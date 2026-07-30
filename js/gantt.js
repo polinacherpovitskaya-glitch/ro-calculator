@@ -23,6 +23,23 @@ const Gantt = {
     PRIORITY_PANEL_MIN_WIDTH: 180,
     PRIORITY_PANEL_MAX_WIDTH: 400,
     PRIORITY_PANEL_STORAGE_KEY: 'ro_gantt_priority_panel_width',
+    DEADLINE_STRIP_HEIGHT: 44,
+    WORKER_LANE_HEIGHT: 84,
+    PROJECT_PALETTE: [
+        { color: '#2563eb', tint: '#dbeafe' },
+        { color: '#c026d3', tint: '#fae8ff' },
+        { color: '#059669', tint: '#d1fae5' },
+        { color: '#e11d48', tint: '#ffe4e6' },
+        { color: '#4f46e5', tint: '#e0e7ff' },
+        { color: '#0f766e', tint: '#ccfbf1' },
+        { color: '#c2410c', tint: '#ffedd5' },
+        { color: '#475569', tint: '#e2e8f0' },
+    ],
+    PHASE_VISUALS: {
+        molding: { color: '#b45309', background: '#fff0cf', label: 'Литьё' },
+        assembly: { color: '#0e7490', background: '#cff5fb', label: 'Сборка' },
+        packaging: { color: '#6d28d9', background: '#ede9fe', label: 'Упаковка' },
+    },
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
         sample: 'Образец',
@@ -631,6 +648,13 @@ const Gantt = {
             { length: this.TEAM_SIZE },
             (_, index) => this.renderWorkerLane(index + 1, priorityQueue, minDate, totalDays, cellWidth, hoursPerDay, holidaySet)
         ).join('');
+        const teamBrackets = this.renderTeamBrackets(
+            priorityQueue,
+            minDate,
+            totalDays,
+            cellWidth,
+            hoursPerDay
+        );
         const workerLabels = Array.from(
             { length: this.TEAM_SIZE },
             (_, index) => `
@@ -685,6 +709,7 @@ const Gantt = {
                                 ${showToday ? `<div class="gantt-today-line" style="left:${todayLeft}px" title="Сегодня"></div>` : ''}
                                 <div class="gantt-deadline-strip">${deadlineHtml}</div>
                                 ${workerRows}
+                                ${teamBrackets}
                             </div>
                         </div>
                     </div>
@@ -755,6 +780,61 @@ const Gantt = {
         return this.formatDateStr(dateStr);
     },
 
+    getOrderVisual(orderId) {
+        const source = String(orderId ?? '');
+        const hash = source.split('').reduce(
+            (sum, character) => ((sum * 31) + character.charCodeAt(0)) >>> 0,
+            7
+        );
+        return this.PROJECT_PALETTE[hash % this.PROJECT_PALETTE.length];
+    },
+
+    getOrderTeamSummary(item) {
+        const groups = new Map();
+        (item?.schedule || []).forEach(segment => {
+            const workerSlot = Math.round(Number(segment.workerSlot));
+            if (!(workerSlot >= 1 && workerSlot <= this.TEAM_SIZE) || !segment?.date) return;
+            const startHour = Number.isFinite(Number(segment.startHour))
+                ? round2(Number(segment.startHour))
+                : 0;
+            const endHour = Number.isFinite(Number(segment.endHour))
+                ? round2(Number(segment.endHour))
+                : round2(startHour + Number(segment.hours || 0));
+            const key = `${segment.date}:${startHour}:${segment.phase || ''}`;
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    date: segment.date,
+                    startHour,
+                    endHour,
+                    phase: segment.phase || '',
+                    workerSlots: [],
+                });
+            }
+            const group = groups.get(key);
+            group.endHour = Math.max(group.endHour, endHour);
+            if (!group.workerSlots.includes(workerSlot)) group.workerSlots.push(workerSlot);
+        });
+        const ranked = Array.from(groups.values())
+            .map(group => ({
+                ...group,
+                workerSlots: group.workerSlots.sort((left, right) => left - right),
+                teamSize: group.workerSlots.length,
+            }))
+            .sort((left, right) => (
+                right.teamSize - left.teamSize
+                || String(left.date).localeCompare(String(right.date))
+                || left.startHour - right.startHour
+            ));
+        return ranked[0] || {
+            date: null,
+            startHour: 0,
+            endHour: 0,
+            phase: '',
+            workerSlots: [],
+            teamSize: 0,
+        };
+    },
+
     renderPriorityCard(item, index, holidaySet = new Set()) {
         const orderId = Number(item.orderId || item.id);
         const progress = this.getOrderProgress(item);
@@ -771,6 +851,11 @@ const Gantt = {
                 Number(item.parallelWorkersTarget || item.production_parallel_workers || this.getOrderParallelWorkers(orderId))
             )
         );
+        const actualTeamSize = this.getOrderTeamSummary(item).teamSize;
+        const workerLabel = actualTeamSize > 0 && actualTeamSize < workerTarget
+            ? `${actualTeamSize}/${workerTarget} чел.`
+            : `${workerTarget} чел.`;
+        const visual = this.getOrderVisual(orderId);
         const riskClass = risk.status === 'late'
             ? 'risk'
             : ((risk.status === 'critical' || risk.status === 'tight') ? 'tight' : 'ok');
@@ -790,6 +875,7 @@ const Gantt = {
 
         return `
             <div class="gantt-priority-card ${riskClass} ${isWaiting ? 'waiting' : ''}" draggable="true" data-order-id="${orderId}" title="${this.esc(title)}"
+                style="--project-color:${visual.color};--project-tint:${visual.tint}"
                 ondragstart="Gantt.onOrderDragStart(event, ${orderId})"
                 ondragover="Gantt.onOrderDragOver(event)"
                 ondragleave="Gantt.onOrderDragLeave(event)"
@@ -802,7 +888,7 @@ const Gantt = {
                 <span class="gantt-drag-handle" title="Перетащить заказ">&#8942;&#8942;</span>
                 <span class="gantt-priority-index">${index + 1}</span>
                 <div class="gantt-priority-main">
-                    <div class="gantt-order-name" title="${this.esc(item.orderName)}">${this.esc(item.orderName || 'Без названия')}</div>
+                    <div class="gantt-order-name" title="${this.esc(item.orderName)}"><span class="gantt-project-dot"></span>${this.esc(item.orderName || 'Без названия')}</div>
                     <div class="gantt-order-meta">${isWaiting ? queueStatus : `ост. ${this.formatHours(progress.remaining)}`} · ${deadlineLabel}</div>
                     <div class="gantt-order-window">
                         <span>Старт ${startLabel}</span>
@@ -812,7 +898,7 @@ const Gantt = {
                 <div class="gantt-priority-actions" onclick="event.stopPropagation()">
                     <span class="gantt-worker-stepper">
                         <button class="gantt-worker-button" onclick="Gantt.adjustParallelWorkers(${orderId}, -1)" ${workerTarget <= 1 ? 'disabled' : ''} title="Уменьшить число сотрудников">&#8722;</button>
-                        <span class="gantt-worker-count" title="Максимум сотрудников одновременно">до ${workerTarget}</span>
+                        <span class="gantt-worker-count" title="Назначенная команда, максимум ${workerTarget}">${workerLabel}</span>
                         <button class="gantt-worker-button" onclick="Gantt.adjustParallelWorkers(${orderId}, 1)" ${workerTarget >= this.TEAM_SIZE ? 'disabled' : ''} title="Увеличить число сотрудников">+</button>
                     </span>
                     <button class="gantt-open-order" onclick="App.navigate('order-detail', true, ${orderId})">Открыть</button>
@@ -857,6 +943,9 @@ const Gantt = {
         const allocations = [];
 
         (queue || []).forEach((item, priorityIndex) => {
+            const scheduleWindow = this.getOrderScheduleWindow(item);
+            const teamSummary = this.getOrderTeamSummary(item);
+            const visual = this.getOrderVisual(Number(item.orderId || item.id));
             (item.schedule || []).forEach((segment, segmentIndex) => {
                 if (Number(segment.workerSlot || 1) !== normalizedSlot) return;
                 const hours = Math.max(0, Number(segment.hours || 0));
@@ -877,6 +966,14 @@ const Gantt = {
                     orderName: item.orderName || item.order_name || 'Без названия',
                     priorityIndex,
                     segmentIndex,
+                    deadlineEnd: item.deadlineEnd || item.deadline_end || null,
+                    parallelWorkersTarget: Math.max(1, Number(item.parallelWorkersTarget || 1)),
+                    orderFinishDate: scheduleWindow.finishDate,
+                    orderFinishHour: scheduleWindow.finishHour,
+                    teamSize: teamSummary.teamSize,
+                    teamWorkerSlots: teamSummary.workerSlots,
+                    projectColor: visual.color,
+                    projectTint: visual.tint,
                     workerSlot: normalizedSlot,
                     startHour: round2(startHour),
                     endHour: round2(endHour),
@@ -908,6 +1005,107 @@ const Gantt = {
         }, []);
     },
 
+    isNextWorkingDate(leftDate, rightDate, holidaySet = new Set()) {
+        if (!leftDate || !rightDate || leftDate >= rightDate) return false;
+        const cursor = this.parseLocalDate(leftDate);
+        cursor.setHours(0, 0, 0, 0);
+        do {
+            cursor.setDate(cursor.getDate() + 1);
+        } while (this.isNonWorkingDate(cursor, holidaySet));
+        return this.formatIsoDateLocal(cursor) === rightDate;
+    },
+
+    getWorkerLaneOrderRuns(
+        queue = [],
+        workerSlot,
+        hoursPerDay = this.SHIFT_HOURS,
+        holidaySet = new Set()
+    ) {
+        const allocations = this.getWorkerLaneAllocations(queue, workerSlot, hoursPerDay);
+        const runs = [];
+
+        allocations.forEach(allocation => {
+            const previousRun = runs[runs.length - 1];
+            const previousSegment = previousRun?.segments?.[previousRun.segments.length - 1];
+            const sameDayForward = previousSegment
+                && previousSegment.date === allocation.date
+                && Number(previousSegment.endHour || 0) <= Number(allocation.startHour || 0) + 0.001;
+            const nextWorkingDay = previousSegment
+                && this.isNextWorkingDate(previousSegment.date, allocation.date, holidaySet);
+            const isSameOrderRun = previousRun
+                && previousRun.orderId === allocation.orderId
+                && (sameDayForward || nextWorkingDay);
+
+            if (!isSameOrderRun) {
+                runs.push({
+                    orderId: allocation.orderId,
+                    orderName: allocation.orderName,
+                    priorityIndex: allocation.priorityIndex,
+                    workerSlot: allocation.workerSlot,
+                    deadlineEnd: allocation.deadlineEnd,
+                    parallelWorkersTarget: allocation.parallelWorkersTarget,
+                    orderFinishDate: allocation.orderFinishDate,
+                    orderFinishHour: allocation.orderFinishHour,
+                    teamSize: allocation.teamSize,
+                    teamWorkerSlots: allocation.teamWorkerSlots,
+                    projectColor: allocation.projectColor,
+                    projectTint: allocation.projectTint,
+                    segments: [allocation],
+                });
+                return;
+            }
+            previousRun.segments.push(allocation);
+        });
+
+        runs.forEach(run => {
+            const first = run.segments[0];
+            const last = run.segments[run.segments.length - 1];
+            run.startDate = first.date;
+            run.startHour = first.startHour;
+            run.endDate = last.date;
+            run.endHour = last.endHour;
+            run.phaseRuns = run.segments.reduce((phaseRuns, segment) => {
+                const previous = phaseRuns[phaseRuns.length - 1];
+                const sameDayContinuation = previous
+                    && previous.phase === segment.phase
+                    && previous.endDate === segment.date
+                    && Math.abs(Number(previous.endHour || 0) - Number(segment.startHour || 0)) < 0.001;
+                const nextCalendarDay = previous
+                    && previous.phase === segment.phase
+                    && Number(previous.endHour || 0) >= Number(hoursPerDay || this.SHIFT_HOURS) - 0.001
+                    && Number(segment.startHour || 0) <= 0.001
+                    && this.daysBetween(
+                        this.parseLocalDate(previous.endDate),
+                        this.parseLocalDate(segment.date)
+                    ) === 1;
+                if (!sameDayContinuation && !nextCalendarDay) {
+                    phaseRuns.push({
+                        phase: segment.phase,
+                        startDate: segment.date,
+                        startHour: segment.startHour,
+                        endDate: segment.date,
+                        endHour: segment.endHour,
+                        hours: Number(segment.hours || 0),
+                    });
+                    return phaseRuns;
+                }
+                previous.endDate = segment.date;
+                previous.endHour = segment.endHour;
+                previous.hours = round2(Number(previous.hours || 0) + Number(segment.hours || 0));
+                return phaseRuns;
+            }, []);
+        });
+        return runs;
+    },
+
+    getTimelinePoint(date, hour, minDate, cellWidth, hoursPerDay) {
+        const dayOffset = this.daysBetween(minDate, this.parseLocalDate(date));
+        return (
+            dayOffset * cellWidth
+            + (Number(hour || 0) / Math.max(Number(hoursPerDay || this.SHIFT_HOURS), 0.01)) * cellWidth
+        );
+    },
+
     renderTimelineGrid(minDate, totalDays, cellWidth, holidaySet = new Set()) {
         let html = '';
         for (let index = 0; index < totalDays; index++) {
@@ -921,6 +1119,7 @@ const Gantt = {
 
     renderDeadlineStrip(queue, minDate, totalDays, cellWidth) {
         const markers = [];
+        const stackByDate = new Map();
         (queue || []).forEach((item, priorityIndex) => {
             const milestones = (item.deliveryMilestones || []).length
                 ? item.deliveryMilestones
@@ -946,12 +1145,17 @@ const Gantt = {
                     ? `${Number(milestone.quantity).toLocaleString('ru-RU')} шт. · `
                     : '';
                 const title = `#${priorityIndex + 1} ${item.orderName || item.order_name || 'Без названия'} · ${quantityLabel}${this.formatDateStr(milestone.date)} · ${risk.label}`;
+                const stackIndex = Number(stackByDate.get(milestone.date) || 0);
+                stackByDate.set(milestone.date, stackIndex + 1);
+                const visual = this.getOrderVisual(Number(item.orderId || item.id));
                 markers.push(`
                     <span class="gantt-deadline-chip ${riskClass}" data-order-id="${Number(item.orderId || item.id)}"
-                        style="left:${(deadlineOffset + 0.72) * cellWidth}px" title="${this.esc(title)}"
+                        style="left:${(deadlineOffset + 0.96) * cellWidth}px;top:${3 + (stackIndex % 2) * 19}px;--project-color:${visual.color};--project-tint:${visual.tint}" title="${this.esc(title)}"
                         onmouseenter="Gantt.highlightOrder(${Number(item.orderId || item.id)})"
                         onmouseleave="Gantt.clearOrderHighlight()">
-                        <span aria-hidden="true">&#9670;</span><strong>${priorityIndex + 1}</strong>
+                        <span class="gantt-deadline-diamond" aria-hidden="true">&#9670;</span>
+                        <strong>#${priorityIndex + 1}</strong>
+                        <em>${this.esc(item.orderName || item.order_name || 'Без названия')}</em>
                     </span>`);
             });
         });
@@ -959,32 +1163,91 @@ const Gantt = {
     },
 
     renderWorkerLane(workerSlot, queue, minDate, totalDays, cellWidth, hoursPerDay, holidaySet = new Set()) {
-        const phaseColors = { molding: '#f59e0b', assembly: '#06b6d4', packaging: '#8b5cf6' };
-        const phaseLabels = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
-        const allocations = this.getWorkerLaneAllocations(queue, workerSlot, hoursPerDay);
-        const barsHtml = allocations.map(allocation => {
-            const dayOffset = this.daysBetween(minDate, this.parseLocalDate(allocation.date));
-            const left = (
-                dayOffset * cellWidth
-                + (Number(allocation.startHour || 0) / hoursPerDay) * cellWidth
-            );
-            const duration = Math.max(Number(allocation.endHour || 0) - Number(allocation.startHour || 0), 0);
-            const width = Math.max(2, (duration / hoursPerDay) * cellWidth);
-            const color = phaseColors[allocation.phase] || '#64748b';
-            const phaseLabel = phaseLabels[allocation.phase] || allocation.phase || 'Работа';
-            const orderLabel = `#${allocation.priorityIndex + 1} ${allocation.orderName}`;
-            const intervalLabel = `${this.formatHours(allocation.startHour)}–${this.formatHours(allocation.endHour)} смены`;
-            const title = `Человек ${workerSlot} · ${orderLabel} · ${phaseLabel} · ${this.formatDateStr(allocation.date)} · ${intervalLabel}`;
+        const runs = this.getWorkerLaneOrderRuns(queue, workerSlot, hoursPerDay, holidaySet);
+        const barsHtml = runs.map(run => {
+            const left = this.getTimelinePoint(run.startDate, run.startHour, minDate, cellWidth, hoursPerDay);
+            const right = this.getTimelinePoint(run.endDate, run.endHour, minDate, cellWidth, hoursPerDay);
+            const width = Math.max(3, right - left);
+            const phaseGeometry = (run.phaseRuns || []).map((phaseRun, phaseIndex) => {
+                const phaseLeft = this.getTimelinePoint(
+                    phaseRun.startDate,
+                    phaseRun.startHour,
+                    minDate,
+                    cellWidth,
+                    hoursPerDay
+                ) - left;
+                const phaseRight = this.getTimelinePoint(
+                    phaseRun.endDate,
+                    phaseRun.endHour,
+                    minDate,
+                    cellWidth,
+                    hoursPerDay
+                ) - left;
+                return {
+                    ...phaseRun,
+                    phaseIndex,
+                    left: phaseLeft,
+                    width: Math.max(2, phaseRight - phaseLeft),
+                };
+            });
+            const widestPhaseByName = new Map();
+            phaseGeometry.forEach(phaseRun => {
+                const previous = widestPhaseByName.get(phaseRun.phase);
+                if (!previous || phaseRun.width > previous.width) {
+                    widestPhaseByName.set(phaseRun.phase, phaseRun);
+                }
+            });
+            const phaseHtml = phaseGeometry.map(phaseRun => {
+                const phaseVisual = this.PHASE_VISUALS[phaseRun.phase]
+                    || { color: '#475569', background: '#e2e8f0', label: phaseRun.phase || 'Работа' };
+                const showLabel = widestPhaseByName.get(phaseRun.phase)?.phaseIndex === phaseRun.phaseIndex
+                    && phaseRun.width >= 34;
+                return `
+                    <span class="gantt-run-phase ${showLabel ? 'has-label' : ''}"
+                        style="left:${Number(phaseRun.left.toFixed(2))}px;width:${Number(phaseRun.width.toFixed(2))}px;--phase-color:${phaseVisual.color};--phase-bg:${phaseVisual.background}"
+                        title="${this.esc(phaseVisual.label)}">
+                        ${showLabel ? `<small>${this.esc(phaseVisual.label)}</small>` : ''}
+                    </span>`;
+            }).join('');
+            const teamWorkerSlots = Array.isArray(run.teamWorkerSlots) ? run.teamWorkerSlots : [];
+            const memberIndex = teamWorkerSlots.indexOf(workerSlot);
+            const memberLabel = run.teamSize > 1 && memberIndex >= 0
+                ? `${memberIndex + 1}/${run.teamSize}`
+                : '';
+            const isOrderFinish = run.orderFinishDate === run.endDate
+                && Math.abs(Number(run.orderFinishHour || 0) - Number(run.endHour || 0)) < 0.001;
+            const phaseLabels = Array.from(new Set((run.phaseRuns || []).map(phaseRun => (
+                this.PHASE_VISUALS[phaseRun.phase]?.label || phaseRun.phase || 'Работа'
+            ))));
+            const orderLabel = `#${run.priorityIndex + 1} ${run.orderName}`;
+            const deadlineLabel = run.deadlineEnd
+                ? `Дедлайн ${this.formatDateStr(run.deadlineEnd)}`
+                : 'Без дедлайна';
+            const title = [
+                `Человек ${workerSlot}`,
+                orderLabel,
+                memberLabel ? `${memberIndex + 1}-й из ${run.teamSize} человек` : '',
+                phaseLabels.join(' → '),
+                `${this.formatDateStr(run.startDate)} — ${this.formatDateStr(run.endDate)}`,
+                isOrderFinish ? `Готово ${this.formatDateStr(run.endDate)}` : '',
+                deadlineLabel,
+            ].filter(Boolean).join(' · ');
             return `
-                <button type="button" class="gantt-worker-task" data-order-id="${allocation.orderId}"
-                    style="left:${left}px;width:${width}px;--task-color:${color};--task-bg:${color}20"
-                    onclick="App.navigate('order-detail', true, ${allocation.orderId})" title="${this.esc(title)}"
-                    onmouseenter="Gantt.highlightOrder(${allocation.orderId})"
+                <button type="button" class="gantt-order-run ${width < 82 ? 'compact' : ''}" data-order-id="${run.orderId}"
+                    style="left:${Number(left.toFixed(2))}px;width:${Number(width.toFixed(2))}px;--project-color:${run.projectColor};--project-tint:${run.projectTint}"
+                    onclick="App.navigate('order-detail', true, ${run.orderId})" title="${this.esc(title)}"
+                    onmouseenter="Gantt.highlightOrder(${run.orderId})"
                     onmouseleave="Gantt.clearOrderHighlight()"
-                    onfocus="Gantt.highlightOrder(${allocation.orderId})"
+                    onfocus="Gantt.highlightOrder(${run.orderId})"
                     onblur="Gantt.clearOrderHighlight()">
-                    <span>${this.esc(orderLabel)}</span>
-                    <small>${this.esc(phaseLabel)}</small>
+                    ${phaseHtml}
+                    <span class="gantt-run-start" aria-hidden="true"></span>
+                    <span class="gantt-run-title">
+                        <strong>#${run.priorityIndex + 1}</strong>
+                        <em>${this.esc(run.orderName)}</em>
+                    </span>
+                    ${memberLabel ? `<span class="gantt-run-member">${memberLabel}</span>` : ''}
+                    ${isOrderFinish ? `<span class="gantt-run-finish">Готово ${this.formatDateStr(run.endDate)}</span>` : ''}
                 </button>`;
         }).join('');
 
@@ -993,6 +1256,34 @@ const Gantt = {
                 ${this.renderTimelineGrid(minDate, totalDays, cellWidth, holidaySet)}
                 ${barsHtml}
             </div>`;
+    },
+
+    renderTeamBrackets(queue, minDate, totalDays, cellWidth, hoursPerDay) {
+        return (queue || []).map((item, priorityIndex) => {
+            const summary = this.getOrderTeamSummary(item);
+            if (summary.teamSize <= 1 || !summary.date) return '';
+            const left = this.getTimelinePoint(
+                summary.date,
+                summary.startHour,
+                minDate,
+                cellWidth,
+                hoursPerDay
+            );
+            if (left < 0 || left > totalDays * cellWidth) return '';
+            const firstWorker = Math.min(...summary.workerSlots);
+            const lastWorker = Math.max(...summary.workerSlots);
+            const top = this.DEADLINE_STRIP_HEIGHT
+                + (firstWorker - 1) * this.WORKER_LANE_HEIGHT
+                + 10;
+            const height = (lastWorker - firstWorker) * this.WORKER_LANE_HEIGHT + 64;
+            const visual = this.getOrderVisual(Number(item.orderId || item.id));
+            return `
+                <div class="gantt-team-bracket" data-order-id="${Number(item.orderId || item.id)}"
+                    style="left:${Number(left.toFixed(2))}px;top:${top}px;height:${height}px;--project-color:${visual.color};--project-tint:${visual.tint}"
+                    title="#${priorityIndex + 1} ${this.esc(item.orderName || item.order_name || 'Без названия')} · ${summary.teamSize} чел.">
+                    <span>${summary.teamSize} чел.</span>
+                </div>`;
+        }).join('');
     },
 
     renderTimeAxis(
