@@ -1,6 +1,98 @@
 # Test Plan
 
-## Active track — Production calendar priority Gantt
+## Active track — Exhaustive calculator audit, phase 1
+
+**Source:** `docs/specs/2026-07-30-calculator-exhaustive-audit-phase1.md`
+**Plan:** `docs/plans/2026-07-30-calculator-exhaustive-audit-phase1.md`
+
+### Audit dimensions
+
+Every row below must be checked across the applicable dimensions:
+
+1. initial rendering and input constraints;
+2. immediate state/calculation update;
+3. authoritative price/cost source;
+4. autosave and manual-save payload;
+5. load and second save;
+6. order list/detail and other consumer rendering;
+7. negative, legacy and zero-value behavior.
+
+### Field and consumer matrix
+
+| Area | Representative scenarios | Required consumers |
+| --- | --- | --- |
+| Header | identity, manager, dates, notes, contacts, links, legal/bank fields | calculator, saved order, order detail |
+| Purpose | commercial, leftovers, rework, stock sample | calculator, orders, detail, production and financial summaries |
+| Discount | none, percent, fixed amount, comma input, over-limit input | pricing card, summary, saved snapshot, invoice/KP, plan-fact |
+| Custom product | ordinary, stock mold, extra molds, complex design, NFC, delivery | cost breakdown, pricing, load, saved item, list/detail |
+| Catalog blank | normal and NFC tiers, manual-price on/off | blanks catalog, calculator pricing, saved item, list/detail |
+| Printing | multiple types, explicit/default delivery, removed row | product cost, pricing, invoice/KP, saved item |
+| Colors/files | multiple colors, legacy single color, multiple attachments | calculator, saved item, order detail |
+| Hardware | warehouse, China, custom China, custom Russia; global/per-product | pricing, load, saved item, order detail, later warehouse |
+| Packaging | warehouse, China, custom China, custom Russia; global/per-product | pricing, load, saved item, order detail, later warehouse |
+| Pendant | letters, multiple cords/carabiners, allocations and packaging | pricing, load, saved item, invoice/KP, later warehouse |
+| Extra row | named/unnamed, positive/zero | pricing, saved item, invoice/KP |
+| Lifecycle | autosave, manual save, refresh restore, load, resave, clone | saved data, history, list/detail, calculator |
+
+### Price-provenance checks
+
+- Settings-driven product components use the current `getProductionParams`
+  values and documented defaults only.
+- Blank/NFC cost and recommendation match the selected `Molds` tier.
+- Warehouse purchase cost hydrates from current stock, while the linked blank
+  tier is the preferred sale-price source.
+- China rows retain selected catalog/manual CNY, weight, exchange-derived
+  purchase price and delivery method after reload.
+- Custom Russia rows retain manually entered RUB purchase/delivery values.
+- Printing cost includes its entered purchase price and explicit/default
+  delivery exactly once.
+- Pendant letters and attachments match their blank and warehouse sources.
+- A manual zero sell price remains zero and represents a free sale.
+
+### Automated baseline — 2026-07-30
+
+- [x] all `js/*.js` and `corporate-gift/*.js` syntax checks
+- [x] `node scripts/audit-codebase-health.mjs`
+- [x] `node scripts/audit-data-paths.mjs`
+- [x] `node tests/order-flow-smoke.js`
+- [x] `node tests/pricing-canon-smoke.js`
+- [x] `node tests/molds-smoke.js`
+- [x] `node tests/warehouse-migration-smoke.js`
+- [x] focused all-header save/load/resave regression
+- [x] focused representative price-provenance regression
+- [ ] headed browser render/save/load/resave pass
+- [ ] cross-view parity pass
+
+### Completed headed scenarios
+
+- [x] full header create/save/load/resave fixture
+- [x] custom NFC product render and full cost breakdown
+- [x] calculator → board → order detail parity for quantity, revenue, cost,
+      deadline and canonical net margin
+- [x] 3K NFC blank recommendation matched the active blanks tier formula
+- [x] manual resave kept one order id and one item row
+- [ ] printing, colors/files, hardware, packaging, pendant, extras and discounts
+- [ ] invoice/KP, plan-fact and production consumer parity
+
+### Confirmed regressions fixed in pass 1
+
+- [x] negative-offset deadline date shift
+- [x] legal/bank fields hidden from order detail
+- [x] half-cent money rounding down
+- [x] order-detail item margin using gross instead of canonical net margin
+- [x] stale 6.5% labels and ignored `commercialRate` setting
+
+### Phase-1 exit gate
+
+- All header fields and representative item-source fields survive both save
+  cycles.
+- Each representative price has an identified source and a numeric equality
+  assertion.
+- Calculator, saved snapshot and downstream consumer totals agree.
+- Confirmed defects have a focused regression and surgical fix.
+- Warehouse mutation remains pending until the C4 fixture/rollback gate.
+
+## Completed track — Production calendar priority Gantt
 
 **Source:** `docs/specs/2026-07-28-production-calendar-priority-gantt.md`
 **Plan:** `docs/plans/2026-07-28-production-calendar-priority-gantt.md`

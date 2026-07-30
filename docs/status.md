@@ -1,10 +1,66 @@
 # Status
 
 ## Snapshot
-- Current phase: M4 complete — ready for review
-- Plan file: `docs/plans/2026-07-28-production-calendar-priority-gantt.md`
-- Status: green — implementation, focused regression tests, visual browser verification, and version bump are complete
-- Last updated: 2026-07-28
+- Current phase: C1 — exhaustive calculator audit
+- Plan file: `docs/plans/2026-07-30-calculator-exhaustive-audit-phase1.md`
+- Status: in progress — header, custom-product and representative price-source
+  pass is green; the remaining line types and downstream consumers are next
+- Last updated: 2026-07-30
+
+## Exhaustive calculator audit — 2026-07-30
+
+### Requested coverage
+
+- Verify every calculator control and calculated output.
+- Trace every price to its catalog, warehouse, China/manual or settings source.
+- Verify save, autosave, reload and resave without field loss or stale values.
+- Verify the same data in order list/detail, financial and production surfaces,
+  invoice/KP and later warehouse reserve/write-off flows.
+
+### Baseline
+
+- Clean worktree created from `origin/main` commit `ddf1fc3`, app `v429`.
+- Passed:
+  - syntax check for all `js/*.js` and `corporate-gift/*.js`;
+  - `node scripts/audit-codebase-health.mjs`;
+  - `node scripts/audit-data-paths.mjs`;
+  - `node tests/order-flow-smoke.js`;
+  - `node tests/pricing-canon-smoke.js`;
+  - `node tests/molds-smoke.js`;
+  - `node tests/warehouse-migration-smoke.js`.
+- Baseline health: 35 JS files, 59 test files, 36 script tags, no duplicate or
+  missing scripts, no duplicate IDs and no missing inline-handler methods.
+
+### Current finding state
+
+- Five first-pass defects are fixed with regressions:
+  - `YYYY-MM-DD` deadlines no longer shift to the previous day in negative UTC
+    offsets;
+  - legal and bank fields are visible and editable in order detail;
+  - half-cent values use conventional money rounding;
+  - product cards use the calculator's canonical net-margin formula instead of
+    showing gross margin under the same label;
+  - commercial-rate labels reflect the current 7% business rate, while
+    FinDirector and plan-fact honor an explicitly configured rate.
+- A headed custom NFC fixture completed create/autosave/manual save, board,
+  detail, calculator reload and resave with one stable order id and item row.
+- The 3K NFC blank recommendation matched the same tier formula used by the
+  blanks directory. The local fixture produced 555 ₽ from its local rates;
+  production catalog numbers were not mutated.
+- Browser console errors in this pass are expected network/auth noise from the
+  deliberately isolated local session; no production write was attempted.
+
+### Next exact task
+
+- Continue the headed matrix with printing, colors/files, hardware, packaging,
+  pendant, extras and discounts, then compare invoice/KP, plan-fact and
+  production consumers before starting the reversible warehouse lifecycle.
+
+### Safety boundary
+
+- Phase 1 does not change real warehouse stock. Warehouse reserve, collection,
+  write-off and rollback will be executed in C4 with a named audit fixture and
+  a verified cleanup path.
 
 ## Production calendar priority Gantt — 2026-07-28
 
@@ -122,6 +178,8 @@
 - Закрыт packaging warehouse sync gap: упаковка со склада теперь идет в тот же `project_hardware` цикл, что и фурнитура, поэтому на обычном `save` она реально ставится в резерв, попадает в блок `Фурнитура и упаковка для проектов`, не списывается раньше времени и не теряет визуальный selected-state из-за string/number id drift в picker.
 
 ## In Progress
+- C1 exhaustive calculator audit: field persistence and authoritative
+  price-source matrix on the current `v429` production code.
 - M6 global stabilization audit before deeper Yandex migration: data paths, duplicate writes, fallback/write-back parity, performance/load behavior and high-risk UI flows.
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases после shortage-safe toggle fix.
 - Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
@@ -132,6 +190,8 @@
 - Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, shortage-safe toggle, блока `Собрано` и auto-hide для завершенных заказов.
 
 ## Next
+- Complete the 2026-07-30 calculator C1/C2 matrix before returning to the older
+  broad M3b warehouse checklist.
 - Перейти к первому незавершённому пункту M6a: создать новый Yandex staging stack, восстановить backup и выполнить полную rehearsal `TEXT -> JSONB -> rollback`.
 - Use the module-by-module migration readiness matrix in `docs/yandex-migration-readiness.md` as the working order: warehouse -> China/shipments -> molds/blanks -> orders -> people/payroll -> finance.
 - Run the full local verify set plus targeted static audits after every package; promote only green packages to `main`.
