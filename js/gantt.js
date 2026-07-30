@@ -421,13 +421,9 @@ const Gantt = {
                 && employee?.is_active !== 0
                 && employee?.is_active !== 'false'
                 && !employee?.fired_date
+                && String(employee?.role || '').trim().toLowerCase() === 'production'
             ))
-            .sort((left, right) => {
-                const leftProduction = String(left.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
-                const rightProduction = String(right.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
-                return leftProduction - rightProduction
-                    || String(left.name || '').localeCompare(String(right.name || ''), 'ru');
-            });
+            .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'ru'));
     },
 
     getOrderAssignedEmployeeIds(orderId) {
@@ -829,7 +825,7 @@ const Gantt = {
         const selected = new Set((this.roster || []).map(slot => String(slot.employeeId)));
         const candidates = this.getRosterCandidates();
         if (!candidates.length) {
-            return '<p class="gantt-roster-empty">В «Часах» пока нет активных сотрудников.</p>';
+            return '<p class="gantt-roster-empty">В «Часах» нет активных сотрудников с ролью «Производство».</p>';
         }
         return `
             <div class="gantt-roster-picker">
@@ -842,7 +838,7 @@ const Gantt = {
                             title="${isSelected ? 'Убрать из текущей команды' : 'Добавить в текущую команду'}">
                             <span>${this.esc(this.getPersonInitials(employee.name))}</span>
                             ${this.esc(employee.name || 'Без имени')}
-                            <em>${this.formatHours(employee.daily_hours || this.SHIFT_HOURS)}</em>
+                            <em>${this.formatHours(this.SHIFT_HOURS)}</em>
                         </button>`;
                 }).join('')}
             </div>`;
@@ -865,7 +861,7 @@ const Gantt = {
                     <section class="gantt-roster-section">
                         <div>
                             <strong>Команда календаря</strong>
-                            <span>Выберите до ${this.TEAM_SIZE} активных сотрудников из «Часов» — независимо от роли</span>
+                            <span>Выберите сотрудников производства из «Часов». Смена каждого — ${this.formatHours(this.SHIFT_HOURS)}</span>
                         </div>
                         ${this.renderRosterPicker()}
                     </section>

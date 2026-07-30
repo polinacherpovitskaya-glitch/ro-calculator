@@ -135,13 +135,11 @@
 
     function buildProductionRoster(employees = [], planState = {}, limit = 4) {
         const active = (employees || [])
-            .filter(isActiveCalendarEmployee)
-            .sort((left, right) => {
-                const leftProduction = String(left.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
-                const rightProduction = String(right.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
-                return leftProduction - rightProduction
-                    || String(left.name || '').localeCompare(String(right.name || ''), 'ru');
-            });
+            .filter(employee => (
+                isActiveCalendarEmployee(employee)
+                && String(employee.role || '').trim().toLowerCase() === 'production'
+            ))
+            .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'ru'));
         const activeById = new Map(active.map(employee => [String(employee.id), employee]));
         const selected = [];
         const seen = new Set();
@@ -152,7 +150,7 @@
             selected.push({
                 employeeId: employee.id,
                 employeeName: String(employee.name || 'Без имени'),
-                dailyHours: pcRound2(Number(employee.daily_hours || 0) > 0 ? Number(employee.daily_hours) : 9),
+                dailyHours: 9,
                 role: String(employee.role || ''),
             });
         };

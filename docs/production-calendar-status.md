@@ -1,10 +1,10 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C9.6 capacity-overload visibility shipped locally, next up timeline-level replan UX
-- Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
-- Status: yellow
-- Last updated: 2026-03-17
+- Current phase: fixed production-only roster and nine-hour shifts complete
+- Plan file: `docs/plans/2026-07-30-production-calendar-fixed-team.md`
+- Status: green
+- Last updated: 2026-07-30
 
 ## Goal
 - Превратить текущие `План производства + Календарь` в один рабочий `Производственный календарь`, который отражает реальные стадии, блокеры и мощности цеха.
@@ -135,10 +135,10 @@
   - pure reorder helper для drag-and-drop очереди.
 
 ## In Progress
-- C9: richer timeline drag/replan persistence.
+- None.
 
 ## Next
-- C9: добавить еще более наглядный timeline drag/replan UX поверх уже работающего queue drag слоя, без зависимости от legacy screen.
+- Публикация v433 после пользовательской команды на деплой.
 
 ## Risks
 - Пока не разведен pricing capacity и planning capacity, календарь все еще может красиво врать по доступным часам.
@@ -186,6 +186,8 @@
 | 2026-03-17 | Deadline buffer readability | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | queue, sidebar and markers now show working-day buffer vs overdue state instead of only binary deadline risk | continue into timeline-level replan UX |
 | 2026-03-17 | Month tracking to-date | `js/gantt.js`, `tests/production-calendar-smoke.js` | stats now compare factual submitted hours against the scheduled plan up to today, not only against the full month | continue into timeline-level replan UX |
 | 2026-03-17 | First overload visibility | `js/gantt.js`, `tests/production-calendar-smoke.js` | queue summary and risk stats now expose the first future overload day and its overload hours | continue into timeline-level replan UX |
+| 2026-07-30 | Fixed production roster preflight | live employee bootstrap, `js/production-core.js`, `js/gantt.js` | confirmed four active production employees and found cross-role picker leakage plus 6/8-hour inherited shifts | filter by `production` and force 9-hour calendar shifts |
+| 2026-07-30 | Fixed production roster implementation | `js/production-core.js`, `js/gantt.js`, `tests/production-calendar-smoke.js` | picker and capacity now use only active `production` employees; every lane is fixed at 9h; syntax, version, calendar, floor-core and order-flow smokes passed | publish v433 |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.
@@ -200,6 +202,8 @@
 - [x] На карточке заказа видно `факт / план / осталось`.
 - [x] Начальник производства может быстро подвинуть старт заказа на рабочий день раньше/позже.
 - [x] Начальник производства может менять порядок очереди drag-and-drop, а не только стрелками.
+- [x] В выборе команды видны только Влад Галкин, Женя Г, Илья Теряев и Тая.
+- [x] Каждая выбранная производственная линия показывает и планирует 9 часов.
 - [ ] Mold-limited заказ не выглядит фальшиво распараллеленным.
 - [ ] При перегрузе до дедлайна экран явно показывает risk.
 - [ ] Заказ можно передвинуть bubble-ом и увидеть последствия.
