@@ -4,7 +4,7 @@
 - Task: перепроектировать `Производственный календарь` так, чтобы он отражал реальные стадии, блокеры, mold constraints, фактическую загрузку и дедлайн-риск.
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-status.md`
-- Last updated: 2026-03-17
+- Last updated: 2026-07-30
 
 ## Validation Scope
 - In scope:
@@ -21,6 +21,12 @@
   - accounting recalculation beyond already existing `Часы` and `План-факт`.
 
 ## Critical Fixtures
+- `Fixed production roster`:
+  - Влад Галкин, Женя Г, Илья Теряев и Тая имеют роль `production`;
+  - офисный и management-сотрудник активны, но не должны появляться в picker,
+    roster или мощности календаря;
+  - производственные сотрудники имеют `daily_hours = 6/8`, но календарь обязан
+    выдать каждой линии 9 часов.
 - `Blank mold order`:
   - бланковый заказ с известным `mold_count = 1`;
   - должен показывать single-mold constraint.
@@ -42,6 +48,10 @@
 ## Test Levels
 
 ### Logic / Unit
+- Verify fixed production roster:
+  - only active `production` employees become roster candidates;
+  - saved office/management IDs are discarded;
+  - every production slot gets `dailyHours = 9`, regardless of `daily_hours`.
 - Verify readiness model:
   - order with no blocker gets computed `ready_to_plan_at`;
   - order with China mold waiting gets blocked;
@@ -104,6 +114,10 @@
   - queue cards can be reordered by drag-and-drop and keep the new order after reload.
 
 ## Negative Cases
+- Активный office/management employee не должен появляться в выборе и мощности
+  календаря даже при сохранённом `roster_employee_ids`.
+- Значение `daily_hours = 6` или `8` у production employee не должно сокращать
+  календарную смену ниже 9 часов.
 - Order without `deadline_end` must not vanish; it should fall back to explicit no-deadline presentation.
 - Blocked order must not silently auto-start because `today` moved.
 - Single mold must not appear split across parallel casting bars.
@@ -118,10 +132,16 @@
 - Legacy orders without perfect mold linkage must surface a clear `needs review` state rather than fake precision.
 
 ## Acceptance Gates
+- [x] Production roster содержит только активных сотрудников с ролью `production`.
+- [x] Management/office отсутствуют в picker и мощности.
+- [x] Все production slots используют 9 часов независимо от `daily_hours`.
+- [x] Визуальный fixture drawer показывает четыре производственные карточки по `9ч`.
 - [x] `for f in js/*.js corporate-gift/*.js; do node --check "$f"; done`
 - [x] `node tests/order-flow-smoke.js`
 - [x] `node tests/payroll-half-month-smoke.js`
 - [x] `node tests/production-calendar-smoke.js`
+- [x] `node tests/production-floor-core-smoke.js`
+- [x] `node tests/version-smoke.js`
 - [ ] `node tests/production-capacity-smoke.js`
 - [ ] headed browser smoke on local page (local http.server was not stable in this session)
 - [ ] Manual smoke:

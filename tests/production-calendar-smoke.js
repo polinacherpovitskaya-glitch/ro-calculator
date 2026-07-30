@@ -51,6 +51,8 @@ assert.match(ganttJs, /PROJECT_PALETTE/, 'Orders must have a stable project colo
 assert.match(ganttJs, /buildOrderVisualMap\(queue = \[\]\)/, 'Visible orders must receive a queue-wide unique visual map');
 assert.match(ganttJs, /employee_assignments/, 'Gantt plan state must persist named assignments');
 assert.match(ganttJs, /roster_employee_ids/, 'Gantt plan state must persist the selected production roster');
+assert.match(ganttJs, /Смена каждого —/, 'Roster editor must explain the fixed production shift');
+assert.match(ganttJs, /ролью «Производство»/, 'Empty roster copy must point to the production role');
 assert.match(ganttJs, /renderQueueRail\(queue = \[\]\)/, 'Priority queue must render above the calendar');
 assert.match(ganttJs, /renderQueueDrawer\(priorityCards/, 'Detailed priority editing must live in a drawer');
 assert.match(ganttJs, /getWorkerTodaySummary\(workerSlot/, 'Named lanes must expose today plan summaries');
@@ -673,43 +675,77 @@ assert.deepEqual(normalizedNamedState.order_color_slots, { 55: 3, 57: 8 }, 'Colo
 const automaticRoster = JSON.parse(JSON.stringify(vm.runInContext(`
     buildProductionRoster([
         { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
-        { id: 2, name: 'Оля', role: 'production', daily_hours: 9, is_active: true },
-        { id: 3, name: 'Миша', role: 'production', daily_hours: 8, is_active: true },
+        { id: 2, name: 'Влад Галкин', role: 'production', daily_hours: 8, is_active: true },
+        { id: 3, name: 'Женя Г', role: 'production', daily_hours: 8, is_active: true },
         { id: 4, name: 'Лёша', role: 'management', daily_hours: 6, is_active: true },
         { id: 5, name: 'Уволен', role: 'production', daily_hours: 9, is_active: false },
-        { id: 6, name: 'Дата увольнения', role: 'production', daily_hours: 9, is_active: true, fired_date: '2026-03-10' }
+        { id: 6, name: 'Дата увольнения', role: 'production', daily_hours: 9, is_active: true, fired_date: '2026-03-10' },
+        { id: 7, name: 'Илья Теряев', role: 'production', daily_hours: 8, is_active: true },
+        { id: 8, name: 'Тая', role: 'production', daily_hours: 6, is_active: true }
     ], {}, 4)
 `, ganttContext)));
-assert.equal(automaticRoster.length, 4, 'Roster must use up to four active employees from Hours');
+assert.equal(automaticRoster.length, 4, 'Roster must use the four active production employees from Hours');
 assert.deepEqual(
-    automaticRoster.slice(0, 2).map(employee => employee.role),
-    ['production', 'production'],
-    'Production employees must be proposed before active employees with other roles'
+    automaticRoster.map(employee => employee.employeeName),
+    ['Влад Галкин', 'Женя Г', 'Илья Теряев', 'Тая'],
+    'Roster must contain only the active production crew'
 );
 assert.equal(
     automaticRoster.some(employee => employee.employeeId === 1),
-    true,
-    'An active manager who also works in production must remain available to the calendar'
+    false,
+    'Management employees must never occupy production lanes'
 );
 assert.equal(
-    automaticRoster.some(employee => employee.employeeId === 5 || employee.employeeId === 6),
+    automaticRoster.some(employee => employee.employeeId === 4 || employee.employeeId === 5 || employee.employeeId === 6),
     false,
-    'Inactive and fired employees must not occupy production lanes'
+    'Management, inactive and fired employees must not occupy production lanes'
+);
+assert.deepEqual(
+    automaticRoster.map(employee => employee.dailyHours),
+    [9, 9, 9, 9],
+    'Every production employee must provide a fixed nine-hour calendar shift'
+);
+
+const rosterPicker = JSON.parse(JSON.stringify(vm.runInContext(`
+    (() => {
+        Gantt.employees = [
+            { id: 1, name: 'Полина', role: 'management', daily_hours: 8, is_active: true },
+            { id: 2, name: 'Влад Галкин', role: 'production', daily_hours: 8, is_active: true },
+            { id: 3, name: 'Тая', role: 'production', daily_hours: 6, is_active: true },
+            { id: 4, name: 'Алина', role: 'office', daily_hours: 8, is_active: true }
+        ];
+        Gantt.roster = [];
+        return {
+            names: Gantt.getRosterCandidates().map(employee => employee.name),
+            html: Gantt.renderRosterPicker()
+        };
+    })()
+`, ganttContext)));
+assert.deepEqual(
+    rosterPicker.names,
+    ['Влад Галкин', 'Тая'],
+    'Roster picker must expose only production employees'
+);
+assert.doesNotMatch(rosterPicker.html, /Полина|Алина/, 'Roster picker must hide management and office employees');
+assert.equal(
+    (rosterPicker.html.match(/<em>9ч<\/em>/g) || []).length,
+    2,
+    'Roster picker must show the fixed nine-hour shift for every production employee'
 );
 
 const savedRoster = JSON.parse(JSON.stringify(vm.runInContext(`
     buildProductionRoster([
         { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
-        { id: 2, name: 'Оля', role: 'production', daily_hours: 9, is_active: true },
-        { id: 3, name: 'Миша', role: 'production', daily_hours: 8, is_active: true }
+        { id: 2, name: 'Влад Галкин', role: 'production', daily_hours: 8, is_active: true },
+        { id: 3, name: 'Тая', role: 'production', daily_hours: 6, is_active: true }
     ], {
         roster_employee_ids: [1, 3]
     }, 4)
 `, ganttContext)));
 assert.deepEqual(
     savedRoster.map(employee => employee.employeeId),
-    [1, 3],
-    'A saved mixed-role roster must preserve the explicitly selected lane order'
+    [3],
+    'A saved mixed-role roster must discard every non-production employee'
 );
 
 const shortShiftCalendar = JSON.parse(JSON.stringify(vm.runInContext(`
@@ -718,8 +754,8 @@ const shortShiftCalendar = JSON.parse(JSON.stringify(vm.runInContext(`
             allOrders: [],
             planState: { roster_employee_ids: [1, 2] },
             employees: [
-                { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
-                { id: 2, name: 'Оля', role: 'production', daily_hours: 8, is_active: true }
+                { id: 1, name: 'Влад Галкин', role: 'production', daily_hours: 8, is_active: true },
+                { id: 2, name: 'Тая', role: 'production', daily_hours: 6, is_active: true }
             ]
         });
         return {
@@ -730,8 +766,8 @@ const shortShiftCalendar = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.deepEqual(
     shortShiftCalendar,
-    { hoursPerDay: 8, dailyCapacity: 15 },
-    'Named lanes must use their real shift lengths instead of stretching every day to nine hours'
+    { hoursPerDay: 9, dailyCapacity: 18 },
+    'Named production lanes must always use nine-hour shifts'
 );
 
 const invalidNamedAssignment = JSON.parse(JSON.stringify(vm.runInContext(`
