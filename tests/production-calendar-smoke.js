@@ -38,8 +38,8 @@ assert.match(ganttJs, /parallel_workers/, 'Gantt plan state must persist per-ord
 assert.match(ganttJs, /renderPriorityCard\(item, index/, 'Gantt must render compact draggable priority cards');
 assert.match(ganttJs, /getOrderScheduleWindow\(item\)/, 'Priority queue must expose each order start and finish forecast');
 assert.match(ganttJs, /isOrderWaitingForStart\(item\)/, 'Future orders must remain visibly marked as waiting');
-assert.match(ganttJs, /Дальше ждут очереди/, 'Ready future orders must remain visible below the currently starting queue');
-assert.match(ganttJs, /Начнут после освобождения людей/, 'Waiting orders must explain when they enter production');
+assert.match(ganttJs, /Следующие уже запланированы/, 'Ready future orders must be presented as scheduled, not merely parked');
+assert.match(ganttJs, /Начнут на первых освободившихся линиях/, 'Future orders must explain how they enter production');
 assert.match(ganttJs, /renderWorkerLane\(workerSlot, queue/, 'Gantt must render work by person instead of by order');
 assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gantt must expose worker-lane allocations');
 assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
@@ -527,7 +527,7 @@ const futureQueueCard = vm.runInContext(`
     })()
 `, ganttContext);
 assert.match(futureQueueCard, /waiting/, 'A fully forecast future order must still be visually marked as waiting');
-assert.match(futureQueueCard, /Ждёт очереди/, 'Future order must explain that it has not started yet');
+assert.match(futureQueueCard, /Дальше по плану/, 'Future order must explain that it is already scheduled');
 
 const laterTodayQueueCard = vm.runInContext(`
     (() => {
@@ -554,7 +554,7 @@ const laterTodayQueueCard = vm.runInContext(`
         }, 4);
     })()
 `, ganttContext);
-assert.match(laterTodayQueueCard, /Ждёт очереди/, 'An order starting later in the same shift must stay below the immediate wave');
+assert.match(laterTodayQueueCard, /Дальше по плану/, 'An order starting later in the same shift must stay scheduled below the immediate wave');
 assert.match(laterTodayQueueCard, /Старт сегодня \+4ч/, 'Same-day waiting order must expose its offset inside the shift');
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`

@@ -619,8 +619,8 @@ const Gantt = {
         const priorityCards = priorityQueue.map((item, index) => `
             ${index === waitingTailIndex ? `
                 <div class="gantt-waiting-divider">
-                    <strong>Дальше ждут очереди</strong>
-                    <span>Начнут после освобождения людей</span>
+                    <strong>Следующие уже запланированы</strong>
+                    <span>Начнут на первых освободившихся линиях</span>
                 </div>` : ''}
             ${this.renderPriorityCard(item, index, holidaySet)}
         `).join('');
@@ -653,7 +653,7 @@ const Gantt = {
                     <div class="gantt-priority-header">
                         <div>
                             <strong>Приоритеты</strong>
-                            <span>${immediateOrderCount} сразу · ${waitingOrderCount} ждут</span>
+                            <span>${immediateOrderCount} сразу · ${waitingOrderCount} дальше</span>
                         </div>
                         <span class="gantt-team-label">4 чел.</span>
                     </div>
@@ -761,6 +761,7 @@ const Gantt = {
         const risk = this.getNextDeliveryRiskSummary(item) || this.getDeadlineRiskSummary(item, holidaySet);
         const scheduleWindow = this.getOrderScheduleWindow(item);
         const isWaiting = this.isOrderWaitingForStart(item);
+        const queueStatus = scheduleWindow.startDate ? 'Дальше по плану' : 'Ждёт расчёта';
         const startLabel = this.formatScheduleDate(scheduleWindow.startDate, true, scheduleWindow.startHour);
         const finishLabel = this.formatScheduleDate(scheduleWindow.finishDate);
         const workerTarget = Math.max(
@@ -780,7 +781,7 @@ const Gantt = {
             item.orderName || 'Без названия',
             item.clientName || 'Без клиента',
             `Осталось ${this.formatHours(progress.remaining)}`,
-            isWaiting ? 'Ждёт очереди' : '',
+            isWaiting ? queueStatus : '',
             `Старт ${startLabel}`,
             `Готово ${finishLabel}`,
             risk.label,
@@ -802,7 +803,7 @@ const Gantt = {
                 <span class="gantt-priority-index">${index + 1}</span>
                 <div class="gantt-priority-main">
                     <div class="gantt-order-name" title="${this.esc(item.orderName)}">${this.esc(item.orderName || 'Без названия')}</div>
-                    <div class="gantt-order-meta">${isWaiting ? 'Ждёт очереди' : `ост. ${this.formatHours(progress.remaining)}`} · ${deadlineLabel}</div>
+                    <div class="gantt-order-meta">${isWaiting ? queueStatus : `ост. ${this.formatHours(progress.remaining)}`} · ${deadlineLabel}</div>
                     <div class="gantt-order-window">
                         <span>Старт ${startLabel}</span>
                         <span>Готово ${finishLabel}</span>
