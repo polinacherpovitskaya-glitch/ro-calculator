@@ -313,6 +313,161 @@ async function buildCollectedItems(context) {
     })()`, context));
 }
 
+async function smokeCalculatorRestoresBeforeSlowCatalogRefresh() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    const state = clone(await vm.runInContext(`(async () => {
+        window.addEventListener = () => {};
+        Calculator.renderItemBlock = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator.rerenderAllPackaging = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator.recalculate = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+
+        localStorage.setItem(Calculator._localDraftKey, JSON.stringify({
+            app_version: 'v430',
+            saved_at: new Date().toISOString(),
+            reason: 'pagehide',
+            editing_order_id: 8801,
+            current_order_status: 'draft',
+            order_fields: {
+                order_name: 'Offline calculator draft',
+                client_name: 'Local client',
+                manager_name: 'Smoke',
+                deadline_start: '2026-07-30',
+            },
+            items: [{
+                ...Calculator.getEmptyItem(1),
+                product_name: 'Recovered product',
+                quantity: 100,
+            }],
+            hardwareItems: [],
+            packagingItems: [],
+            extraCosts: [{ name: 'Срочность', amount: 5000 }],
+            pendants: [],
+        }));
+
+        Calculator.resetForm({ preserveLocalDraft: true });
+        Colors.data = [];
+        let releaseColors;
+        loadColors = () => new Promise(resolve => { releaseColors = resolve; });
+        Calculator._ensureBlanksCatalog = async () => {};
+
+        let settled = false;
+        const initPromise = Calculator.init().finally(() => { settled = true; });
+        await Promise.resolve();
+        await Promise.resolve();
+        const beforeCatalog = {
+            settled,
+            orderName: document.getElementById('calc-order-name').value,
+            itemCount: Calculator.items.length,
+            extraCount: Calculator.extraCosts.length,
+            dirty: Calculator._isDirty,
+        };
+
+        releaseColors([]);
+        await initPromise;
+        return {
+            beforeCatalog,
+            afterCatalog: {
+                orderName: document.getElementById('calc-order-name').value,
+                itemCount: Calculator.items.length,
+            },
+        };
+    })()`, context));
+
+    assert.equal(state.beforeCatalog.settled, false, 'catalog refresh should still be pending');
+    assert.equal(state.beforeCatalog.orderName, 'Offline calculator draft');
+    assert.equal(state.beforeCatalog.itemCount, 1);
+    assert.equal(state.beforeCatalog.extraCount, 1);
+    assert.equal(state.beforeCatalog.dirty, true);
+    assert.equal(state.afterCatalog.orderName, 'Offline calculator draft');
+    assert.equal(state.afterCatalog.itemCount, 1);
+}
+
+async function smokeColorChangesAndLocalizedPricesRecalculateImmediately() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    const state = clone(await vm.runInContext(`(() => {
+        Colors.data = [
+            { id: 1, name: 'Красный' },
+            { id: 31, name: 'Синий' },
+        ];
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Color smoke';
+        Calculator.items[0].quantity = 100;
+        Calculator.items[0].printings = [
+            { name: 'Тампо', qty: 100, price: 8, sell_price: 0, delivery_total: 0 },
+        ];
+        Calculator.hardwareItems = [{ sell_price: 0 }];
+        Calculator.packagingItems = [{ sell_price: 0 }];
+
+        let recalculateCalls = 0;
+        Calculator.renderItemBlock = () => {};
+        Calculator.recalculate = () => { recalculateCalls += 1; };
+        Calculator.scheduleAutosave = () => {};
+
+        Calculator.onColorSelect(0, 1);
+        Calculator.onColorSelect(0, 31);
+        Calculator.removeColor(0, 1);
+        Calculator.clearColors(0);
+        const colorRecalculateCalls = recalculateCalls;
+
+        Calculator.onPricingSellChange('printing', 0, '52,18', 0);
+        Calculator.onPricingSellChange('item', 0, '834,58');
+        Calculator.onPricingSellChange('hw', 0, '32,24');
+        Calculator.onPricingSellChange('pkg', 0, '16,93');
+        clearTimeout(Calculator._sellPriceTimer);
+
+        return {
+            colorRecalculateCalls,
+            colors: Calculator.items[0].colors,
+            colorId: Calculator.items[0].color_id,
+            printingSell: Calculator.items[0].printings[0].sell_price,
+            printingAggregate: Calculator.items[0].sell_price_printing,
+            itemSell: Calculator.items[0].sell_price_item,
+            hardwareSell: Calculator.hardwareItems[0].sell_price,
+            packagingSell: Calculator.packagingItems[0].sell_price,
+        };
+    })()`, context));
+
+    assert.equal(state.colorRecalculateCalls, 4, 'every color mutation must recalculate immediately');
+    assert.deepEqual(state.colors, []);
+    assert.equal(state.colorId, null);
+    assert.equal(state.printingSell, 52.18);
+    assert.equal(state.printingAggregate, 52.18);
+    assert.equal(state.itemSell, 834.58);
+    assert.equal(state.hardwareSell, 32.24);
+    assert.equal(state.packagingSell, 16.93);
+}
+
+function smokeKpPreservesCurrencyPrecision() {
+    const context = createContext();
+    runScript(context, 'js/calculator.js');
+    runScript(context, 'js/kp.js');
+
+    const state = clone(vm.runInContext(`({
+        formatted: [
+            KPGenerator.fmtRub(32.24),
+            KPGenerator.fmtRub(52.18),
+            KPGenerator.fmtRub(1395.8),
+        ],
+        pendantName: KPGenerator.pdfSafeText('Подвес "MIX❤️😊"'),
+    })`, context));
+
+    assert.deepEqual(state.formatted, [
+        '32,24 ₽',
+        '52,18 ₽',
+        '1 395,8 ₽',
+    ]);
+    assert.equal(state.pendantName, 'Подвес "MIX [сердце] [смайл]"');
+}
+
 async function smokeCalculatorPersistence(context) {
     const items = await buildCollectedItems(context);
     const productRow = items.find(item => item.item_type === 'product');
@@ -493,6 +648,61 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.charity, 0.9);
 }
 
+async function smokeOrderSummaryUsesExactBatchCosts(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = {
+            taxRate: 0.07,
+            commercialRate: 0.07,
+            charityRate: 0.01,
+            vatRate: 0.05,
+        };
+        const hardware = [{
+                qty: 100,
+                sell_price: 10,
+                result: { costPerUnit: 4.33, totalCost: 432.5 },
+            }];
+        const packaging = [{
+                qty: 100,
+                sell_price: 5,
+                result: { costPerUnit: 2.01, totalCost: 201.25 },
+            }];
+        const pendants = [{
+                quantity: 3,
+                result: {
+                    sellPerUnit: 100,
+                    totalRevenue: 300,
+                    costPerUnit: 33.67,
+                    totalCost: 101,
+                },
+            }];
+        return {
+            summary: calculateOrderSummary(
+                [],
+                hardware,
+                packaging,
+                [],
+                params,
+                pendants,
+                { mode: 'none', value: 0 }
+            ),
+            nonCommercialCost: calculateNonCommercialWorkCost([], hardware, packaging, pendants),
+        };
+    })()`, context));
+
+    assert.equal(data.summary.totalRevenue, 1800);
+    assert.equal(
+        data.summary.totalEarned,
+        795.25,
+        'order profit should subtract exact batch costs instead of multiplying rounded per-unit costs',
+    );
+    assert.equal(data.summary.marginPercent, 44.18);
+    assert.equal(
+        data.nonCommercialCost,
+        734.75,
+        'non-commercial loss should use the same exact batch costs',
+    );
+}
+
 async function smokeDiscountShownInCustomerInvoice(context) {
     await vm.runInContext(`(() => {
         Calculator.resetForm();
@@ -586,10 +796,32 @@ async function smokeGenerateKPPassesDiscount(context) {
             costPrinting: 0,
             costPrintingDetails: [],
         };
-        Calculator.hardwareItems = [];
-        Calculator.packagingItems = [];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            parent_item_index: 0,
+            name: 'Per-item ring',
+            qty: 2,
+            sell_price: 25,
+            result: { costPerUnit: 10, hoursHardware: 0.1 },
+        })];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(0), {
+            parent_item_index: 0,
+            name: 'Per-item pouch',
+            qty: 2,
+            sell_price: 15,
+            result: { costPerUnit: 5, hoursPackaging: 0.1 },
+        })];
         Calculator.extraCosts = [];
-        Calculator.pendants = [];
+        Calculator.pendants = [{
+            item_type: 'pendant',
+            name: 'ABC',
+            quantity: 2,
+            result: {
+                costPerUnit: 120,
+                sellPerUnit: 300,
+                totalCost: 240,
+                totalRevenue: 600,
+            },
+        }];
         await Calculator.generateKP();
     })()`, context);
 
@@ -597,6 +829,15 @@ async function smokeGenerateKPPassesDiscount(context) {
     assert.equal(kpArgs.length, 6);
     assert.equal(kpArgs[5].discount.mode, 'percent');
     assert.equal(kpArgs[5].discount.value, 10);
+    assert.deepEqual(kpArgs[2].map(item => item.type), [
+        'product',
+        'hardware',
+        'packaging',
+        'pendant',
+    ]);
+    assert.equal(kpArgs[2][1].name, 'Фурнитура (Smoke Product) · Per-item ring');
+    assert.equal(kpArgs[2][2].name, 'Упаковка (Smoke Product) · Per-item pouch');
+    assert.equal(kpArgs[2][3].name, 'Подвес "ABC"');
 }
 
 async function smokeHardwareOnlyAutosave(context) {
@@ -1715,6 +1956,50 @@ async function smokeFinDirectorPendantsUseAllAttachments(context) {
     assert.equal(fin.nfcTotal, 0);
     assert.equal(fin.hardwareDelivery, 30);
     assert.equal(fin.revenue, 500);
+}
+
+async function smokeFinDirectorUsesExactPendantBatchAndPrinting(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            taxRate: 0,
+            commercialRate: 0,
+            charityRate: 0,
+            vatRate: 0,
+            fotPerHour: 0,
+            indirectPerHour: 0,
+        };
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            pieces_per_hour_avg: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            builtin_assembly_name: '',
+            builtin_assembly_speed: 0,
+        }];
+        const pendant = {
+            quantity: 100,
+            elements: [
+                { char: 'A', has_print: true, print_price: 6 },
+                { char: 'B', has_print: false, print_price: 0 },
+            ],
+            cords: [],
+            carabiners: [],
+            _totalSellPerUnit: 500,
+        };
+        pendant.result = calculatePendantCost(pendant, params);
+        return {
+            result: pendant.result,
+            fin: calculateFinDirectorData([], [], [], params, [pendant]),
+        };
+    })()`, context));
+
+    assert.equal(data.fin.printing, 600, 'FinDirector should include explicit per-letter pendant printing even with a blank breakdown');
+    assert.equal(data.fin.totalCosts, data.result.totalCost, 'FinDirector pendant rows should add up to the exact pendant batch cost');
 }
 
 async function smokeFinDirectorSeparatesHardwareAndNfc(context) {
@@ -8991,6 +9276,53 @@ async function smokeOrderDetailShowsLegalAndBankFields(context) {
     assert.match(html, /044525001/);
 }
 
+async function smokeOrderDetailShowsMixedCalculatorRows(context) {
+    const html = String(vm.runInContext(`(() => {
+        OrderDetail.currentItems = [{
+            item_type: 'product',
+            product_name: 'MIX брелок',
+            quantity: 100,
+            cost_total: 414.79,
+            cost_printing: 39.23,
+            sell_price_item: 835,
+            printings: JSON.stringify([
+                { name: 'УФ', qty: 100, price: 12.5, sell_price: 35, delivery_total: 250 },
+                { name: 'Тампо', qty: 100, price: 8, sell_price: 52.18, delivery_total: 0 },
+            ]),
+            colors: JSON.stringify([{ id: 1, name: 'Красный' }, { id: 31, name: 'Синий' }]),
+        }, {
+            item_type: 'pendant',
+            name: 'MIX❤️',
+            product_name: 'Подвес "MIX❤️"',
+            quantity: 100,
+            elements: [{ char: 'M', color: 'Красный', has_print: true, print_price: 6 }],
+            element_price_per_unit: 88.25,
+            result: { costPerUnit: 630.36, sellPerUnit: 1395.8 },
+            cost_total: 630.36,
+            sell_price_item: 1395.8,
+        }, {
+            item_type: 'extra_cost',
+            product_name: 'Срочность',
+            quantity: 1,
+            cost_total: 5000,
+            sell_price_item: 5000,
+        }];
+        OrderDetail.renderItemsTab();
+        return document.getElementById('od-tab-items').innerHTML;
+    })()`, context));
+
+    assert.match(html, /УФ/);
+    assert.match(html, /Тампо/);
+    assert.match(html, /закупка 12,5 ₽\/шт/);
+    assert.match(html, /продажа 52,18 ₽\/шт/);
+    assert.match(html, /Чистая маржа:<\/span> <span class="text-green">40\.0%/);
+    assert.doesNotMatch(html, /35\.3%/);
+    assert.match(html, /Подвес "MIX❤️"/);
+    assert.match(html, /Доплаты/);
+    assert.match(html, /Срочность/);
+    assert.match(html, /5 000 ₽/);
+}
+
 async function smokeOrderDetailUsesCanonicalNetMargin(context) {
     const html = String(vm.runInContext(`(() => {
         App.params = {
@@ -9203,6 +9535,9 @@ async function main() {
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
     stubRuntime(context);
 
+    await smokeCalculatorRestoresBeforeSlowCatalogRefresh();
+    await smokeColorChangesAndLocalizedPricesRecalculateImmediately();
+    smokeKpPreservesCurrencyPrecision();
     await smokeCalculatorPersistence(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
@@ -9225,11 +9560,13 @@ async function main() {
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);
     await smokePendantFallbackTierMatchesVatExclusiveMargin();
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
+    await smokeOrderSummaryUsesExactBatchCosts(context);
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeCalculatorSupportsMoreThanSixItems(context);
     await smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
+    await smokeFinDirectorUsesExactPendantBatchAndPrinting(context);
     await smokeFinDirectorSeparatesHardwareAndNfc(context);
     await smokeFinDirectorBlankMoldsUseAmortization(context);
     await smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context);
@@ -9259,6 +9596,7 @@ async function main() {
     await smokeAllOrderHeaderFieldsSurviveSaveLoadResave();
     await smokeBoardDeadlineDoesNotShiftAcrossTimezones(context);
     await smokeOrderDetailShowsLegalAndBankFields(context);
+    await smokeOrderDetailShowsMixedCalculatorRows(context);
     await smokeOrderDetailUsesCanonicalNetMargin(context);
     await smokeRepresentativePriceSourcesStayExplicit(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);

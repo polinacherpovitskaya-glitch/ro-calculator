@@ -409,15 +409,24 @@ const OrderDetail = {
         const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
         const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
         const pendantItems = this.currentItems.filter(i => i.item_type === 'pendant');
+        const extraItems = this.currentItems.filter(i => i.item_type === 'extra_cost');
 
         // Build pendant HTML (used in both grouped and non-grouped paths)
         let pendantHtml = '';
         pendantItems.forEach(pndItem => {
-            let pnd;
-            try { pnd = typeof pndItem.item_data === 'string' ? JSON.parse(pndItem.item_data) : pndItem.item_data; } catch(e) { return; }
+            let pnd = { ...pndItem };
+            try {
+                const itemData = typeof pndItem.item_data === 'string'
+                    ? JSON.parse(pndItem.item_data)
+                    : pndItem.item_data;
+                if (itemData && typeof itemData === 'object') pnd = { ...pnd, ...itemData };
+            } catch(e) { /* keep top-level local fallback fields */ }
             if (!pnd) return;
             pendantHtml += this._renderPendantDetail(pnd, pndItem);
         });
+        const extraHtml = extraItems.length > 0
+            ? `<h3 style="margin:16px 0 12px">&#10010; Доплаты</h3>${extraItems.map(item => this._renderExtraCostDetail(item)).join('')}`
+            : '';
 
         // Separate order-level vs per-item hw/pkg
         const orderHardware = allHardware.filter(i => i.hardware_parent_item_index === null || i.hardware_parent_item_index === undefined);
@@ -546,6 +555,7 @@ const OrderDetail = {
             // Pendant items
             html += pendantHtml;
         }
+        html += extraHtml;
 
         if (!html) {
             html = '<div class="empty-state"><div class="empty-icon">&#128230;</div><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
@@ -990,7 +1000,9 @@ const OrderDetail = {
         let sellPrice = 0;
 
         if (type === 'product') {
-            costPerUnit = item.cost_total || 0;
+            // Printing is billed as separate rows in the calculator, invoice and
+            // KP, so the product card must use the same printing-free cost base.
+            costPerUnit = Math.max(0, round2((item.cost_total || 0) - (item.cost_printing || 0)));
             sellPrice = item.sell_price_item || 0;
         } else if (type === 'hardware') {
             costPerUnit = item.cost_total || 0;
@@ -1027,10 +1039,61 @@ const OrderDetail = {
         </div>`;
     },
 
+    _renderExtraCostDetail(item) {
+        const name = item.product_name || 'Доп. доход';
+        const amount = Number(item.sell_price_item ?? item.cost_total ?? 0) || 0;
+        return `
+        <div class="od-item-card">
+            <div class="od-item-header">
+                <b>${this._esc(name)}</b>
+                <span style="font-size:14px;font-weight:700;">${formatRub(amount)}</span>
+            </div>
+            <div class="text-muted" style="font-size:12px;">Отдельная строка в смете и КП</div>
+        </div>`;
+    },
+
     _renderProductMeta(item) {
         const colors = this._normalizeProductColors(item);
         const attachments = this._normalizeColorAttachments(item);
         const sections = [];
+        let printings = item?.printings;
+        if (typeof printings === 'string') {
+            try {
+                printings = JSON.parse(printings);
+            } catch (e) {
+                printings = [];
+            }
+        }
+        if (!Array.isArray(printings)) printings = [];
+        if (typeof getActivePrintings === 'function') {
+            printings = getActivePrintings({ ...item, printings });
+        } else {
+            printings = printings.filter(printing => (
+                (Number(printing?.qty) || 0) > 0
+                || (Number(printing?.price) || 0) > 0
+                || (Number(printing?.sell_price) || 0) > 0
+            ));
+        }
+
+        if (printings.length > 0) {
+            sections.push(`
+                <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                    <span class="text-muted" style="min-width:62px;">Печать:</span>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        ${printings.map((printing, index) => {
+                            const details = [];
+                            const purchasePrice = Number(printing?.price) || 0;
+                            const sellPrice = Number(printing?.sell_price) || 0;
+                            const deliveryTotal = Number(printing?.delivery_total) || 0;
+                            if (purchasePrice > 0) details.push(`закупка ${formatRub(purchasePrice)}/шт`);
+                            if (sellPrice > 0) details.push(`продажа ${formatRub(sellPrice)}/шт`);
+                            if (deliveryTotal > 0) details.push(`доставка ${formatRub(deliveryTotal)}`);
+                            return `<span><strong>${this._esc(printing?.name || `Нанесение ${index + 1}`)}</strong>${details.length ? ` · ${details.join(' · ')}` : ''}</span>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `);
+        }
 
         if (colors.length > 0) {
             sections.push(`

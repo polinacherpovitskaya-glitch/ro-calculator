@@ -1558,6 +1558,17 @@ const Calculator = {
     _loadedOrderOrigin: null,
 
     async init() {
+        // Restore the calculator before optional catalog refreshes. Those requests
+        // can be slow or unavailable, while the local draft is already usable.
+        const preserveCurrentState = this._preserveStateOnNextInit
+            || (this._isDirty && this._hasAnyDraftData());
+        let restoredLocalDraft = false;
+        if (this._preserveStateOnNextInit) this._preserveStateOnNextInit = false;
+        if (!preserveCurrentState) {
+            this.resetForm({ preserveLocalDraft: true });
+            restoredLocalDraft = await this._restoreLocalDraftIfAvailable();
+        }
+
         // Ensure colors are loaded for color picker
         try {
             if (!Colors.data || Colors.data.length === 0) {
@@ -1571,11 +1582,18 @@ const Calculator = {
             console.error('[Calculator.init] load blanks catalog error:', e);
         }
 
-        if (this._preserveStateOnNextInit) {
-            this._preserveStateOnNextInit = false;
-        } else {
-            this.resetForm({ preserveLocalDraft: true });
-            await this._restoreLocalDraftIfAvailable();
+        // A refresh event may deliver fresher catalogs/settings after the draft
+        // has already been rendered. Refresh the visible calculation without
+        // clearing the user's in-progress form.
+        if ((preserveCurrentState || restoredLocalDraft) && this._hasAnyDraftData()) {
+            this.items.forEach((item, idx) => this.renderItemBlock(idx));
+            this.rerenderAllHardware();
+            this.rerenderAllPackaging();
+            this.renderExtraCosts();
+            if (typeof Pendant !== 'undefined') Pendant.renderAllCards();
+            this._updateItemsEmptyState();
+            this._syncDiscountUi();
+            this.recalculate();
         }
         // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
@@ -4067,6 +4085,7 @@ const Calculator = {
         // Sync backward-compat fields (first color)
         this._syncColorCompat(idx);
         this.renderItemBlock(idx);
+        this.recalculate();
         this.scheduleAutosave();
     },
 
@@ -4075,6 +4094,7 @@ const Calculator = {
         this.items[idx].colors = this.items[idx].colors.filter(c => c.id !== colorId);
         this._syncColorCompat(idx);
         this.renderItemBlock(idx);
+        this.recalculate();
         this.scheduleAutosave();
     },
 
@@ -4083,6 +4103,7 @@ const Calculator = {
         this._syncColorCompat(idx);
         document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
         this.renderItemBlock(idx);
+        this.recalculate();
         this.scheduleAutosave();
     },
 
@@ -5496,7 +5517,7 @@ const Calculator = {
     },
 
     onPricingSellChange(type, globalIdx, value, printingIdx) {
-        const price = parseFloat(value) || 0;
+        const price = this._parseDiscountValue(value);
         if (type === 'item') {
             this.items[globalIdx].sell_price_item = price;
         } else if (type === 'printing') {
@@ -6750,17 +6771,16 @@ const Calculator = {
             item.sell_price_printing = getPrintingSellPricePerUnit(item);
         });
 
-        // Auto-fill hardware sell prices (only order-level; per-item included in item price)
+        // Auto-fill hardware sell prices for every pricing line. Per-item
+        // hardware is billed separately in the pricing card and order summary.
         this.hardwareItems.forEach(hw => {
-            if (hw.parent_item_index !== null) return;  // per-item hw — skip
             if (hw.result && hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
                 hw.sell_price = roundTo5(calcTarget(hw.result.costPerUnit, 0.40));
             }
         });
 
-        // Auto-fill packaging sell prices (only order-level)
+        // Auto-fill packaging sell prices for every pricing line.
         this.packagingItems.forEach(pkg => {
-            if (pkg.parent_item_index !== null) return;  // per-item pkg — skip
             if (pkg.result && pkg.qty > 0 && (!pkg.sell_price || pkg.sell_price <= 0)) {
                 pkg.sell_price = roundTo5(calcTarget(pkg.result.costPerUnit, 0.40));
             }
@@ -6769,7 +6789,7 @@ const Calculator = {
         // After auto-fill, update the pricing card inputs to show the values
         this.renderPricingCard(params);
 
-        // Collect data for КП — 4 entities: item, printing, hw, pkg
+        // Collect the same billable entities shown in the customer invoice.
         const kpItems = [];
 
         this.items.forEach(item => {
@@ -6807,27 +6827,46 @@ const Calculator = {
             }
         });
 
-        // Only order-level hw/pkg as separate KP lines (per-item included in item price)
-        this.hardwareItems.forEach(hw => {
-            if (hw.parent_item_index !== null) return;  // per-item — included in item price
+        // Hardware rows (both per-item and order-level)
+        this.hardwareItems.forEach((hw, i) => {
             if (hw.qty > 0 && (hw.sell_price || 0) > 0) {
+                const parentName = (hw.parent_item_index !== null && hw.parent_item_index !== undefined)
+                    ? (this.items[hw.parent_item_index]?.product_name || ('Изделие ' + (hw.parent_item_index + 1)))
+                    : '';
                 kpItems.push({
                     type: 'hardware',
-                    name: hw.name || 'Фурнитура',
+                    name: (parentName ? `Фурнитура (${parentName})` : 'Общая фурнитура')
+                        + ' · ' + (hw.name || ('Фурнитура ' + (i + 1))),
                     qty: hw.qty,
                     price: hw.sell_price,
                 });
             }
         });
 
-        this.packagingItems.forEach(pkg => {
-            if (pkg.parent_item_index !== null) return;  // per-item — included in item price
+        // Packaging rows (both per-item and order-level)
+        this.packagingItems.forEach((pkg, i) => {
             if (pkg.qty > 0 && (pkg.sell_price || 0) > 0) {
+                const parentName = (pkg.parent_item_index !== null && pkg.parent_item_index !== undefined)
+                    ? (this.items[pkg.parent_item_index]?.product_name || ('Изделие ' + (pkg.parent_item_index + 1)))
+                    : '';
                 kpItems.push({
                     type: 'packaging',
-                    name: pkg.name || 'Упаковка',
+                    name: (parentName ? `Упаковка (${parentName})` : 'Общая упаковка')
+                        + ' · ' + (pkg.name || ('Упаковка ' + (i + 1))),
                     qty: pkg.qty,
                     price: pkg.sell_price,
+                });
+            }
+        });
+
+        // Pendant rows (one line per pendant)
+        this.pendants.forEach((pnd) => {
+            if (pnd.result && pnd.quantity > 0 && pnd.result.sellPerUnit > 0) {
+                kpItems.push({
+                    type: 'pendant',
+                    name: `Подвес "${pnd.name || '...'}"`,
+                    qty: pnd.quantity,
+                    price: pnd.result.sellPerUnit,
                 });
             }
         });

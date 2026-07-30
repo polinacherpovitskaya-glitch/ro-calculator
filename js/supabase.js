@@ -667,11 +667,20 @@ const _missingOptionalWorkTables = new Set();
 const _volatileLocalCache = new Map();
 
 function _isSharedCacheOnlyMode() {
-    return isSupabaseReady() && !_hasSupabaseAccessProblem();
+    const hasConnectivityProblem = typeof window !== 'undefined' && !!window.__roSharedDatabaseProblem;
+    return isSupabaseReady() && !_hasSupabaseAccessProblem() && !hasConnectivityProblem;
+}
+
+function _isDirtyLocalCacheKey(key) {
+    const dirtyMap = _readLocalDirtyDatasets();
+    return Object.entries(LOCAL_KEYS).some(([datasetName, storageKey]) => (
+        storageKey === key && Number(dirtyMap?.[datasetName] || 0) > 0
+    ));
 }
 
 function _shouldKeepOnlyInVolatileCache(key, payload = '') {
     if (!_isSharedCacheOnlyMode()) return false;
+    if (_isDirtyLocalCacheKey(key)) return false;
     if (ALWAYS_PERSIST_LOCAL_KEYS.has(key)) return false;
     if (SHARED_VOLATILE_LOCAL_CACHE_KEYS.has(key)) return true;
     return typeof payload === 'string' && payload.length > SHARED_VOLATILE_PAYLOAD_THRESHOLD;
@@ -1255,6 +1264,11 @@ function _cleanupLocalStorage(options = {}) {
         ...ALWAYS_PERSIST_LOCAL_KEYS,
         ...(options.preserveKeys || []),
     ]);
+    const dirtyMap = _readLocalDirtyDatasets();
+    Object.keys(dirtyMap || {}).forEach(datasetName => {
+        const storageKey = LOCAL_KEYS[datasetName];
+        if (storageKey) preserveKeys.add(storageKey);
+    });
     // 1. Trim auth activity & sessions (keep last 50 entries each)
     ['ro_calc_auth_activity', 'ro_calc_auth_sessions'].forEach(key => {
         try {
@@ -2294,8 +2308,8 @@ async function saveOrder(order, items = []) {
         const localBackupOrder = { ...order, id: orderId };
         let localBackupItems = Array.isArray(items) ? items : [];
         const saveEmergencyLocalCopy = (error) => {
-            _saveOrderLocally(localBackupOrder, localBackupItems);
             _markLocalDatasetDirty(['orders', 'orderItems']);
+            _saveOrderLocally(localBackupOrder, localBackupItems);
             console.warn('[saveOrder] Saved emergency local copy after remote save failed', {
                 orderId,
                 reason: error && (error.message || error.code || error),

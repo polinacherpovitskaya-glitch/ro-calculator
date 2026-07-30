@@ -1590,6 +1590,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         if (!pnd.result) return;
         const qty = pnd.quantity || 0;
         const r = pnd.result;
+        const beforePendantCost = totalSalary + totalIndirect + totalHardwarePurchase + totalNfc + totalHardwareDelivery
+            + totalPackagingPurchase + totalPackagingDelivery + totalPrinting + totalPlastic + totalMolds;
         const cords = getPendantAttachmentEntries(pnd, 'cord');
         const carabiners = getPendantAttachmentEntries(pnd, 'carabiner');
         const elements = getCountablePendantElements(pnd);
@@ -1617,16 +1619,24 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalHardwarePurchase += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentPurchasePerUnit('carabiner', entry)), 0);
         totalHardwareDelivery += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('cord', entry)), 0);
         totalHardwareDelivery += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('carabiner', entry)), 0);
-        // Printing
-        if (!letterBreakdown) {
-            elements.forEach(el => {
-                if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
-            });
-        }
+        // Per-letter printing is an explicit pendant option and is additional
+        // to any printing already included in the linked blank calculation.
+        elements.forEach(el => {
+            if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
+        });
         // Packaging
         if (pnd.packaging) {
             totalPackagingPurchase += qty * (pnd.packaging.price_per_unit || 0);
             totalPackagingDelivery += qty * (pnd.packaging.delivery_price || 0);
+        }
+        const categorizedPendantCost = (totalSalary + totalIndirect + totalHardwarePurchase + totalNfc + totalHardwareDelivery
+            + totalPackagingPurchase + totalPackagingDelivery + totalPrinting + totalPlastic + totalMolds) - beforePendantCost;
+        const exactPendantCost = Number(r.totalCost);
+        if (Number.isFinite(exactPendantCost) && exactPendantCost > 0) {
+            // Component rows are rounded independently. Reconcile their tiny
+            // residue inside indirect costs so FinDirector stays equal to the
+            // exact pendant batch cost used by the order summary.
+            totalIndirect += exactPendantCost - categorizedPendantCost;
         }
         // Revenue
         totalRevenue += r.totalRevenue;
@@ -1670,9 +1680,19 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
+function getResultBatchCost(result, quantity) {
+    const rawBatchCost = result?.totalCost;
+    const parsedBatchCost = Number(rawBatchCost);
+    if (rawBatchCost !== null && rawBatchCost !== undefined && rawBatchCost !== '' && Number.isFinite(parsedBatchCost)) {
+        return parsedBatchCost;
+    }
+    return (Number(result?.costPerUnit) || 0) * (Number(quantity) || 0);
+}
+
 function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}, pendantItems = [], orderAdjustments = {}) {
     let totalRevenue = 0;
     let totalEarned = 0;
+    const netRevenueRetentionRate = getNetRevenueRetentionRate(params);
 
     items.forEach(item => {
         if (!item.result) return;
@@ -1685,24 +1705,23 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
 
         // Total sell = item + printing, total cost = costTotal (includes printing cost)
         const totalSellPerUnit = (item.sell_price_item || 0) + getPrintingSellPricePerUnit(item);
-        const marginItem = calculateActualMargin(totalSellPerUnit, item.result.costTotal, params);
-        totalEarned += marginItem.earned * qty;
+        totalEarned += (totalSellPerUnit * qty * netRevenueRetentionRate) - (item.result.costTotal * qty);
     });
 
     (hardwareItems || []).forEach(hw => {
         const qty = hw.qty || 0;
         if (!hw.result) return;
         totalRevenue += (hw.sell_price || 0) * qty;
-        const m = calculateActualMargin(hw.sell_price || 0, hw.result.costPerUnit, params);
-        totalEarned += m.earned * qty;
+        const batchCost = getResultBatchCost(hw.result, qty);
+        totalEarned += ((hw.sell_price || 0) * qty * netRevenueRetentionRate) - batchCost;
     });
 
     (packagingItems || []).forEach(pkg => {
         const qty = pkg.qty || 0;
         if (!pkg.result) return;
         totalRevenue += (pkg.sell_price || 0) * qty;
-        const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit, params);
-        totalEarned += m.earned * qty;
+        const batchCost = getResultBatchCost(pkg.result, qty);
+        totalEarned += ((pkg.sell_price || 0) * qty * netRevenueRetentionRate) - batchCost;
     });
 
     // Pendants
@@ -1710,8 +1729,8 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         if (!pnd.result) return;
         const qty = pnd.quantity || 0;
         totalRevenue += pnd.result.totalRevenue;
-        const m = calculateActualMargin(pnd.result.sellPerUnit, pnd.result.costPerUnit, params);
-        totalEarned += m.earned * qty;
+        const batchCost = getResultBatchCost(pnd.result, qty);
+        totalEarned += (pnd.result.totalRevenue * netRevenueRetentionRate) - batchCost;
     });
 
     // Extra income — full amount goes to revenue, and net (after taxes/commission) goes to earned.
@@ -1719,7 +1738,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         const amt = ec.amount || 0;
         if (amt > 0) {
             totalRevenue += amt;
-            totalEarned += amt * getNetRevenueRetentionRate(params);
+            totalEarned += amt * netRevenueRetentionRate;
         }
     });
 
@@ -1773,13 +1792,13 @@ function calculateNonCommercialWorkCost(items, hardwareItems, packagingItems, pe
         total += Number(item?.result?.costTotal || 0) * Number(item?.quantity || 0);
     });
     (hardwareItems || []).forEach(item => {
-        total += Number(item?.result?.costPerUnit || 0) * Number(item?.qty || 0);
+        total += getResultBatchCost(item?.result, item?.qty);
     });
     (packagingItems || []).forEach(item => {
-        total += Number(item?.result?.costPerUnit || 0) * Number(item?.qty || 0);
+        total += getResultBatchCost(item?.result, item?.qty);
     });
     (pendantItems || []).forEach(item => {
-        total += Number(item?.result?.costPerUnit || 0) * Number(item?.quantity || 0);
+        total += getResultBatchCost(item?.result, item?.quantity);
     });
     return round2(Math.max(0, total));
 }

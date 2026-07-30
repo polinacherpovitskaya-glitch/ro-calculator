@@ -60,8 +60,8 @@ Every row below must be checked across the applicable dimensions:
 - [x] `node tests/warehouse-migration-smoke.js`
 - [x] focused all-header save/load/resave regression
 - [x] focused representative price-provenance regression
-- [ ] headed browser render/save/load/resave pass
-- [ ] cross-view parity pass
+- [x] headed browser render/save/load/resave pass
+- [x] cross-view parity pass
 
 ### Completed headed scenarios
 
@@ -71,8 +71,9 @@ Every row below must be checked across the applicable dimensions:
       deadline and canonical net margin
 - [x] 3K NFC blank recommendation matched the active blanks tier formula
 - [x] manual resave kept one order id and one item row
-- [ ] printing, colors/files, hardware, packaging, pendant, extras and discounts
-- [ ] invoice/KP, plan-fact and production consumer parity
+- [x] printing, colors/files, hardware, packaging, pendant, extras and discounts
+- [x] invoice/KP, plan-fact and production consumer parity
+- [x] reversible synthetic warehouse reserve/consume/rollback/release cycle
 
 ### Confirmed regressions fixed in pass 1
 
@@ -81,6 +82,14 @@ Every row below must be checked across the applicable dimensions:
 - [x] half-cent money rounding down
 - [x] order-detail item margin using gross instead of canonical net margin
 - [x] stale 6.5% labels and ignored `commercialRate` setting
+- [x] local draft restored too late after slow catalog bootstrap
+- [x] color/comma-decimal edits not recalculating immediately
+- [x] offline order composition lost from volatile-only fallback after reload
+- [x] printing, extra rows and pendant details missing in order detail
+- [x] KP money rounded to tens and pendant emoji breaking PDF output
+- [x] pendant costs absent from plan-fact
+- [x] rounded per-unit costs drifting from exact batch totals
+- [x] explicit pendant printing absent from FinDirector
 
 ### Pass-1 release gates
 
@@ -99,7 +108,8 @@ Every row below must be checked across the applicable dimensions:
   assertion.
 - Calculator, saved snapshot and downstream consumer totals agree.
 - Confirmed defects have a focused regression and surgical fix.
-- Warehouse mutation remains pending until the C4 fixture/rollback gate.
+- The reversible local warehouse lifecycle is green; a production-stock
+  mutation remains outside phase 1 and requires the dedicated C4 fixture.
 
 ## Completed track — Production calendar priority Gantt
 

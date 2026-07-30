@@ -2516,18 +2516,37 @@ async function main() {
         vm.runInContext('initSupabase()', context);
 
         const message = await vm.runInContext(`
-            saveOrder({ id: 12345, order_name: 'Broken save' }, [])
+            saveOrder(
+                { id: 12345, order_name: 'Broken save' },
+                [{
+                    item_number: 1,
+                    item_type: 'product',
+                    product_name: 'Emergency item',
+                    quantity: 100,
+                    color_solution_attachment: 'x'.repeat(20000),
+                }]
+            )
                 .then(() => '')
                 .catch(error => error && error.message)
         `, context);
 
         assert.match(message, /Не удалось проверить заказ перед сохранением/, 'saveOrder should reject instead of silently returning null');
         const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        const persistedItems = JSON.parse(context.localStorage.getItem('ro_calc_order_items') || '[]');
         assert.equal(cachedOrders.length, 1, 'failed remote lookup should keep an emergency local order copy');
         assert.equal(cachedOrders[0].order_name, 'Broken save', 'emergency local order copy should keep the order payload');
+        assert.equal(persistedItems.length, 1, 'emergency order items must persist across a page reload, not only in memory');
+        assert.equal(persistedItems[0].product_name, 'Emergency item');
         const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
         assert.ok(dirtyMap.orders, 'failed remote lookup should mark local orders dirty');
         assert.ok(dirtyMap.orderItems, 'failed remote lookup should mark local order items dirty');
+
+        vm.runInContext(`_cleanupLocalStorage({ aggressive: true })`, context);
+        assert.notEqual(
+            context.localStorage.getItem('ro_calc_order_items'),
+            null,
+            'aggressive shared-cache cleanup must preserve unsynced order items',
+        );
     }
 
     {

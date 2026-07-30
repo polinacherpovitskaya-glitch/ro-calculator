@@ -3,8 +3,8 @@
 ## Snapshot
 - Current phase: C1 — exhaustive calculator audit
 - Plan file: `docs/plans/2026-07-30-calculator-exhaustive-audit-phase1.md`
-- Status: in progress — header, custom-product and representative price-source
-  pass is green; the remaining line types and downstream consumers are next
+- Status: implementation and local audit complete; release validation/push is
+  in progress
 - Last updated: 2026-07-30
 
 ## Exhaustive calculator audit — 2026-07-30
@@ -33,7 +33,13 @@
 
 ### Current finding state
 
-- Five first-pass defects are fixed with regressions:
+- The full headed mixed fixture covered product, two printings, colors/file,
+  per-item and global hardware/packaging, pendant, extra income and discount.
+- It survived save, reload and resave with one stable order id and all seven
+  normalized item rows.
+- Calculator, board, order detail, production load, invoice/KP, FinDirector and
+  plan-fact now agree on revenue, exact batch cost, margin and hours.
+- Confirmed defects fixed with regressions include:
   - `YYYY-MM-DD` deadlines no longer shift to the previous day in negative UTC
     offsets;
   - legal and bank fields are visible and editable in order detail;
@@ -41,12 +47,22 @@
   - product cards use the calculator's canonical net-margin formula instead of
     showing gross margin under the same label;
   - commercial-rate labels reflect the current 7% business rate, while
-    FinDirector and plan-fact honor an explicitly configured rate.
-- A headed custom NFC fixture completed create/autosave/manual save, board,
-  detail, calculator reload and resave with one stable order id and item row.
+    FinDirector and plan-fact honor an explicitly configured rate;
+  - valid local drafts restore before slow catalogs finish;
+  - colors and comma-decimal sale prices recalculate immediately;
+  - failed remote saves persist the complete local order composition across a
+    reload;
+  - order detail shows printings, extra rows and pendant data with the same
+    margin calculation;
+  - KP/PDF preserves exact money and safely renders pendant symbols;
+  - plan-fact includes every pendant article and current linked stock price;
+  - order summary, internal-loss calculation and FinDirector use exact batch
+    costs and include pendant-letter printing.
 - The 3K NFC blank recommendation matched the same tier formula used by the
   blanks directory. The local fixture produced 555 ₽ from its local rates;
   production catalog numbers were not mutated.
+- The reversible local warehouse fixture passed reserve, idempotent resave,
+  write-off, rollback and draft release. No real warehouse quantity changed.
 - Browser console errors in this pass are expected network/auth noise from the
   deliberately isolated local session; no production write was attempted.
 - Release candidate is `v430`, selected after refreshing `origin/main` at
@@ -58,6 +74,9 @@
 - Passed `version-smoke`, `order-flow-smoke`, `supabase-fallback-smoke`,
   `pricing-canon-smoke`, `molds-smoke`, `factual-smoke`, `finance-smoke` and
   `warehouse-migration-smoke`.
+- Passed active-order recalculation, leftover assembly, partial delivery,
+  pendant color batching, production-floor publish and production-load
+  rendering checks.
 - Passed pricing-surface, code-health and data-path audits.
 - Passed ops calculator build, typecheck and the focused 49-test
   pricing/live-calc/plan-fact suite.
@@ -66,15 +85,14 @@
 
 ### Next exact task
 
-- Continue the headed matrix with printing, colors/files, hardware, packaging,
-  pendant, extras and discounts, then compare invoice/KP, plan-fact and
-  production consumers before starting the reversible warehouse lifecycle.
+- Refresh `origin/main`, resolve the final release version, run the complete
+  local release matrix, commit/push the audit package and monitor both mirrors.
 
 ### Safety boundary
 
-- Phase 1 does not change real warehouse stock. Warehouse reserve, collection,
-  write-off and rollback will be executed in C4 with a named audit fixture and
-  a verified cleanup path.
+- Phase 1 did not change real warehouse stock. The lifecycle was executed only
+  against an isolated, reversible local fixture; a live C4 run still requires
+  a named audit record and verified cleanup path.
 
 ## Production calendar priority Gantt — 2026-07-28
 

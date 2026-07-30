@@ -293,7 +293,8 @@ const KPGenerator = {
             doc.setFont(fn, 'normal');
             doc.setFontSize(9.5);
             doc.setTextColor(...DARK);
-            const displayName = allSameQty ? item.name : item.name + '  (' + this.fmtNum(item.qty) + ' шт)';
+            const rawDisplayName = allSameQty ? item.name : item.name + '  (' + this.fmtNum(item.qty) + ' шт)';
+            const displayName = this.pdfSafeText(rawDisplayName);
             doc.text(displayName, col1X, y);
 
             // Colors under the product name (if any)
@@ -380,8 +381,8 @@ const KPGenerator = {
         }
 
         // ── VAT 5% ──
-        const vatAmount = Math.ceil(discountedSubtotal * 0.05);
-        const vatPerUnit = allSameQty ? Math.ceil((perUnitSubtotal - discountPerUnit) * 0.05) : 0;
+        const vatAmount = round2(discountedSubtotal * 0.05);
+        const vatPerUnit = allSameQty ? round2((perUnitSubtotal - discountPerUnit) * 0.05) : 0;
         y += rowH;
 
         doc.setFont(fn, 'normal');
@@ -394,7 +395,7 @@ const KPGenerator = {
         doc.text(this.fmtRub(vatAmount), col3X, y, { align: 'right' });
 
         // ── Total with VAT ──
-        const totalWithVat = discountedSubtotal + vatAmount;
+        const totalWithVat = round2(discountedSubtotal + vatAmount);
         const totalPerUnitWithVat = allSameQty ? round2((perUnitSubtotal - discountPerUnit) + vatPerUnit) : 0;
 
         y += 2;
@@ -616,11 +617,19 @@ const KPGenerator = {
         return new Intl.NumberFormat('ru-RU').format(n);
     },
 
+    pdfSafeText(value) {
+        return String(value ?? '')
+            .replace(/\u2764\uFE0F?/g, ' [сердце]')
+            .replace(/\u{1F60A}/gu, ' [смайл]')
+            .replace(/\uFE0F/g, '');
+    },
+
     fmtRub(n) {
         if (!n && n !== 0) return '— \u20BD';
-        // Round up to nearest 10 for clean display
-        const rounded = Math.ceil(n / 10) * 10;
-        return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(rounded) + ' \u20BD';
+        return new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        }).format(round2(n)) + ' \u20BD';
     },
 
     fmtMoney(n) {

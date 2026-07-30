@@ -8,9 +8,9 @@
 - [x] Add focused persistence coverage for every order-header field.
 - [x] Add focused price-provenance coverage for one representative row of each
       product/hardware/packaging/printing/pendant source.
-- [ ] Run the local headed browser matrix for render, edit, calculation,
+- [x] Run the local headed browser matrix for render, edit, calculation,
       save, reload and resave.
-- [ ] Compare the same fixture in calculator, orders list, order detail,
+- [x] Compare the same fixture in calculator, orders list, order detail,
       production load, FinDirector, invoice and KP.
 - [x] Fix each confirmed first-pass defect with a regression.
 - [x] Refresh from `origin/main`, bump the four version anchors and changed
@@ -36,16 +36,28 @@
   - product cards showing gross margin under the same label as canonical net
     margin;
   - stale 6.5% commercial-rate copy and settings rates being ignored by
-    FinDirector and plan-fact.
-- Warehouse mutation remains deferred to the dedicated reversible fixture in
-  C4.
+    FinDirector and plan-fact;
+  - slow catalog bootstrap overwriting a valid local calculator draft;
+  - color edits and comma-decimal sale prices not recalculating immediately;
+  - failed shared-database saves keeping large order items only in volatile
+    memory, so a reload could lose the item composition;
+  - order detail omitting printings, extra rows and locally saved pendant data;
+  - KP rounding money to tens and emitting unsupported emoji glyphs to PDF;
+  - plan-fact dropping the full pendant cost breakdown;
+  - order summary, non-commercial loss and FinDirector multiplying rounded
+    per-unit costs instead of using exact batch totals;
+  - FinDirector omitting explicit printing on pendant letters.
+- A synthetic reversible warehouse lifecycle passed
+  `stock → reserve → resave → consume → rollback → draft release`, including
+  idempotency and movement history. No production stock was mutated.
 
 ## Release validation
 
 - Refreshed `origin/main` remained at `v429`; this package targets `v430`.
 - Passed all JavaScript syntax checks plus version, order-flow,
   Supabase-fallback, pricing-canon, molds, factual, finance,
-  warehouse-migration, pricing-surface, code-health and data-path checks.
+  warehouse-migration, active-order recalculation, pendant, partial-delivery,
+  production-load/publish, pricing-surface, code-health and data-path checks.
 - Ops calculator TypeScript build and typecheck passed. The focused 49-test
   pricing/live-calc/plan-fact suite passed. The full ops suite additionally
   requires its PostgreSQL fixture on `127.0.0.1:5433`; those 24 integration
