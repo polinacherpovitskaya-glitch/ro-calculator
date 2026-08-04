@@ -69,6 +69,11 @@ jobs:
           node tests/supabase-fallback-smoke.js
           node tests/bootstrap-guard-smoke.js
           node tests/yandex-backup-workflow-smoke.js
+          node tests/cloud-consolidation-preservation-smoke.js
+          node tests/supabase-preservation-export-smoke.js
+          node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
+            ops/migration/cloud-consolidation-preservation.json \
+            --mode=inventory
           node tests/yandex-api-deploy-smoke.js
           node tests/bootstrap-pagination-smoke.js
           node tests/storage-url-rewrite-smoke.mjs
