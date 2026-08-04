@@ -141,12 +141,12 @@ node tests/cloud-consolidation-preservation-smoke.js
 
 - [ ] Обновить backup калькулятора RO и подтвердить текущий Yandex PostgreSQL,
   legacy Supabase, Storage и timebot state.
-- [ ] Экспортировать RePanel Firestore, Firebase Storage и Railway Volume.
+- [x] Экспортировать RePanel Firestore, Firebase Storage и Railway Volume.
 - [ ] Экспортировать managed Supabase + Storage сайта RePanel и YDB.
 - [ ] Экспортировать managed Supabase + Storage сайта Recycle Object, включая
   auth/admin state.
-- [ ] Создать Git bundles всех четырёх release commits.
-- [ ] Сгенерировать SHA-256 manifests и зашифрованную офлайн-копию.
+- [x] Создать Git bundles всех четырёх release commits.
+- [x] Сгенерировать SHA-256 manifests и зашифрованную офлайн-копию.
 - [ ] Загрузить копии в private versioned Yandex backup bucket.
 - [ ] Восстановить каждый DB/file bundle в изолированную среду и записать
   counts/checksums.
@@ -170,6 +170,11 @@ node tests/cloud-consolidation-preservation-smoke.js
 - Supabase Auth и Firebase metadata требуют отдельного export, не только
   public tables.
 - Railway Volume не имеет автоматических Hobby backups.
+- Supabase application-logical export не заменяет `pg_dump`: roles,
+  extensions, triggers, functions, RLS и unexposed schemas должны быть
+  сохранены отдельно до cutover.
+- Yandex offsite upload требует service account или browser account, который
+  действительно зарегистрирован в целевом cloud.
 
 ### Stop-and-fix rule
 

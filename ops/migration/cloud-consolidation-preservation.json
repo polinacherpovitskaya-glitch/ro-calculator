@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-04T16:00:00Z",
+  "updatedAt": "2026-08-04T18:52:02Z",
   "policy": {
     "primaryProvider": "yandex-cloud-ru",
     "allowedSecondaryProviders": [
@@ -84,8 +84,26 @@
           "containsPersonalData": false,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         }
       ],
       "decommission": {
@@ -122,8 +140,26 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Managed export downloaded with generation pinning; 435 objects and 74007377 source bytes passed SHA-256 verification; source listing stayed unchanged",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Encrypted offline preservation set passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         },
         {
           "id": "repanel-firebase-storage",
@@ -133,8 +169,26 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "4010 generation-pinned objects and 2788529164 source bytes passed SHA-256 verification; source listing stayed unchanged",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Encrypted offline preservation set passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         },
         {
           "id": "repanel-railway-volume",
@@ -144,8 +198,26 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Railway /app/data archive matched the server size and SHA-256 and passed complete tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://railway-volume-20260804T180600Z/repanel-railway-volume-20260804T180600Z.tar",
+                "sha256": "6aeeedc9544561c9acbf150fc063be807c8b9f6e75466f211b7c2114725988ca",
+                "bytes": 246200320,
+                "createdAt": "2026-08-04T18:06:00Z",
+                "encrypted": false
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "The verified Railway archive was included in the encrypted offline preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         },
         {
           "id": "repanel-calculator-repository-and-runtime-config",
@@ -155,8 +227,26 @@
           "containsPersonalData": false,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         }
       ],
       "decommission": {
@@ -194,8 +284,20 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Current application-logical export captured 10 exposed tables, 7 rows and 0 Auth users; managed physical backup from 2026-08-02 exists",
+              "limitation": "Full pg_dump is still required for roles, extensions, triggers, functions, RLS and unexposed schemas",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            },
+            "offlineCopy": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Logical export is included in the encrypted preservation set; source completeness remains pending full pg_dump",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            }
+          }
         },
         {
           "id": "repanel-supabase-product-images",
@@ -205,8 +307,26 @@
           "containsPersonalData": false,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Storage API export verified the product-images bucket exists and currently contains zero objects",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Bucket metadata and SHA-256 manifest are included in the verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         },
         {
           "id": "repanel-ydb-personal-data",
@@ -227,8 +347,26 @@
           "containsPersonalData": false,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         }
       ],
       "decommission": {
@@ -265,8 +403,20 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Current application-logical export captured 65 exposed tables, 43165 rows and 1 Auth user; managed physical backup from 2026-08-04 exists",
+              "limitation": "Full pg_dump is still required for roles, extensions, triggers, functions, RLS and unexposed schemas",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            },
+            "offlineCopy": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Logical export is included in the encrypted preservation set; source completeness remains pending full pg_dump",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            }
+          }
         },
         {
           "id": "ro-site-supabase-storage",
@@ -276,8 +426,20 @@
           "containsPersonalData": true,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "evidence": {
+            "backup": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Storage API export captured 4 buckets, 420 objects and 410254132 object bytes; local SHA-256 manifest passed",
+              "limitation": "A second generation-aware source listing is still required before verified status",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            },
+            "offlineCopy": {
+              "capturedAt": "2026-08-04T18:51:00Z",
+              "method": "Storage export is included in the encrypted preservation set; generation parity remains pending",
+              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+            }
+          }
         },
         {
           "id": "ro-site-repository-and-runtime-config",
@@ -287,8 +449,26 @@
           "containsPersonalData": false,
           "retirementBlocker": true,
           "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
-          "evidence": {}
+          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T18:51:00Z",
+              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
+              "reportRef": "docs/cloud-consolidation-status.md#done"
+            }
+          }
         }
       ],
       "decommission": {

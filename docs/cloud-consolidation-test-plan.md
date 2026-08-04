@@ -74,6 +74,12 @@
 - [ ] backups mode passes before first shadow import.
 - [ ] decommission mode passes before any provider pause/delete.
 - [x] `node tests/version-smoke.js`
+- [x] Four Git bundles pass `git bundle verify`.
+- [x] Firestore and Firebase Storage SHA-256 manifests pass; second
+  generation listing reports no source changes.
+- [x] Railway server/local tar size and SHA-256 match; tar traversal passes.
+- [x] Encrypted preservation set passes SHA-256 generation and full
+  decrypt/tar traversal.
 - [ ] product-specific test suites and builds pass before each cutover.
 - [ ] restore drill and parity reports contain no unexplained mismatch.
 - [ ] rollback is executable and rehearsed.
@@ -106,10 +112,13 @@ implementation begins.
 ## Open risks
 
 - Railway Hobby Volume does not provide the required backup guarantees by
-  itself.
-- Managed Supabase database export is not equivalent to Storage/Auth export.
-- Firebase export tooling and bucket permissions must be proven with current
-  credentials.
+  itself; the manual snapshot is verified but restore rehearsal remains open.
+- Managed Supabase application-logical export preserves exposed tables, Auth
+  users and Storage bytes, but it is not a full PostgreSQL dump.
+- Yandex offsite copy is blocked until a service/browser account with access to
+  the target cloud is available.
+- Firestore/Firebase export integrity is proven, but isolated restore into a
+  disposable project is still required.
 - Vercel/foreign email/AI logs may require separate data-flow minimization even
   after primary data is in Russia.
 
