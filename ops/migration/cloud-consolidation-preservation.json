@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-04T16:00:00Z",
+  "policy": {
+    "primaryProvider": "yandex-cloud-ru",
+    "allowedSecondaryProviders": [
+      "vercel-telegram-relay"
+    ],
+    "physicalDeletionRequiresOwnerApproval": true,
+    "secretsAllowedInManifest": false
+  },
+  "systems": [
+    {
+      "id": "ro-calculator",
+      "repository": "polinacherpovitskaya-glitch/ro-calculator",
+      "productionUrls": [
+        "https://calc.recycleobject.ru/",
+        "https://calc2.recycleobject.ru/",
+        "https://api.recycleobject.ru/api/health"
+      ],
+      "targetProvider": "yandex-cloud-ru",
+      "configurationKeyNames": [
+        "OPS_BOT_TOKEN",
+        "TELEGRAM_RELAY_SECRET",
+        "TIMEBOT_TOKEN",
+        "VERCEL_ORG_ID",
+        "VERCEL_PROJECT_ID",
+        "VERCEL_TOKEN",
+        "YANDEX_VM_HOST",
+        "YANDEX_VM_SSH_PRIVATE_KEY",
+        "YANDEX_VM_USER",
+        "YC_OAUTH_TOKEN"
+      ],
+      "sources": [
+        {
+          "id": "ro-active-yandex-postgres",
+          "kind": "postgresql",
+          "provider": "yandex-cloud-ru",
+          "location": "ro-db / ro-platform-shadow-postgres",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-legacy-supabase-bundle",
+          "kind": "postgresql-and-storage",
+          "provider": "self-hosted-supabase-yandex",
+          "location": "ro-db / supabase-db + storage volume",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "captured", "cloudCopy": "captured", "offlineCopy": "pending", "restore": "captured", "parity": "captured"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-yandex-media",
+          "kind": "object-storage",
+          "provider": "yandex-cloud-ru",
+          "location": "ro-platform-media-b1gl59l77vb50ihub2nd",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "captured", "cloudCopy": "captured", "offlineCopy": "pending", "restore": "captured", "parity": "captured"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-timebot-state",
+          "kind": "docker-volume",
+          "provider": "yandex-cloud-ru",
+          "location": "ro-db / timebot-state",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-repository-and-runtime-config",
+          "kind": "git-bundle-and-encrypted-config",
+          "provider": "github-and-yandex",
+          "location": "ro-calculator repository + protected runtime env",
+          "containsPersonalData": false,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
+          "evidence": {}
+        }
+      ],
+      "decommission": {
+        "observationStatus": "pending",
+        "writesStoppedStatus": "pending",
+        "writesStoppedAt": null,
+        "approvalStatus": "pending",
+        "approvedBy": null,
+        "approvedAt": null
+      }
+    },
+    {
+      "id": "repanel-calculator",
+      "repository": "polinacherpovitskaya-glitch/cnc-calculator",
+      "productionUrls": [
+        "https://web-production-d2761c.up.railway.app/"
+      ],
+      "targetProvider": "yandex-cloud-ru",
+      "configurationKeyNames": [
+        "APP_STORAGE_BACKEND",
+        "FIREBASE_CREDENTIALS",
+        "FIREBASE_STORAGE_BUCKET",
+        "RAILWAY_SERVICE_ID",
+        "RAILWAY_VOLUME_MOUNT_PATH",
+        "REPANEL_DATA_DIR",
+        "TELEGRAM_BOT_TOKEN"
+      ],
+      "sources": [
+        {
+          "id": "repanel-firestore",
+          "kind": "document-database",
+          "provider": "google-cloud-firebase",
+          "location": "Firebase project repel-188e4 / Firestore",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-firebase-storage",
+          "kind": "object-storage",
+          "provider": "google-cloud-firebase",
+          "location": "Firebase project repel-188e4 / Storage",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-railway-volume",
+          "kind": "persistent-volume",
+          "provider": "railway",
+          "location": "aware-communication / web / web-volume",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-calculator-repository-and-runtime-config",
+          "kind": "git-bundle-and-encrypted-config",
+          "provider": "github-railway-google",
+          "location": "cnc-calculator repository + Railway/Firebase config",
+          "containsPersonalData": false,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
+          "evidence": {}
+        }
+      ],
+      "decommission": {
+        "observationStatus": "pending",
+        "writesStoppedStatus": "pending",
+        "writesStoppedAt": null,
+        "approvalStatus": "pending",
+        "approvedBy": null,
+        "approvedAt": null
+      }
+    },
+    {
+      "id": "repanel-site",
+      "repository": "polinacherpovitskaya-glitch/repanel-site",
+      "productionUrls": [
+        "https://re-panel.ru/",
+        "https://site.re-panel.ru/"
+      ],
+      "targetProvider": "yandex-cloud-ru",
+      "configurationKeyNames": [
+        "ADMIN_PASSWORD",
+        "ADMIN_TOKEN",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "YDB_CONNECTION_STRING",
+        "YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS"
+      ],
+      "sources": [
+        {
+          "id": "repanel-managed-supabase-database-auth",
+          "kind": "postgresql-and-auth",
+          "provider": "supabase-cloud",
+          "location": "cxnrraaiiczctdpmkbqk / eu-west-2",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-supabase-product-images",
+          "kind": "object-storage",
+          "provider": "supabase-cloud",
+          "location": "cxnrraaiiczctdpmkbqk / product-images",
+          "containsPersonalData": false,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-ydb-personal-data",
+          "kind": "ydb",
+          "provider": "yandex-cloud-ru",
+          "location": "repanel-personal-data / ru-central1",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "repanel-site-repository-and-runtime-config",
+          "kind": "git-bundle-and-encrypted-config",
+          "provider": "github-vercel-yandex",
+          "location": "repanel-site repository + Vercel/Yandex config",
+          "containsPersonalData": false,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
+          "evidence": {}
+        }
+      ],
+      "decommission": {
+        "observationStatus": "pending",
+        "writesStoppedStatus": "pending",
+        "writesStoppedAt": null,
+        "approvalStatus": "pending",
+        "approvedBy": null,
+        "approvedAt": null
+      }
+    },
+    {
+      "id": "recycle-object-site",
+      "repository": "polinacherpovitskaya-glitch/recycle-object-site",
+      "productionUrls": [
+        "https://recycleobject.ru/"
+      ],
+      "targetProvider": "yandex-cloud-ru",
+      "configurationKeyNames": [
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_WEBHOOK_SECRET",
+        "TELEGRAM_BOT_TOKEN",
+        "TOCHKA_JWT",
+        "YANDEX_DELIVERY_TOKEN"
+      ],
+      "sources": [
+        {
+          "id": "ro-site-managed-supabase-database-auth",
+          "kind": "postgresql-and-auth",
+          "provider": "supabase-cloud",
+          "location": "jbpmorruwjrxcieqlbmd / eu-central-1",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-site-supabase-storage",
+          "kind": "object-storage",
+          "provider": "supabase-cloud",
+          "location": "jbpmorruwjrxcieqlbmd / all site buckets",
+          "containsPersonalData": true,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
+          "evidence": {}
+        },
+        {
+          "id": "ro-site-repository-and-runtime-config",
+          "kind": "git-bundle-and-encrypted-config",
+          "provider": "github-vercel",
+          "location": "recycle-object-site repository + Vercel config",
+          "containsPersonalData": false,
+          "retirementBlocker": true,
+          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
+          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending"},
+          "evidence": {}
+        }
+      ],
+      "decommission": {
+        "observationStatus": "pending",
+        "writesStoppedStatus": "pending",
+        "writesStoppedAt": null,
+        "approvalStatus": "pending",
+        "approvedBy": null,
+        "approvedAt": null
+      }
+    }
+  ]
+}

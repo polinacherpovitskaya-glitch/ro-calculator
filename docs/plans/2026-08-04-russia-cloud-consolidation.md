@@ -47,8 +47,8 @@
 | ID | Title | Depends on | Status |
 | --- | --- | --- | --- |
 | M0 | Архитектурное решение и safety policy | — | [x] |
-| M1 | Preservation inventory и decommission guard | M0 | [~] |
-| M2 | Полные backup/restore drills всех источников | M1 | [ ] |
+| M1 | Preservation inventory и decommission guard | M0 | [x] |
+| M2 | Полные backup/restore drills всех источников | M1 | [~] |
 | M3 | Yandex landing zone для калькулятора RePanel | M2 | [ ] |
 | M4 | Калькулятор RePanel: shadow, parity, cutover | M3 | [ ] |
 | M5 | Сайт RePanel: shadow, parity, cutover | M4 | [ ] |
@@ -88,7 +88,7 @@ test -s docs/specs/2026-08-04-russia-cloud-consolidation.md
 
 - Любой новый foreign data processor добавляется в scope до миграции.
 
-## M1. Preservation inventory и decommission guard `[~]`
+## M1. Preservation inventory и decommission guard `[x]`
 
 ### Goal
 
@@ -97,13 +97,14 @@ test -s docs/specs/2026-08-04-russia-cloud-consolidation.md
 
 ### Tasks
 
-- [ ] Добавить non-secret inventory четырёх систем и всех источников данных.
-- [ ] Добавить preservation manifest со статусами backup/restore/parity.
-- [ ] Добавить Node validator с режимами `inventory` и `decommission`.
-- [ ] Добавить fail-closed тесты validator.
-- [ ] Добавить CI guard.
-- [ ] Зафиксировать GitHub secret-name inventory без значений.
-- [ ] Зафиксировать локальные env key names без значений.
+- [x] Добавить non-secret inventory четырёх систем и всех источников данных.
+- [x] Добавить preservation manifest со статусами backup/restore/parity.
+- [x] Добавить Node validator с режимами `inventory`, `backups` и
+  `decommission`.
+- [x] Добавить fail-closed тесты validator.
+- [x] Добавить CI guard.
+- [x] Зафиксировать GitHub secret-name inventory без значений.
+- [x] Зафиксировать локальные env key names без значений.
 
 ### Definition of done
 

@@ -69,11 +69,11 @@
 
 ## Acceptance gates
 
-- [ ] `node tests/cloud-consolidation-preservation-smoke.js`
-- [ ] inventory mode passes.
+- [x] `node tests/cloud-consolidation-preservation-smoke.js`
+- [x] inventory mode passes.
 - [ ] backups mode passes before first shadow import.
 - [ ] decommission mode passes before any provider pause/delete.
-- [ ] `node tests/version-smoke.js`
+- [x] `node tests/version-smoke.js`
 - [ ] product-specific test suites and builds pass before each cutover.
 - [ ] restore drill and parity reports contain no unexplained mismatch.
 - [ ] rollback is executable and rehearsed.

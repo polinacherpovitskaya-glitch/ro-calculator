@@ -2,10 +2,10 @@
 
 ## Snapshot
 
-- Current phase: M1 — preservation inventory и decommission guard.
+- Current phase: M2 — полные backup/restore drills всех источников.
 - Plan file: `docs/plans/2026-08-04-russia-cloud-consolidation.md`.
-- Status: yellow; production не изменён, полный cross-provider backup ещё не
-  подтверждён.
+- Status: yellow; preservation guard зелёный, production не изменён, полный
+  cross-provider backup ещё не подтверждён.
 - Last updated: 2026-08-04.
 
 ## Done
@@ -20,18 +20,26 @@
   Firestore/Firebase Storage и Railway Volume.
 - Создан чистый worktree от свежего `origin/main`; локальный dirty worktree не
   изменён.
+- Добавлен non-secret inventory четырёх продуктов и 16 обязательных источников.
+- Добавлен preservation manifest с отдельными backup/cloud/offline/restore/
+  parity gates.
+- Добавлен validator в режимах `inventory`, `backups` и `decommission`.
+- Подтверждено, что pending backup и отсутствие owner approval блокируют
+  decommission.
+- Добавлен CI preservation guard и включён inventory check в основной verify.
+- Версия приложения поднята с v433 до v434 по четырём обязательным anchors.
 
 ## In progress
 
-- Non-secret inventory источников и обязательных backup evidence.
-- Машинно-проверяемый preservation manifest.
-- Fail-closed decommission guard и smoke tests.
+- Проверка доступности provider export tooling и действующих credentials без
+  вывода значений.
+- Свежий backup калькулятора RO.
+- Подготовка полного Firestore/Firebase/Railway export калькулятора RePanel.
 
 ## Next
 
-- Завершить M1 и получить первый structural inventory report.
-- Затем начать M2 с актуального backup калькулятора RO и provider exports
-  калькулятора RePanel.
+- Получить актуальный backup калькулятора RO и записать evidence.
+- Выполнить provider exports калькулятора RePanel и restore drill.
 
 ## Decisions made
 
@@ -77,11 +85,13 @@ node tests/version-smoke.js
 | 2026-08-04 | M1 | Fresh `origin/main` worktree | `git fetch`, `git worktree add` | clean branch created | preservation guard |
 | 2026-08-04 | M1 | GitHub secret-name inventory | `gh secret list` | RO secrets present; other repos empty | plan M2 credentials |
 | 2026-08-04 | M1 | Local env key inventory | key names only | no values exposed | encode required evidence |
+| 2026-08-04 | M1 | Manifest, validator, tests, CI | Node checks, inventory, negative backup/decommission modes, YAML parse | pass; fail-closed confirmed | M2 provider exports |
 
 ## Smoke / demo checklist
 
 - [x] Existing production URLs remain HTTP 200.
 - [x] No provider or dataset has been deleted, paused or overwritten.
-- [ ] Preservation inventory validates structurally.
-- [ ] Decommission mode fails closed while backups are pending.
-- [ ] Every source has a named owner, export, checksum and restore requirement.
+- [x] Preservation inventory validates structurally.
+- [x] Decommission mode fails closed while backups are pending.
+- [x] Every source has a named provider, location, export, checksum and restore
+  requirement.

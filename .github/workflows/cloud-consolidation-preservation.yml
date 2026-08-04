@@ -1,0 +1,57 @@
+name: Cloud consolidation preservation guard
+
+on:
+  pull_request:
+    paths:
+      - 'ops/migration/cloud-consolidation-preservation.json'
+      - 'scripts/cloud-consolidation/**'
+      - 'tests/cloud-consolidation-preservation-smoke.js'
+      - '.github/workflows/cloud-consolidation-preservation.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'ops/migration/cloud-consolidation-preservation.json'
+      - 'scripts/cloud-consolidation/**'
+      - 'tests/cloud-consolidation-preservation-smoke.js'
+      - '.github/workflows/cloud-consolidation-preservation.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: inventory, backups or decommission
+        required: false
+        default: inventory
+        type: choice
+        options:
+          - inventory
+          - backups
+          - decommission
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run fail-closed preservation tests
+        run: node tests/cloud-consolidation-preservation-smoke.js
+
+      - name: Validate preservation manifest
+        env:
+          PRESERVATION_MODE: ${{ github.event.inputs.mode || 'inventory' }}
+        run: |
+          node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
+            ops/migration/cloud-consolidation-preservation.json \
+            --mode="$PRESERVATION_MODE"
