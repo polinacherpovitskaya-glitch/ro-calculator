@@ -48,7 +48,7 @@
 | --- | --- | --- | --- |
 | M0 | Архитектурное решение и safety policy | — | [x] |
 | M1 | Preservation inventory и decommission guard | M0 | [x] |
-| M2 | Полные backup/restore drills всех источников | M1 | [~] |
+| M2 | Полные backup/restore drills всех источников | M1 | [x] |
 | M3 | Yandex landing zone для калькулятора RePanel | M2 | [ ] |
 | M4 | Калькулятор RePanel: shadow, parity, cutover | M3 | [ ] |
 | M5 | Сайт RePanel: shadow, parity, cutover | M4 | [ ] |
@@ -130,7 +130,7 @@ node tests/cloud-consolidation-preservation-smoke.js
 - Не начинать provider export, пока inventory не перечисляет его данные,
   файлы, auth и runtime state.
 
-## M2. Полные backup/restore drills всех источников `[ ]`
+## M2. Полные backup/restore drills всех источников `[x]`
 
 ### Goal
 
@@ -139,16 +139,16 @@ node tests/cloud-consolidation-preservation-smoke.js
 
 ### Tasks
 
-- [ ] Обновить backup калькулятора RO и подтвердить текущий Yandex PostgreSQL,
+- [x] Обновить backup калькулятора RO и подтвердить текущий Yandex PostgreSQL,
   legacy Supabase, Storage и timebot state.
 - [x] Экспортировать RePanel Firestore, Firebase Storage и Railway Volume.
-- [ ] Экспортировать managed Supabase + Storage сайта RePanel и YDB.
-- [ ] Экспортировать managed Supabase + Storage сайта Recycle Object, включая
+- [x] Экспортировать managed Supabase + Storage сайта RePanel и YDB.
+- [x] Экспортировать managed Supabase + Storage сайта Recycle Object, включая
   auth/admin state.
 - [x] Создать Git bundles всех четырёх release commits.
 - [x] Сгенерировать SHA-256 manifests и зашифрованную офлайн-копию.
-- [ ] Загрузить копии в private versioned Yandex backup bucket.
-- [ ] Восстановить каждый DB/file bundle в изолированную среду и записать
+- [x] Загрузить копии в private versioned Yandex backup bucket.
+- [x] Восстановить каждый DB/file bundle в изолированную среду и записать
   counts/checksums.
 
 ### Definition of done
