@@ -70,6 +70,7 @@ jobs:
           node tests/bootstrap-guard-smoke.js
           node tests/yandex-backup-workflow-smoke.js
           node tests/cloud-consolidation-preservation-smoke.js
+          node tests/supabase-preservation-export-smoke.js
           node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
             ops/migration/cloud-consolidation-preservation.json \
             --mode=inventory

@@ -46,7 +46,9 @@ jobs:
           node-version: '24'
 
       - name: Run fail-closed preservation tests
-        run: node tests/cloud-consolidation-preservation-smoke.js
+        run: |
+          node tests/cloud-consolidation-preservation-smoke.js
+          node tests/supabase-preservation-export-smoke.js
 
       - name: Validate preservation manifest
         env:
