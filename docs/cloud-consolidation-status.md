@@ -2,10 +2,11 @@
 
 ## Snapshot
 
-- Current phase: M2 — полные backup/restore drills всех источников.
+- Current phase: M3 — Yandex landing zone для калькулятора RePanel.
 - Plan file: `docs/plans/2026-08-04-russia-cloud-consolidation.md`.
-- Status: yellow; локальный зашифрованный preservation set проверен,
-  production не изменён, Yandex offsite copy и restore drills ещё не завершены.
+- Status: green for M2; все 16 источников имеют проверенные backup, Yandex
+  offsite copy, offline copy, restore и source-parity evidence. Production не
+  изменён; M3 ещё не начат.
 - Last updated: 2026-08-04.
 
 ## Done
@@ -56,22 +57,48 @@
 - Временные Supabase/Yandex CLI access tokens отозваны, локальные profiles и
   временные файлы с API keys удалены.
 
+## M2 evidence
+
+- Все четыре encrypted archives повторно прошли `SHA256SUMS`: общий
+  preservation set, YDB export, managed Supabase full dumps и RO platform
+  backup.
+- Все архивы загружены в private versioned bucket
+  `ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd`, скачаны обратно и
+  совпали по SHA-256.
+- Managed Supabase RePanel восстановлен в изолированном PostgreSQL 17.6:
+  48 таблиц, public 10 таблиц / 7 строк.
+- Managed Supabase Recycle Object восстановлен в изолированном PostgreSQL
+  17.6: 107 таблиц, public 65 таблиц / 43 165 строк, `auth.users` 1 строка.
+- Firestore export загружен в локальный emulator: 23 root collections и
+  55 140 документов. Firebase Storage: 4 010 объектов, все checksum entries
+  совпали.
+- Railway Volume запустил текущий RePanel-код на изолированной копии:
+  `/health` 200, principal stores загружены.
+- Active Yandex PostgreSQL восстановлен: 66 таблиц / 95 029 строк. Legacy
+  Supabase: 103 таблицы / 43 593 строки. Storage: 420 файлов / 410 254 132
+  байта. Timebot: 4 файла / 29 415 байт.
+- YDB backup `etn3vo50868nb3fmbofu` восстановлен в отдельную защищённую базу
+  `etn75mh40qa5pto3kt0c`; таблица `personal_data_records` содержит ожидаемые
+  6 строк.
+- Четыре Git bundle клонированы в bare repositories и прошли `git fsck
+  --full` + `git bundle verify`.
+- Полный внешний отчёт без значений secrets хранится в локальном
+  `PRESERVATION-STATUS.md`; manifest содержит машинно-проверяемые ссылки на
+  checksums, counts и restore evidence.
+
 ## In progress
 
-- Получение downloadable full PostgreSQL dump managed Supabase; текущие
-  application-logical exports не включают roles, extensions, triggers,
-  functions, RLS и unexposed schemas.
-- Yandex offsite upload encrypted preservation set.
-- Изолированные restore drills Firestore, Firebase Storage, Railway Volume и
-  managed Supabase exports.
+- Подготовка отдельной M3 spec/plan branch в `cnc-calculator`.
+- Выбор минимального российского runtime, persistent storage и shadow hostname
+  для RePanel calculator без production writes.
 
 ## Next
 
-- Получить доступ к Yandex Cloud account/service account, который видит cloud
-  `b1gl59l77vb50ihub2nd`, и загрузить encrypted set в private versioned bucket.
-- Получить DB passwords или официальный downloadable logical dump обоих
-  managed Supabase projects без reset production credentials.
-- Выполнить restore drills и только после них переходить к Yandex landing zone.
+- Поднять изолированный RePanel shadow runtime в Yandex без Railway/Firebase
+  credentials.
+- Проверить persistence после restart, `/health`, logs, backup и restore
+  automation.
+- Не выполнять data import/cutover, пока shadow storage не подтверждён.
 
 ## Decisions made
 
@@ -85,28 +112,24 @@
 
 ## Assumptions in force
 
-- Доступы к Supabase, Railway и Google dashboards доступны на чтение; Yandex
-  browser account `panels@recycleobject.com` не зарегистрирован в Yandex Cloud.
+- Доступы к Supabase, Railway и Google остаются доступными на чтение как
+  rollback-копии до окончания окна наблюдения.
 - Локальные `.env` используются только как источник key-name inventory;
   значения не копируются и не выводятся.
-- Existing Yandex backup bucket остаётся private и versioned.
+- Yandex backup bucket остаётся private и versioned; restore-drill databases и
+  Docker volumes защищены от случайного production traffic.
 
 ## Current blockers
 
-- Нет локального/Yandex service-account доступа к cloud
-  `b1gl59l77vb50ihub2nd`; поэтому encrypted offsite copy в Yandex пока не
-  загружена.
-- У managed Supabase projects нет доступного DB password, а dashboard physical
-  backup поддерживает restore внутри Supabase, но не downloadable full dump.
-- RePanel YDB export ещё не выполнен.
-- Restore drills всех stateful sources ещё не выполнены; сохранённые production
-  providers остаются включены как rollback copies.
+- M2 blockers отсутствуют.
+- Для M3 ещё не утверждён конкретный shadow hostname; это не блокирует создание
+  внутреннего runtime и health check на Yandex.
 
 ## Commands
 
 ```sh
 node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
-  ops/migration/cloud-consolidation-preservation.json --mode=inventory
+  ops/migration/cloud-consolidation-preservation.json --mode=backups
 node tests/cloud-consolidation-preservation-smoke.js
 node tests/version-smoke.js
 ```
@@ -126,6 +149,12 @@ node tests/version-smoke.js
 | 2026-08-04 | M2 | Firestore + Firebase Storage | managed export, generation-pinned download, second source listing, SHA-256 | 55 140 docs; 4 445 local objects verified | isolated restore |
 | 2026-08-04 | M2 | Two managed Supabase projects | managed physical backup audit + application-logical export | tables/Auth/Storage captured; full pg_dump pending | obtain DB dump |
 | 2026-08-04 | M2 | Encrypted offline set | AES-256-CBC PBKDF2, SHA-256, full decrypt/tar traversal | 5 418 823 712 bytes verified | Yandex offsite upload |
+| 2026-08-04 | M2 | Yandex private versioned backup bucket | four encrypted uploads + complete read-back SHA-256 | all four remote copies verified | restore drills |
+| 2026-08-04 | M2 | Managed Supabase projects | full `pg_dump`, isolated PostgreSQL 17.6 restores | RePanel 48 tables; Recycle Object 107 tables; logical/Auth parity | retain managed sources |
+| 2026-08-04 | M2 | Firestore, Firebase Storage, Railway | emulator import, per-object checksums, isolated app boot | 55 140 docs; 4 010 objects; `/health` 200 | retain providers |
+| 2026-08-04 | M2 | RO PostgreSQL, legacy Supabase, Storage, timebot | isolated DB/file restores | all counts/checksums verified | retain rollback copies |
+| 2026-08-04 | M2 | YDB backup | restore API + direct YDB CLI count | protected restore DB, 6/6 rows | retain source and restore DB |
+| 2026-08-04 | M2 | Four Git bundles | bare clone, `git fsck --full`, `git bundle verify` | all four verified | M3 |
 
 ## Smoke / demo checklist
 
@@ -133,9 +162,10 @@ node tests/version-smoke.js
 - [x] No provider or dataset has been deleted, paused or overwritten.
 - [x] Temporary provider access tokens created during preservation were revoked.
 - [x] Preservation inventory validates structurally.
-- [x] Decommission mode fails closed while backups are pending.
+- [x] Decommission mode fails closed while observation/write-stop/owner approval
+  are pending.
 - [x] Every source has a named provider, location, export, checksum and restore
   requirement.
 - [x] Encrypted preservation set can be fully decrypted and traversed.
-- [ ] Encrypted preservation set has a verified Yandex offsite copy.
-- [ ] Every stateful source has passed an isolated restore drill.
+- [x] Encrypted preservation set has a verified Yandex offsite copy.
+- [x] Every stateful source has passed an isolated restore drill.

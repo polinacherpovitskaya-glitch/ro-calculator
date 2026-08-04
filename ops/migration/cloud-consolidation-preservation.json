@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-04T18:52:02Z",
+  "updatedAt": "2026-08-04T21:49:09Z",
   "policy": {
     "primaryProvider": "yandex-cloud-ru",
     "allowedSecondaryProviders": [
@@ -39,9 +39,54 @@
           "location": "ro-db / ro-platform-shadow-postgres",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fresh PostgreSQL 16 custom-format dump captured from the active Yandex target; dump SHA-256 8103c56c1a2b6783d9bda247b1aeda9c87d6eedb886fdf3f658cb1fa7fc4470b and pg_restore catalog validation passed",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/ro-platform-full-20260804T212249Z.tar.enc",
+                "sha256": "c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+                "bytes": 438097952,
+                "createdAt": "2026-08-04T21:22:49Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "RO platform archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The active Yandex PostgreSQL dump and count report are inside the locally verified encrypted RO platform archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored with --exit-on-error into an isolated PostgreSQL 16 container with no network or published port; 66 tables and 95029 rows were readable",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The dump matched the GitHub Actions and VM SHA-256 evidence; all 66 tables and 95029 rows were recovered from that exact artifact",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            }
+          }
         },
         {
           "id": "ro-legacy-supabase-bundle",
@@ -50,9 +95,54 @@
           "location": "ro-db / supabase-db + storage volume",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "captured", "cloudCopy": "captured", "offlineCopy": "pending", "restore": "captured", "parity": "captured"},
-          "evidence": {}
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fresh self-hosted Supabase PostgreSQL dump plus Storage volume snapshot captured from ro-db; database SHA-256 5f80a1bb32fe399a85364d7148c504612af7ea3e48fe74e35632c5ff0b9991ab",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/ro-platform-full-20260804T212249Z.tar.enc",
+                "sha256": "c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+                "bytes": 438097952,
+                "createdAt": "2026-08-04T21:22:49Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "RO platform archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The legacy database dump, Storage tar and restore reports are inside the locally verified encrypted RO platform archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored into isolated Supabase PostgreSQL 17.6.1.136 with 103 tables and 43593 rows; Storage extraction recovered 420 files and 410254132 bytes",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fresh source snapshots, workflow checksums and restored database/file counts agree; the Storage tar SHA-256 matches the workflow artifact",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            }
+          }
         },
         {
           "id": "ro-yandex-media",
@@ -61,9 +151,54 @@
           "location": "ro-platform-media-b1gl59l77vb50ihub2nd",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "captured", "cloudCopy": "captured", "offlineCopy": "pending", "restore": "captured", "parity": "captured"},
-          "evidence": {}
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Private media baseline is preserved by the fresh 420-object Storage archive; Yandex media bucket versioning is enabled",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/ro-platform-full-20260804T212249Z.tar.enc",
+                "sha256": "c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+                "bytes": 438097952,
+                "createdAt": "2026-08-04T21:22:49Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "RO platform archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The 420-object media baseline and its checksum evidence are inside the locally verified encrypted RO platform archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The media snapshot extracted successfully as 420 files and 410254132 bytes in an isolated directory",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Existing Yandex migration evidence records 420 of 420 objects and 410254132 bytes with a matching checksum manifest",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            }
+          }
         },
         {
           "id": "ro-timebot-state",
@@ -72,9 +207,54 @@
           "location": "ro-db / timebot-state",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fresh timebot state archive captured from ro-db; SHA-256 89b055877160dbf7f8f40c2d66c343ad6b5bb1acad314c5dc3ea7932f765c211",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/ro-platform-full-20260804T212249Z.tar.enc",
+                "sha256": "c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+                "bytes": 438097952,
+                "createdAt": "2026-08-04T21:22:49Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "RO platform archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched c614da9a3ec7659e3042ba17f55906a5a5bcc003016e323e475bf99841a1de3e",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The timebot state tar and count report are inside the locally verified encrypted RO platform archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The timebot state archive extracted successfully as 4 files and 29415 bytes in an isolated directory",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The restored file count and bytes were computed from the exact fresh source archive and its verified SHA-256",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            }
+          }
         },
         {
           "id": "ro-repository-and-runtime-config",
@@ -83,13 +263,23 @@
           "location": "ro-calculator repository + protected runtime env",
           "containsPersonalData": false,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fetched ro-calculator Git bundle, dirty/untracked working-tree snapshot and encrypted runtime configuration were captured",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -98,10 +288,20 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The encrypted offline preservation set passed full decryption and tar traversal and contains the repository/configuration backup",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "ro-calculator.bundle cloned as an isolated bare repository, passed git fsck --full and git bundle verify; restored HEAD 26cd52c5822de6d49932da045949f7b548aee398",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         }
@@ -139,13 +339,25 @@
           "location": "Firebase project repel-188e4 / Firestore",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Managed export downloaded with generation pinning; 435 objects and 74007377 source bytes passed SHA-256 verification; source listing stayed unchanged",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Managed Firestore export captured 55140 documents in 435 export objects; every object and manifest checksum passed",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -154,10 +366,25 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Encrypted offline preservation set passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The Firestore managed export is inside the locally verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Firestore Emulator 1.22.0 imported the managed export through --seed_from_export; 23 root collections and exactly 55140 documents were readable",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored document count exactly matched the managed export operation count; the generation-pinned source listing stayed unchanged during capture",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -168,13 +395,25 @@
           "location": "Firebase project repel-188e4 / Storage",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "4010 generation-pinned objects and 2788529164 source bytes passed SHA-256 verification; source listing stayed unchanged",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Generation-pinned Firebase Storage export captured 4010 objects and 2788529164 object bytes; all 4011 checksum entries passed",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -183,10 +422,25 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Encrypted offline preservation set passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The Firebase Storage object export is inside the locally verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "All 4010 object files were extracted in isolation and all 4011 object/manifest SHA-256 entries verified",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored object count, bytes and checksums match the generation-pinned source export; the second source listing showed no change",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -197,25 +451,52 @@
           "location": "aware-communication / web / web-volume",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Railway /app/data archive matched the server size and SHA-256 and passed complete tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Railway /app/data archive matched the server size and SHA-256 6aeeedc9544561c9acbf150fc063be807c8b9f6e75466f211b7c2114725988ca",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
-                "location": "offline://railway-volume-20260804T180600Z/repanel-railway-volume-20260804T180600Z.tar",
-                "sha256": "6aeeedc9544561c9acbf150fc063be807c8b9f6e75466f211b7c2114725988ca",
-                "bytes": 246200320,
-                "createdAt": "2026-08-04T18:06:00Z",
-                "encrypted": false
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "The verified Railway archive was included in the encrypted offline preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The Railway volume snapshot is inside the locally verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Current RePanel code started against the isolated restored copy with local_json storage and no production credentials; /health returned 200 and principal stores loaded",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored 332 files and 245926154 extracted bytes; representative store counts matched the preserved source data",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -226,13 +507,23 @@
           "location": "cnc-calculator repository + Railway/Firebase config",
           "containsPersonalData": false,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fetched cnc-calculator Git bundle, dirty/untracked working-tree snapshot and encrypted Railway/Firebase configuration were captured",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -241,10 +532,20 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The encrypted offline preservation set passed full decryption and tar traversal and contains the repository/configuration backup",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "repanel-calculator.bundle cloned as an isolated bare repository, passed git fsck --full and git bundle verify; restored HEAD 6d9ff5c6cfb820ad036ae660da618f0bc7726055",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         }
@@ -283,19 +584,52 @@
           "location": "cxnrraaiiczctdpmkbqk / eu-west-2",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Current application-logical export captured 10 exposed tables, 7 rows and 0 Auth users; managed physical backup from 2026-08-02 exists",
-              "limitation": "Full pg_dump is still required for roles, extensions, triggers, functions, RLS and unexposed schemas",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Full PostgreSQL 17.6 custom-format pg_dump captured all managed Supabase schemas; dump SHA-256 b86b2fcb5c2c51355b21e3619e1643a29b336275329ae10d0d556de04563682e and 436 catalog entries",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/managed-supabase-full-20260804T205750Z.tar.enc",
+                "sha256": "a155b05a1de2460010a351f417c70a332ea8f8887aafa3c978db035ac8601099",
+                "bytes": 16547872,
+                "createdAt": "2026-08-04T20:57:50Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Managed Supabase archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched a155b05a1de2460010a351f417c70a332ea8f8887aafa3c978db035ac8601099",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             },
             "offlineCopy": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Logical export is included in the encrypted preservation set; source completeness remains pending full pg_dump",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The full managed Supabase dump and restore count report are inside the locally verified encrypted managed-Supabase archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored with --exit-on-error into isolated Supabase PostgreSQL 17.6.1.136; 48 tables overall, public 10 tables and 7 rows",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored public table and row counts match the independently captured application-logical export; Auth has 0 users",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -306,13 +640,25 @@
           "location": "cxnrraaiiczctdpmkbqk / product-images",
           "containsPersonalData": false,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Storage API export verified the product-images bucket exists and currently contains zero objects",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Storage API captured the product-images bucket metadata and confirmed zero source objects",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -321,10 +667,25 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Bucket metadata and SHA-256 manifest are included in the verified encrypted preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Bucket metadata and SHA-256 manifest are inside the locally verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The isolated Storage restore drill traversed and verified the bucket manifest; the empty object set is reproducible",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The restored object count of zero matches the source Storage API listing captured at backup time",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -335,9 +696,54 @@
           "location": "repanel-personal-data / ru-central1",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "pending", "cloudCopy": "pending", "offlineCopy": "pending", "restore": "pending", "parity": "pending"},
-          "evidence": {}
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
+          "evidence": {
+            "backup": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "YDB user backup etn3vo50868nb3fmbofu reached READY and the encrypted logical export preserved schema plus 6 rows; source database deletion protection and daily backups are enabled",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/ydb-repanel-personal-data-20260804T200708Z.tar.enc",
+                "sha256": "35393006faa50164daa9a3d8cef7cbfc99e1162b9b39afdad3b6581fbe7fc585",
+                "bytes": 30752,
+                "createdAt": "2026-08-04T20:07:08Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "YDB encrypted export was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched 35393006faa50164daa9a3d8cef7cbfc99e1162b9b39afdad3b6581fbe7fc585",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "offlineCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The YDB schema and 6-row logical export are inside the locally verified encrypted YDB archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The user backup restored into separate protected serverless database etn75mh40qa5pto3kt0c; direct YDB CLI validation found personal_data_records with exactly 6 rows",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The restored table and 6-row count exactly match the encrypted source export; no personal row bodies were printed during validation",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            }
+          }
         },
         {
           "id": "repanel-site-repository-and-runtime-config",
@@ -346,13 +752,23 @@
           "location": "repanel-site repository + Vercel/Yandex config",
           "containsPersonalData": false,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fetched repanel-site Git bundle, dirty/untracked working-tree snapshot and encrypted Vercel/Yandex configuration were captured",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -361,10 +777,20 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The encrypted offline preservation set passed full decryption and tar traversal and contains the repository/configuration backup",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "repanel-site.bundle cloned as an isolated bare repository, passed git fsck --full and git bundle verify; restored HEAD 39a93a0b7d7e73112b0fd5ddec0a3bafe3ffb44f",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         }
@@ -402,19 +828,52 @@
           "location": "jbpmorruwjrxcieqlbmd / eu-central-1",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Current application-logical export captured 65 exposed tables, 43165 rows and 1 Auth user; managed physical backup from 2026-08-04 exists",
-              "limitation": "Full pg_dump is still required for roles, extensions, triggers, functions, RLS and unexposed schemas",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Full PostgreSQL 17.6 custom-format pg_dump captured all managed Supabase schemas including Auth; dump SHA-256 88f089554be25cbdc0634254f9431f71ecc539627d4d69321a32cede43c993a8 and 940 catalog entries",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/managed-supabase-full-20260804T205750Z.tar.enc",
+                "sha256": "a155b05a1de2460010a351f417c70a332ea8f8887aafa3c978db035ac8601099",
+                "bytes": 16547872,
+                "createdAt": "2026-08-04T20:57:50Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Managed Supabase archive was uploaded to the private versioned Yandex Object Storage bucket and downloaded again; read-back SHA-256 matched a155b05a1de2460010a351f417c70a332ea8f8887aafa3c978db035ac8601099",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             },
             "offlineCopy": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Logical export is included in the encrypted preservation set; source completeness remains pending full pg_dump",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The full managed Supabase dump and restore count report are inside the locally verified encrypted managed-Supabase archive",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored with --exit-on-error into isolated Supabase PostgreSQL 17.6.1.136; 107 tables overall, public 65 tables and 43165 rows, auth.users 1 row",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Restored public and Auth counts match the independently captured application-logical export",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -425,19 +884,52 @@
           "location": "jbpmorruwjrxcieqlbmd / all site buckets",
           "containsPersonalData": true,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore", "parity"],
-          "checks": {"backup": "captured", "cloudCopy": "pending", "offlineCopy": "captured", "restore": "pending", "parity": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore",
+            "parity"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified",
+            "parity": "verified"
+          },
           "evidence": {
             "backup": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Storage API export captured 4 buckets, 420 objects and 410254132 object bytes; local SHA-256 manifest passed",
-              "limitation": "A second generation-aware source listing is still required before verified status",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Storage API export captured all 4 buckets, 420 objects and 410254132 object bytes with a verified per-object SHA-256 manifest",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
+              "artifact": {
+                "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
+                "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+                "bytes": 5418823712,
+                "createdAt": "2026-08-04T18:49:12Z",
+                "encrypted": true
+              }
+            },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             },
             "offlineCopy": {
-              "capturedAt": "2026-08-04T18:51:00Z",
-              "method": "Storage export is included in the encrypted preservation set; generation parity remains pending",
-              "reportRef": "docs/cloud-consolidation-status.md#current-blockers"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The complete managed Supabase Storage export and checksum manifest are inside the locally verified encrypted preservation set",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The corresponding fresh Storage snapshot extracted as 420 files and 410254132 bytes; all preserved object checksums were traversed and verified",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "parity": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Managed source export and restored Storage snapshot have identical 4-bucket, 420-object and 410254132-byte baselines",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         },
@@ -448,13 +940,23 @@
           "location": "recycle-object-site repository + Vercel config",
           "containsPersonalData": false,
           "retirementBlocker": true,
-          "requiredChecks": ["backup", "cloudCopy", "offlineCopy", "restore"],
-          "checks": {"backup": "verified", "cloudCopy": "pending", "offlineCopy": "verified", "restore": "pending"},
+          "requiredChecks": [
+            "backup",
+            "cloudCopy",
+            "offlineCopy",
+            "restore"
+          ],
+          "checks": {
+            "backup": "verified",
+            "cloudCopy": "verified",
+            "offlineCopy": "verified",
+            "restore": "verified"
+          },
           "evidence": {
             "backup": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "Fetched Git bundle, dirty/untracked working-tree snapshot and encrypted configuration were included in the verified preservation set",
-              "reportRef": "docs/cloud-consolidation-status.md#done",
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Fetched recycle-object-site Git bundle, dirty/untracked working-tree snapshot and encrypted Vercel configuration were captured",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence",
               "artifact": {
                 "location": "offline://2026-08-04-encrypted/preservation-set-20260804T185000Z.tar.enc",
                 "sha256": "6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
@@ -463,10 +965,20 @@
                 "encrypted": true
               }
             },
+            "cloudCopy": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "Encrypted preservation set was uploaded to the private versioned Yandex Object Storage bucket and downloaded completely; read-back SHA-256 matched 6ba64d98b78f365c6df6f30ac2d57a3d303819589bb67b52e49ad284e9849aaa",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
             "offlineCopy": {
-              "verifiedAt": "2026-08-04T18:51:00Z",
-              "method": "AES-256-CBC PBKDF2 archive passed full decrypt and tar traversal",
-              "reportRef": "docs/cloud-consolidation-status.md#done"
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "The encrypted offline preservation set passed full decryption and tar traversal and contains the repository/configuration backup",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
+            },
+            "restore": {
+              "verifiedAt": "2026-08-04T21:49:09Z",
+              "method": "recycle-object-site.bundle cloned as an isolated bare repository, passed git fsck --full and git bundle verify; restored HEAD 00e804564484a3c59f8e00b38c03dae4f1594fe9",
+              "reportRef": "docs/cloud-consolidation-status.md#m2-evidence"
             }
           }
         }

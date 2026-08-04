@@ -31,7 +31,13 @@ function verifiedEvidence(check, sourceId) {
 
   assert.deepEqual(validateManifest(manifest, { mode: 'inventory' }), []);
 
-  const backupErrors = validateManifest(manifest, { mode: 'backups' });
+  const pending = structuredClone(manifest);
+  const pendingSource = pending.systems[0].sources[0];
+  const pendingCheck = pendingSource.requiredChecks[0];
+  pendingSource.checks[pendingCheck] = 'pending';
+  delete pendingSource.evidence[pendingCheck];
+
+  const backupErrors = validateManifest(pending, { mode: 'backups' });
   assert.ok(backupErrors.length > 0, 'pending preservation checks must block backups mode');
   assert.ok(
     backupErrors.some((error) => error.includes('must be verified in backups mode')),
