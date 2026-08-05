@@ -1,60 +1,51 @@
-# Yandex AI runtime cutover for `recycleobject.ru`
+# Final disposition of the unused AI description runtime
 
 ## Context
 
-После переноса database/Auth/Storage сайта Recycle Object в Yandex последней
-обнаруженной production-зависимостью от Google оставался административный
-генератор описаний товаров. Он отправлял в Gemini название, категорию и полное
-изображение товара. Браузер каждого посетителя также загружал Montserrat и
-Alfa Slab One с Google Fonts.
+После переноса database/Auth/Storage сайта Recycle Object в Yandex аудит
+обнаружил административный генератор описаний товаров на Google Gemini. В
+рамках удаления Google runtime его сначала подготовили к text-only YandexGPT,
+а Google Fonts заменили на локальные Fontsource assets.
 
-Целевой постоянный perimeter уже согласован владельцем: Yandex Cloud, Vercel и
-Telegram. Vercel остаётся разрешённым frontend/runtime, но AI и customer data
-не должны требовать Google Cloud или доступа к Google endpoints из России.
+Владелец подтвердил, что команда генератором описаний не пользуется. Поэтому
+финальное решение — не поддерживать второй AI runtime, а полностью удалить
+неиспользуемую функцию и оба набора credentials.
 
 ## Decision
 
-- Генерация описаний выполняется через YandexGPT 5 Lite в том же российском
-  Yandex folder, что и остальная инфраструктура.
-- Отдельный service account получает только роль `ai.languageModels.user`, а
-  API key ограничен scope `yc.ai.languageModels.execute` и сроком действия.
-- В AI отправляются только нормализованные название и категория товара. Фото,
-  Storage URL и binary data не передаются.
-- Для запроса явно задан `x-data-logging-enabled: false`.
+- Описания товаров остаются обычным ручным полем в админке.
+- Кнопка AI, client handler и route `/api/admin/generate-description` удалены.
+- `GEMINI_API_KEY`, `YANDEX_AI_API_KEY` и `YANDEX_AI_FOLDER_ID` отсутствуют во
+  всех Vercel environments.
+- Неиспользованный scoped Yandex API key удалён; service account оставлен без
+  ключей и не участвует в runtime.
 - Montserrat и Alfa Slab One поставляются внутри Vercel build через Fontsource;
-  browser runtime больше не обращается к Google Fonts.
-- `GEMINI_API_KEY` удаляется из Vercel только после успешного production deploy
-  и контрольной генерации через YandexGPT.
+  browser runtime не обращается к Google Fonts.
 
 ## Scope boundaries
 
-- База данных, Auth, Storage, платежи и webhook state не изменяются.
-- Managed Supabase, Google/Firebase и другие rollback sources этим изменением
-  физически не удаляются.
+- Существующие названия и описания товаров не переписываются.
+- База данных, Auth, Storage, платежи, cron и webhook state не изменяются.
+- Managed Supabase, Railway, Google/Firebase и другие rollback sources этим
+  изменением физически не удаляются.
 - Одноразовые локальные image-generation scripts не являются production
-  runtime и не входят в этот cutover; они не получают Vercel credentials.
-- Реальный платёж, отправка Telegram/email и создание заказа в smoke не
-  выполняются.
+  runtime и не получают Vercel credentials.
 
 ## Security and rollback
 
-- Значение Yandex API key не попадает в Git, логи, manifests или smoke output.
-- Ошибки route логируют только HTTP status, request id или класс исключения,
-  но не response body и не credentials.
-- До контрольной production-генерации старый Gemini env сохраняется как быстрый
-  rollback. После проверки он удаляется из Development, Preview и Production.
-- Кодовый rollback — `git revert` merge commit сайта и повторный deploy. Если
-  понадобится временно вернуть Gemini, credential должен быть добавлен заново
-  отдельным одобренным действием.
+- Значения credentials не попадают в Git, логи, manifests или smoke output.
+- Удаление AI route закрывает server-side credential path вместо поддержки
+  неиспользуемой интеграции.
+- Кодовый rollback возможен через `git revert`, но возврат AI потребует нового
+  отдельного решения и нового credential; старые ключи не восстанавливаются.
 
 ## Acceptance criteria
 
-- Vercel preview и production deploy имеют статус Ready.
+- Site PR с удалением AI merged, Vercel production имеет статус Ready.
+- В production admin editor есть ручное поле описания и нет AI-кнопки.
+- Route `/api/admin/generate-description` отсутствует в production build.
+- В Vercel нет Gemini и Yandex AI environment variables.
+- У Yandex service account нет API keys.
 - `recycleobject.ru` проходит полный public live audit.
-- Административный route возвращает непустое русское описание через YandexGPT.
-- В браузере production отсутствуют `fonts.googleapis.com` и
-  `fonts.gstatic.com`, а оба шрифта успешно загружены локально.
-- Runtime route не содержит Gemini URL, `GEMINI_API_KEY`, image fetch или
-  base64 encoding.
-- `GEMINI_API_KEY` отсутствует во всех Vercel environments после smoke.
+- В браузере отсутствуют Google Fonts runtime requests.
 - Никакие database/Storage rows или objects не меняются этим cutover.

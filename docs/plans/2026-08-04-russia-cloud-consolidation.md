@@ -310,12 +310,12 @@ npm run build
   versioned Yandex bucket с read-back SHA-256.
 - [x] Включить и проверить ежедневный DB + Storage backup timer: первый run
   выгрузил 4 объекта и прошёл полный download/read-back SHA-256.
-- [x] Перенести production-генератор описаний с Google Gemini на text-only
-  YandexGPT 5 Lite; убрать runtime-загрузку Google Fonts.
+- [x] Удалить неиспользуемый production-генератор описаний и все Gemini/Yandex
+  AI credentials; убрать runtime-загрузку Google Fonts.
 - [x] Подтвердить single-writer cron ownership: только Vercel schedules,
   Yandex database target, `payment-recovery?dry=1` без writes/side effects.
-- [ ] После авторизованного admin smoke удалить неиспользуемый
-  `GEMINI_API_KEY` из всех Vercel environments.
+- [x] Проверить production admin editor с ручным полем описания и без AI;
+  удалить AI env из всех Vercel environments.
 - [ ] Выполнить безопасные integration smokes Точки, CDEK, Yandex Delivery,
   email и Telegram без реального списания/дублирующей отправки.
 
