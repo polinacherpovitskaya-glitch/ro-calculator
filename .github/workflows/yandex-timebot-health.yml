@@ -71,6 +71,11 @@ jobs:
             echo "ro-timebot status is ${status:-missing}" >&2
             exit 1
           fi
+          taskbot_status="$(docker inspect --format '{{.State.Status}}' ro-taskbot 2>/dev/null || true)"
+          if [ "$taskbot_status" != "running" ]; then
+            echo "ro-taskbot status is ${taskbot_status:-missing}" >&2
+            exit 1
+          fi
 
           docker exec -i ro-timebot node - <<'NODE'
           const fs = require('node:fs');
@@ -116,6 +121,29 @@ jobs:
             echo "timebot logs contain a fatal startup error" >&2
             exit 1
           fi
+          taskbot_logs="$(docker logs --tail 160 ro-taskbot 2>&1)"
+          if printf '%s' "$taskbot_logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
+            echo "taskbot logs contain a fatal startup error" >&2
+            exit 1
+          fi
+          if docker exec ro-taskbot env | grep -Eq '^(SUPABASE_|DATABASE_URL=)'; then
+            echo "taskbot contains a forbidden legacy database credential" >&2
+            exit 1
+          fi
+          docker exec ro-taskbot env \
+            | grep -q '^OPS_API_URL=http://ro-platform-shadow-api:3000$'
+          docker exec -i ro-taskbot node - <<'NODE'
+          const { createOpsApiClient } = require('./api-client');
+          createOpsApiClient().listNotificationEvents({ pending: true, limit: 1 })
+            .then(({ events }) => {
+              if (!Array.isArray(events)) process.exit(1);
+              console.log('Taskbot Yandex API read probe passed');
+            })
+            .catch((error) => {
+              console.error(error?.message || error);
+              process.exit(1);
+            });
+          NODE
 
           platform_health="$(curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3100/api/health)"
           printf '%s' "$platform_health" \
@@ -127,10 +155,12 @@ jobs:
       - name: Probe Telegram relay independently
         env:
           TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
           TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
         run: |
           set -euo pipefail
           test -n "${TIMEBOT_TOKEN:-}"
+          test -n "${TASK_BOT_TOKEN:-}"
           test -n "${TELEGRAM_RELAY_SECRET:-}"
           relay_base="https://ro-calculator-xi.vercel.app/api/telegram-relay/${TELEGRAM_RELAY_SECRET}"
           echo "::add-mask::$relay_base"
@@ -145,6 +175,19 @@ jobs:
                     process.exit(1);
                   }
                   console.log(`Telegram relay is healthy for @${payload.result.username}`);
+                });
+              '
+          curl --fail --silent --show-error --max-time 25 \
+            "${relay_base}/bot${TASK_BOT_TOKEN}/getMe" \
+            | node -e '
+                let raw = "";
+                process.stdin.on("data", chunk => raw += chunk);
+                process.stdin.on("end", () => {
+                  const payload = JSON.parse(raw);
+                  if (!payload.ok || payload.result?.is_bot !== true || !payload.result?.username) {
+                    process.exit(1);
+                  }
+                  console.log(`Telegram relay is healthy for taskbot @${payload.result.username}`);
                 });
               '
 
@@ -189,7 +232,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           ALERT_WORKFLOW: Yandex timebot health
-          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, Yandex DB, and replacement API
+          ALERT_SCOPE: Production timebot and taskbot processes, heartbeat, Telegram relay, Yandex DB, and replacement API
           ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
@@ -203,7 +246,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ALERT_WORKFLOW: Yandex timebot health
-          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, Yandex DB, and replacement API
+          ALERT_SCOPE: Production timebot and taskbot processes, heartbeat, Telegram relay, Yandex DB, and replacement API
           ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

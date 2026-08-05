@@ -8,8 +8,9 @@
 - Status: green for M3–M5 и основной runtime/data-plane M6. Калькулятор и сайт
   RePanel работают в Yandex; `recycleobject.ru` остаётся на разрешённом Vercel
   frontend, а database/Auth/Storage обслуживаются из Yandex. Неиспользуемый AI
-  генератор удалён вместе с Gemini/Yandex credentials. Старые stateful
-  providers сохранены как rollback и не удалены.
+  генератор удалён вместе с Gemini/Yandex credentials. Отдельный taskbot
+  уведомлений перенесён со старого локального Supabase poller в Yandex. Старые
+  stateful providers сохранены как rollback и не удалены.
 - Last updated: 2026-08-05.
 
 ## Done
@@ -95,6 +96,18 @@
 - Подтверждено, что два cron сайта имеют одного scheduler owner — Vercel — и
   работают с Yandex database. `payment-recovery?dry=1` вернул dry summary без
   mutations, email или платежных side effects.
+- Найден остаточный managed Supabase consumer: локальный LaunchAgent
+  `com.recycleobject.taskbot.v2` девять дней опрашивал
+  `task_notification_events` через legacy Supabase SDK каждые 15 секунд.
+- Развёрнут отдельный `ro-taskbot` на Yandex VM через приватный Ops API и
+  защищённый Vercel Telegram relay. Deploy `31015020487` и independent health
+  `31015151087` зелёные; оба bot container running с restart count `0`.
+- Локальный legacy poller выгружен, но plist и `.env` сохранены для rollback;
+  права `.env` усилены до `0600` без изменения содержимого.
+- Unified Logs подтвердил прекращение legacy Node poll: последний запрос
+  `task_notification_events` был `2026-08-05 11:23:55 -03`. В логах остаются
+  публичные чтения старых Supabase Storage URL из Instagram, поэтому Supabase
+  пока нельзя ставить на паузу.
 
 ## M2 evidence
 
@@ -129,10 +142,13 @@
 
 - Наблюдение за тремя production cutover и ежедневными Yandex backups.
 - Безопасные integration smokes без реального списания и дублирующих сообщений.
+- Наблюдение за `ro-taskbot` и остаточными публичными Supabase Storage reads.
 
 ## Next
 
 - Повторять restore drill на свежих scheduled backups в окне наблюдения.
+- Выяснить срок жизни старых Supabase image URL в Instagram и не ставить
+  проект на паузу, пока эти ссылки должны продолжать открываться.
 - Продолжать 14-дневное наблюдение; Supabase/Railway/Firebase не удалять без
   отдельного подтверждения владельца.
 
@@ -161,6 +177,9 @@
 - Блокеров сохранности данных нет.
 - Физический decommission старых providers намеренно заблокирован до окончания
   окна наблюдения и отдельного подтверждения владельца.
+- Paused state managed Supabase дополнительно заблокирован активными внешними
+  чтениями старых Storage URL из Instagram; production database writes туда
+  не возвращались.
 
 ## Commands
 
@@ -199,6 +218,7 @@ node tests/version-smoke.js
 | 2026-08-05 | M6 | `ro-site-backup.timer` | DB dump, Storage tar, upload, download, SHA-256 | first run success; 4 objects | monitor timer |
 | 2026-08-05 | M7 | Scheduled RO site backup | isolated Supabase restore + manifest comparison + Storage traversal | 65 tables / 43 176 rows; Auth 1/1; Storage 420 | observe |
 | 2026-08-05 | M6 | RO site AI/fonts + Vercel cron | Fontsource, AI feature removal, Chrome admin/font checks, public audit, dry cron smoke | Google/Yandex AI runtime and credentials removed; public flows green | observe |
+| 2026-08-05 | M7 | Local taskbot + managed Supabase logs | LaunchAgent inventory, Yandex deploy `31015020487`, health `31015151087`, Unified Logs | API-backed `ro-taskbot` green; 15-second Supabase poll stopped; rollback retained | observe Storage reads |
 
 ## Smoke / demo checklist
 
@@ -221,4 +241,6 @@ node tests/version-smoke.js
   Storage archive traversal.
 - [x] Неиспользуемый AI description runtime и Gemini/Yandex AI credentials
   удалены; ручное поле описания и существующие данные сохранены.
+- [x] Task notification poller работает в Yandex через Ops API; локальный
+  Supabase consumer остановлен с сохранённым rollback.
 - [ ] 14-day observation window and fresh post-cutover restore drill complete.

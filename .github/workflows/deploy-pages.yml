@@ -81,6 +81,7 @@ jobs:
           node tests/floor-month-load-smoke.js
           node tests/timebot-state-utils-smoke.js
           node tests/timebot-health-monitor-smoke.js
+          node tests/yandex-taskbot-cutover-smoke.js
           node scripts/audit-codebase-health.mjs
           node scripts/audit-data-paths.mjs
           node --check tests/live-site-smoke.mjs
