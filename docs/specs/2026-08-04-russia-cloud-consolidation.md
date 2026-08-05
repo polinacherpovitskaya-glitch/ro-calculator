@@ -26,12 +26,17 @@ VPN для обычной работы. Персональные данные с
 
 1. **Yandex Cloud, регион Россия** — production-приложения, базы данных, API,
    авторизация, файлы, фоновые задания, логи, мониторинг и резервные копии.
-2. **Vercel** — только Telegram relay и, при необходимости, preview-сборки без
-   production-данных.
+2. **Vercel** — публичные web-frontends, Telegram relay и preview-сборки без
+   собственной production-базы и файлового хранилища.
 
 Telegram остаётся внешней бизнес-интеграцией. Supabase, Railway и
 Google Cloud/Firebase отключаются только после миграции, окна наблюдения и
 проверенного восстановления.
+
+Уточнение владельца от 2026-08-05: допустимый постоянный perimeter — Yandex
+Cloud, Vercel и Telegram. Поэтому `recycleobject.ru` может оставаться на
+Vercel, если база, Auth и Storage находятся в российском Yandex-контуре и
+Vercel не становится отдельным источником customer data.
 
 ## Главный инвариант сохранности
 
@@ -57,14 +62,14 @@ manifest. Decommission guard обязан закрываться с ошибко
 Пользователи в России
         │
         ├── calc.recycleobject.ru ─────── Yandex Object Storage
-        ├── recycleobject.ru ──────────── Yandex runtime
+        ├── recycleobject.ru ──────────── Vercel frontend ─┐
         ├── re-panel.ru ───────────────── Yandex runtime
         └── calc.re-panel.ru ──────────── Yandex runtime
-                                             │
+                                             │             │
                                              ├── PostgreSQL
                                              ├── Object Storage
                                              ├── API / auth / jobs
-                                             └── logs / backups
+                                             └── logs / backups ◄────────┘
 
 Telegram Bot API ◄──── Vercel relay ◄──── Yandex applications
 ```
@@ -153,6 +158,9 @@ RePanel. Для legacy Supabase калькулятора RO сохраняютс
 
 - Production данные размещаются только в регионе Россия.
 - Vercel relay не хранит payloads и не логирует Telegram token/secret path.
+- Vercel storefront не имеет собственной БД или Storage: server/browser data
+  requests идут в `db.recycleobject.ru`, а production secrets остаются в
+  защищённых environment variables.
 - Secrets находятся в Yandex Lockbox/закрытых env и GitHub Secrets; значения не
   попадают в manifests, логи, artifacts или Git.
 - Доступ сотрудников не требует VPN, но защищён TLS, ролями, 2FA, rate limits и
@@ -188,7 +196,21 @@ RePanel. Для legacy Supabase калькулятора RO сохраняютс
 - Все четыре production URL доступны из России без VPN.
 - Персональные данные и файлы записываются в Yandex Cloud, регион Россия.
 - Supabase, Railway и Firebase не получают новых production writes.
-- Vercel обслуживает только разрешённый минимальный perimeter.
+- Vercel обслуживает только разрешённые frontends/relay и не является
+  authoritative data store.
 - По окончании окна наблюдения старые сервисы сначала переводятся в read-only/
   paused, а физическое удаление выполняется отдельно.
 - Для каждого продукта есть рабочий rollback runbook и проверенный backup.
+
+## Cutover `recycleobject.ru` — 2026-08-05
+
+- Vercel frontend переключён с managed Supabase на
+  `https://db.recycleobject.ru`.
+- В Yandex объединены source-only и target-only данные без truncate: добавлено
+  146 отсутствовавших строк, обновлено 5 более свежих строк сайта, сохранены
+  новые записи калькулятора.
+- Перенесены 1 Auth user и 1 identity с исходным password hash; orphan checks
+  равны нулю.
+- Все 420 Storage objects / 410 254 132 bytes прошли SHA-256 parity; после
+  cutover source delta не содержит новых таблиц или файлов.
+- Managed Supabase сохранён как rollback source; physical delete не выполнен.
