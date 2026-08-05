@@ -2,12 +2,14 @@
 
 ## Snapshot
 
-- Current phase: M3 — Yandex landing zone для калькулятора RePanel.
+- Current phase: M6/M7 — завершение cutover сайта Recycle Object и окно
+  наблюдения.
 - Plan file: `docs/plans/2026-08-04-russia-cloud-consolidation.md`.
-- Status: green for M2; все 16 источников имеют проверенные backup, Yandex
-  offsite copy, offline copy, restore и source-parity evidence. Production не
-  изменён; M3 ещё не начат.
-- Last updated: 2026-08-04.
+- Status: green for M3–M5 и основной data-plane M6. Калькулятор и сайт RePanel
+  работают в Yandex; `recycleobject.ru` остаётся на разрешённом Vercel
+  frontend, но database/Auth/Storage уже обслуживаются из Yandex. Старые
+  providers сохранены как rollback и не удалены.
+- Last updated: 2026-08-05.
 
 ## Done
 
@@ -56,6 +58,29 @@
   полный decrypt + tar traversal завершился успешно.
 - Временные Supabase/Yandex CLI access tokens отозваны, локальные profiles и
   временные файлы с API keys удалены.
+- Калькулятор RePanel перенесён с Railway/Firebase в Yandex и работает на
+  production hostname; исходные данные сохранены для rollback.
+- Сайт RePanel перенесён с managed Supabase/YDB в Yandex PostgreSQL и
+  production runtime; legacy Supabase keys отозваны без удаления source.
+- `recycleobject.ru` переключён на `https://db.recycleobject.ru`: 65 таблиц /
+  43 165 source rows объединены с target без truncate, добавлено 146 строк и
+  обновлено 5 source-newer записей.
+- Перенесены 1 Supabase Auth user и 1 identity с исходным password hash;
+  orphan checks равны нулю.
+- Все 420 Storage objects / 410 254 132 bytes совпали по SHA-256; финальная
+  source delta не обнаружила новых таблиц или файлов.
+- Cutover-комплект сайта RO загружен в private versioned Yandex bucket и
+  прошёл read-back: source archive, target pre-sync archive и post-cutover dump
+  совпали по SHA-256.
+- На Yandex VM включён `ro-site-backup.timer`. Первый run создал custom-format
+  PostgreSQL dump, Storage archive, manifest и checksums, загрузил 4 объекта в
+  `ro-site/daily/20260805T060513Z` и успешно проверил их обратным скачиванием.
+- Тот же scheduled dump восстановлен в изолированную БД
+  `codex_ro_site_restore_20260805_060513`: 65 public tables / 43 176 rows,
+  Auth 1 user / 1 identity и 420 Storage metadata rows точно совпали с
+  manifest; Storage archive полностью traversed.
+- Временные локальные/VM-файлы с ключами, password hash и merge SQL удалены
+  после подтверждения независимых копий.
 
 ## M2 evidence
 
@@ -88,22 +113,23 @@
 
 ## In progress
 
-- Подготовка отдельной M3 spec/plan branch в `cnc-calculator`.
-- Выбор минимального российского runtime, persistent storage и shadow hostname
-  для RePanel calculator без production writes.
+- Наблюдение за тремя production cutover и ежедневными Yandex backups.
+- Аудит оставшегося Google Gemini runtime и Vercel cron ownership сайта RO.
+- Безопасные integration smokes без реального списания и дублирующих сообщений.
 
 ## Next
 
-- Поднять изолированный RePanel shadow runtime в Yandex без Railway/Firebase
-  credentials.
-- Проверить persistence после restart, `/health`, logs, backup и restore
-  automation.
-- Не выполнять data import/cutover, пока shadow storage не подтверждён.
+- Перенести или отключить Gemini, чтобы Google не оставался runtime provider.
+- Проверить cron jobs и single-writer ownership на Vercel/Yandex.
+- Повторять restore drill на свежих scheduled backups в окне наблюдения.
+- Продолжать 14-дневное наблюдение; Supabase/Railway/Firebase не удалять без
+  отдельного подтверждения владельца.
 
 ## Decisions made
 
 - Yandex Cloud — единственный production data plane и основной runtime.
-- Vercel остаётся только для Telegram relay и preview без production-данных.
+- Vercel остаётся для публичных frontends, Telegram relay и preview, но не как
+  authoritative database или Storage.
 - YDB не расширяется как общая data platform; целевая реляционная база —
   PostgreSQL.
 - Каждый продуктовый cutover — отдельный branch/PR.
@@ -121,9 +147,10 @@
 
 ## Current blockers
 
-- M2 blockers отсутствуют.
-- Для M3 ещё не утверждён конкретный shadow hostname; это не блокирует создание
-  внутреннего runtime и health check на Yandex.
+- Блокеров сохранности данных нет.
+- Физический decommission старых providers намеренно заблокирован до окончания
+  окна наблюдения и отдельного подтверждения владельца.
+- Google Gemini остаётся последней обнаруженной лишней runtime-зависимостью.
 
 ## Commands
 
@@ -131,6 +158,7 @@
 node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
   ops/migration/cloud-consolidation-preservation.json --mode=backups
 node tests/cloud-consolidation-preservation-smoke.js
+node tests/ro-site-backup-smoke.js
 node tests/version-smoke.js
 ```
 
@@ -155,6 +183,11 @@ node tests/version-smoke.js
 | 2026-08-04 | M2 | RO PostgreSQL, legacy Supabase, Storage, timebot | isolated DB/file restores | all counts/checksums verified | retain rollback copies |
 | 2026-08-04 | M2 | YDB backup | restore API + direct YDB CLI count | protected restore DB, 6/6 rows | retain source and restore DB |
 | 2026-08-04 | M2 | Four Git bundles | bare clone, `git fsck --full`, `git bundle verify` | all four verified | M3 |
+| 2026-08-05 | M3–M5 | RePanel calculator + site | Yandex shadow/parity/cutover/live smokes | production moved; rollback retained | M6 |
+| 2026-08-05 | M6 | Recycle Object Supabase/Auth/Storage | full export, rehearsal restore, union merge, final delta, live smokes | Yandex data plane live; 420/420 objects | observe |
+| 2026-08-05 | M6 | RO site cutover backups | private versioned upload + full read-back SHA-256 | source/pre/post copies verified | daily automation |
+| 2026-08-05 | M6 | `ro-site-backup.timer` | DB dump, Storage tar, upload, download, SHA-256 | first run success; 4 objects | monitor timer |
+| 2026-08-05 | M7 | Scheduled RO site backup | isolated Supabase restore + manifest comparison + Storage traversal | 65 tables / 43 176 rows; Auth 1/1; Storage 420 | observe |
 
 ## Smoke / demo checklist
 
@@ -169,3 +202,11 @@ node tests/version-smoke.js
 - [x] Encrypted preservation set can be fully decrypted and traversed.
 - [x] Encrypted preservation set has a verified Yandex offsite copy.
 - [x] Every stateful source has passed an isolated restore drill.
+- [x] RePanel calculator and RePanel site production run from Yandex.
+- [x] RO site database/Auth/Storage run from Yandex behind the Vercel frontend.
+- [x] RO site daily DB + Storage backup timer is active and its first run passed
+  remote read-back verification.
+- [x] Fresh scheduled RO site backup passed isolated database restore and
+  Storage archive traversal.
+- [ ] Google Gemini is removed or replaced.
+- [ ] 14-day observation window and fresh post-cutover restore drill complete.

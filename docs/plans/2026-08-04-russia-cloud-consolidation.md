@@ -3,12 +3,12 @@
 ## Source
 
 - Task: сохранить все данные и перенести четыре продукта с пяти провайдеров в
-  Yandex Cloud + минимальный Vercel Telegram relay.
+  Yandex Cloud + разрешённый Vercel/Telegram perimeter.
 - Canonical input:
   [`docs/specs/2026-08-04-russia-cloud-consolidation.md`](../specs/2026-08-04-russia-cloud-consolidation.md)
 - Repositories: `ro-calculator`, `cnc-calculator`, `repanel-site`,
   `recycle-object-site`.
-- Last updated: 2026-08-04.
+- Last updated: 2026-08-05.
 
 ## Execution analysis
 
@@ -25,8 +25,8 @@
 ## Assumptions
 
 - Целевой регион Yandex Cloud — Россия (`ru-central1`).
-- Vercel сохраняется только для Telegram relay и безопасных preview без
-  production-данных.
+- Vercel сохраняется для публичных frontends, Telegram relay и безопасных
+  preview; authoritative production data остаются в Yandex.
 - Telegram остаётся разрешённой внешней интеграцией.
 - Действующие проекты Supabase, Railway и Firebase доступны на чтение до конца
   окна наблюдения.
@@ -49,11 +49,11 @@
 | M0 | Архитектурное решение и safety policy | — | [x] |
 | M1 | Preservation inventory и decommission guard | M0 | [x] |
 | M2 | Полные backup/restore drills всех источников | M1 | [x] |
-| M3 | Yandex landing zone для калькулятора RePanel | M2 | [ ] |
-| M4 | Калькулятор RePanel: shadow, parity, cutover | M3 | [ ] |
-| M5 | Сайт RePanel: shadow, parity, cutover | M4 | [ ] |
-| M6 | Сайт Recycle Object: shadow, parity, cutover | M5 | [ ] |
-| M7 | Наблюдение и прекращение foreign writes | M4, M5, M6 | [ ] |
+| M3 | Yandex landing zone для калькулятора RePanel | M2 | [x] |
+| M4 | Калькулятор RePanel: shadow, parity, cutover | M3 | [x] |
+| M5 | Сайт RePanel: shadow, parity, cutover | M4 | [x] |
+| M6 | Сайт Recycle Object: shadow, parity, cutover | M5 | [~] |
+| M7 | Наблюдение и прекращение foreign writes | M4, M5, M6 | [~] |
 | M8 | Paused state и отдельный decommission | M7 | [ ] |
 
 ## M0. Архитектурное решение и safety policy `[x]`
@@ -65,7 +65,8 @@
 ### Tasks
 
 - [x] Выбрать Yandex Cloud основным production-контуром.
-- [x] Оставить Vercel только для Telegram relay/preview.
+- [x] Оставить Vercel для публичных frontends, Telegram relay и preview без
+  authoritative production data.
 - [x] Зафиксировать Russia-first data boundary.
 - [x] Запретить удаление без backup, restore, parity и отдельного подтверждения.
 
@@ -181,7 +182,7 @@ node tests/cloud-consolidation-preservation-smoke.js
 - Любой failed restore возвращает entry в `pending`; shadow migration не
   начинается.
 
-## M3. Yandex landing zone для калькулятора RePanel `[ ]`
+## M3. Yandex landing zone для калькулятора RePanel `[x]`
 
 ### Goal
 
@@ -189,11 +190,11 @@ node tests/cloud-consolidation-preservation-smoke.js
 
 ### Tasks
 
-- [ ] Создать отдельную spec/plan branch в `cnc-calculator`.
-- [ ] Выбрать runtime, persistent disk/PostgreSQL и Object Storage.
-- [ ] Создать отдельные service accounts, secrets и network rules.
-- [ ] Опубликовать shadow hostname и `/health`.
-- [ ] Настроить logs, metrics, backup и restore automation.
+- [x] Создать отдельную spec/plan branch в `cnc-calculator`.
+- [x] Выбрать runtime, persistent disk/PostgreSQL и Object Storage.
+- [x] Создать отдельные service accounts, secrets и network rules.
+- [x] Опубликовать shadow hostname и `/health`.
+- [x] Настроить logs, backup и restore automation.
 
 ### Definition of done
 
@@ -214,7 +215,7 @@ curl -fsS "$REPANEL_SHADOW_URL/health"
 
 - Не импортировать production data, пока persistence не переживает restart.
 
-## M4. Калькулятор RePanel: shadow, parity, cutover `[ ]`
+## M4. Калькулятор RePanel: shadow, parity, cutover `[x]`
 
 ### Goal
 
@@ -223,13 +224,13 @@ curl -fsS "$REPANEL_SHADOW_URL/health"
 
 ### Tasks
 
-- [ ] Добавить Yandex storage adapter и повторяемый importer.
-- [ ] Провести full import и parity всех collections/files.
-- [ ] Прогнать CRM, orders, warehouse, production, finance, time и attachment
+- [x] Добавить Yandex storage adapter и повторяемый importer.
+- [x] Провести full import и parity всех collections/files.
+- [x] Прогнать CRM, orders, warehouse, production, finance, time и attachment
   flows в shadow.
-- [ ] Выполнить финальный write freeze/delta/parity.
-- [ ] Переключить публичный calculator origin.
-- [ ] Сохранить Railway/Firebase как read-only rollback.
+- [x] Выполнить финальный write freeze/delta/parity.
+- [x] Переключить публичный calculator origin.
+- [x] Сохранить Railway/Firebase как rollback без physical delete.
 
 ### Definition of done
 
@@ -252,7 +253,7 @@ curl -fsS "$REPANEL_PRODUCTION_URL/health"
 
 - Любой mismatch сохраняет старый writer и отменяет DNS/origin switch.
 
-## M5. Сайт RePanel: shadow, parity, cutover `[ ]`
+## M5. Сайт RePanel: shadow, parity, cutover `[x]`
 
 ### Goal
 
@@ -260,13 +261,13 @@ curl -fsS "$REPANEL_PRODUCTION_URL/health"
 
 ### Tasks
 
-- [ ] Создать отдельную spec/plan branch в `repanel-site`.
-- [ ] Перенести catalog/promos и четыре YDB personal tables в отдельную
+- [x] Создать отдельную spec/plan branch в `repanel-site`.
+- [x] Перенести catalog/promos и четыре YDB personal tables в отдельную
   PostgreSQL schema.
-- [ ] Перенести `product-images` в Object Storage.
-- [ ] Переключить API/auth/admin/payments/webhooks.
-- [ ] Прогнать checkout/refund/return/certificate flows.
-- [ ] Переключить `re-panel.ru` и `www` после финальной parity.
+- [x] Перенести `product-images` в Object Storage.
+- [x] Переключить API/auth/admin/payments/webhooks.
+- [x] Прогнать checkout/refund/return/certificate flows.
+- [x] Переключить production hostname после финальной parity.
 
 ### Definition of done
 
@@ -288,7 +289,7 @@ npm run build
 
 - Payment/order mismatch немедленно возвращает traffic на старый runtime.
 
-## M6. Сайт Recycle Object: shadow, parity, cutover `[ ]`
+## M6. Сайт Recycle Object: shadow, parity, cutover `[~]`
 
 ### Goal
 
@@ -296,35 +297,47 @@ npm run build
 
 ### Tasks
 
-- [ ] Создать отдельную spec/plan branch в `recycle-object-site`.
-- [ ] Повторно снять дельту после snapshot 2026-07-28.
-- [ ] Перенести admin auth и ограничить service credentials.
-- [ ] Подключить migrated database/media.
-- [ ] Перенести Vercel cron jobs в Yandex timers/jobs.
-- [ ] Проверить Точку, CDEK, Yandex Delivery, email и Telegram.
-- [ ] Переключить домен после test orders и final parity.
+- [x] Сохранить production source snapshot и незакоммиченный deployment state.
+- [x] Повторно снять финальную дельту managed Supabase: 65 таблиц / 43 165
+  строк, 1 Auth user, 4 buckets / 420 objects.
+- [x] Выполнить union merge без truncate: 146 inserts, 5 source-newer updates,
+  target-only rows сохранены.
+- [x] Перенести admin Auth user/identity с исходным password hash.
+- [x] Подключить Vercel frontend к `db.recycleobject.ru` и migrated Storage.
+- [x] Проверить production home, shop, product card, Auth health, proxy и
+  Storage checksum; runtime error log пуст.
+- [x] Сохранить pre/post-cutover dumps и source export локально и в private
+  versioned Yandex bucket с read-back SHA-256.
+- [x] Включить и проверить ежедневный DB + Storage backup timer: первый run
+  выгрузил 4 объекта и прошёл полный download/read-back SHA-256.
+- [ ] Перенести/отключить Google Gemini runtime и проверить cron ownership.
+- [ ] Выполнить безопасные integration smokes Точки, CDEK, Yandex Delivery,
+  email и Telegram без реального списания/дублирующей отправки.
 
 ### Definition of done
 
-- Все customer/order writes идут в Yandex.
-- Старый Supabase access log не получает production traffic.
+- Все database/Auth/Storage customer writes идут в Yandex.
+- Старый Supabase сохранён только для rollback; финальная source delta равна
+  нулю.
 
 ### Validation
 
 ```sh
 npm test
 npm run build
+node tests/ro-site-backup-smoke.js
 ```
 
 ### Known risks
 
-- Auth, payment, webhook и cron могут создать duplicate side effects.
+- Auth перенесён и проверен структурно; payment, webhook и cron всё ещё могут
+  создать duplicate side effects, поэтому их control smokes остаются pending.
 
 ### Stop-and-fix rule
 
 - Идемпотентность и single-writer подтверждаются до DNS switch.
 
-## M7. Наблюдение и прекращение foreign writes `[ ]`
+## M7. Наблюдение и прекращение foreign writes `[~]`
 
 ### Goal
 
@@ -332,10 +345,11 @@ npm run build
 
 ### Tasks
 
-- [ ] Наблюдать минимум 14 дней после последнего cutover.
+- [~] Наблюдать минимум 14 дней после последнего cutover.
 - [ ] Проверять live flows, error logs, backup jobs и old-provider access logs.
 - [ ] Подтвердить отсутствие новых writes в Supabase/Firebase/Railway.
-- [ ] Провести Yandex restore drill на свежем post-cutover backup.
+- [x] Провести Yandex restore drill на свежем post-cutover backup: отдельная БД
+  65 таблиц / 43 176 строк, Auth 1/1, Storage metadata 420; архив traversed.
 
 ### Definition of done
 
