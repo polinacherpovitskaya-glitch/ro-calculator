@@ -60,15 +60,33 @@ node scripts/cloud-consolidation/verify-preservation-manifest.mjs \
   ops/migration/cloud-consolidation-preservation.json --mode=backups
 ```
 
-## M4. Production cutover `[ ]`
+## M4. Production cutover `[x]`
 
-- [ ] Зафиксировать SHA-256 локального plist и наличие rollback env без
+- [x] Зафиксировать SHA-256 локального plist и наличие rollback env без
   вывода secret values.
-- [ ] Выполнить `launchctl bootout` только для
+- [x] Выполнить `launchctl bootout` только для
   `com.recycleobject.taskbot.v2`.
-- [ ] Merge/deploy `ro-taskbot` и дождаться зелёных deploy/health checks.
-- [ ] Подтвердить локальное отсутствие legacy process и сохранность plist/env.
-- [ ] Подтвердить прекращение 15-секундного Supabase poll traffic.
+- [x] Deploy `ro-taskbot` и дождаться зелёных deploy/health checks.
+- [x] Подтвердить локальное отсутствие legacy process и сохранность plist/env.
+- [x] Подтвердить прекращение 15-секундного Supabase poll traffic.
+
+### Production evidence
+
+- Preservation guard: Actions run `31014933604`, success.
+- Yandex deploy: Actions run `31015020487`, success; `ro-timebot` и
+  `ro-taskbot` running, restart count `0`, API read probe passed.
+- Independent bot health: Actions run `31015151087`, success; оба Telegram
+  relay probe, Yandex API и PostgreSQL green.
+- Local LaunchAgent plist SHA-256:
+  `7e9d1c8958d20f63a5fd89549e0d5320dfb9756897d6a647dd970c671a90dc6a`.
+- Local rollback `.env` SHA-256:
+  `468c271c36660c910a0ead567fde412c1ab7163b227265d60b19619f2332e535`;
+  permissions hardened from `0644` to `0600`, contents unchanged.
+- Managed Supabase Unified Logs: последний 15-секундный Node poll
+  `/rest/v1/task_notification_events` — `2026-08-05 11:23:55 -03`; после
+  cutover новые строки Storage продолжали поступать, а task poll не повторился.
+- Старые публичные Storage image reads из Instagram всё ещё присутствуют и
+  отдельно блокируют немедленную паузу managed Supabase.
 
 ### Rollback gate
 

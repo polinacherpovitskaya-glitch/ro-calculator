@@ -351,7 +351,9 @@ node tests/ro-site-backup-smoke.js
 ### Tasks
 
 - [~] Наблюдать минимум 14 дней после последнего cutover.
-- [ ] Проверять live flows, error logs, backup jobs и old-provider access logs.
+- [~] Проверять live flows, error logs, backup jobs и old-provider access logs:
+  legacy taskbot Node poll остановлен; старые Supabase Storage URL всё ещё
+  читаются из Instagram.
 - [ ] Подтвердить отсутствие новых writes в Supabase/Firebase/Railway.
 - [x] Провести Yandex restore drill на свежем post-cutover backup: отдельная БД
   65 таблиц / 43 176 строк, Auth 1/1, Storage metadata 420; архив traversed.
