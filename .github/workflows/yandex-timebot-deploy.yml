@@ -52,6 +52,7 @@ jobs:
       - name: Install secrets and start poller
         env:
           TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
           OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
           TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
           YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
@@ -59,6 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${TIMEBOT_TOKEN:-}"
+          test -n "${TASK_BOT_TOKEN:-}"
           test -n "${OPS_BOT_TOKEN:-}"
           test -n "${TELEGRAM_RELAY_SECRET:-}"
           umask 077
@@ -71,12 +73,26 @@ jobs:
             printf 'OPS_API_URL=http://ro-platform-shadow-api:3000\n'
             printf 'OPS_BOT_TOKEN=%s\n' "$OPS_BOT_TOKEN"
           } > "$RUNNER_TEMP/timebot.env"
+          {
+            printf 'TG_BOT_TOKEN=%s\n' "$TASK_BOT_TOKEN"
+            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator-xi.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
+            printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
+            printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
+            printf 'TASK_BOT_POLL_INTERVAL_MS=15000\n'
+            printf 'OPS_API_URL=http://ro-platform-shadow-api:3000\n'
+            printf 'OPS_BOT_TOKEN=%s\n' "$OPS_BOT_TOKEN"
+          } > "$RUNNER_TEMP/taskbot.env"
           scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/timebot.env" \
             "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/timebot/runtime.env"
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "mkdir -p /home/robot/taskbot"
+          scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/taskbot.env" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/taskbot/runtime.env"
 
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
             set -euo pipefail
             chmod 600 /home/robot/timebot/runtime.env
+            chmod 600 /home/robot/taskbot/runtime.env
             set -a
             source /home/robot/platform/infra/.env.shadow
             source /home/robot/timebot/runtime.env
@@ -100,6 +116,14 @@ jobs:
               -e TIMEBOT_STATE_DIR=/app/state \
               -v ro-timebot-state:/app/state \
               ro-timebot:latest node timebot.js >/dev/null
+            docker tag ro-timebot:latest ro-taskbot:latest
+            docker rm -f ro-taskbot >/dev/null 2>&1 || true
+            docker run -d \
+              --name ro-taskbot \
+              --restart unless-stopped \
+              --network ro-platform-shadow_shadow \
+              --env-file /home/robot/taskbot/runtime.env \
+              ro-taskbot:latest node taskbot.js >/dev/null
           REMOTE
 
       - name: Verify poller
@@ -112,19 +136,37 @@ jobs:
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
             set -euo pipefail
             test "$(docker inspect --format '{{.State.Status}}' ro-timebot)" = "running"
-            logs="$(docker logs --tail 100 ro-timebot 2>&1)"
-            printf '%s\n' "$logs"
-            printf '%s' "$logs" | grep -q 'Polling started at'
-            if docker exec ro-timebot env | grep -q '^SUPABASE_'; then
-              echo "Supabase environment leaked into the replacement timebot" >&2
-              exit 1
-            fi
-            if docker exec ro-timebot env | grep -q '^DATABASE_URL='; then
-              echo "Direct database credentials leaked into timebot" >&2
-              exit 1
-            fi
-            docker exec ro-timebot env | grep -q '^OPS_API_URL=http://ro-platform-shadow-api:3000$'
-            if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
-              exit 1
-            fi
+            test "$(docker inspect --format '{{.RestartCount}}' ro-timebot)" = "0"
+            test "$(docker inspect --format '{{.State.Status}}' ro-taskbot)" = "running"
+            test "$(docker inspect --format '{{.RestartCount}}' ro-taskbot)" = "0"
+            for container in ro-timebot ro-taskbot; do
+              logs="$(docker logs --tail 100 "$container" 2>&1)"
+              printf '%s\n' "$logs"
+              printf '%s' "$logs" | grep -q 'Polling started at'
+              if docker exec "$container" env | grep -q '^SUPABASE_'; then
+                echo "Supabase environment leaked into $container" >&2
+                exit 1
+              fi
+              if docker exec "$container" env | grep -q '^DATABASE_URL='; then
+                echo "Direct database credentials leaked into $container" >&2
+                exit 1
+              fi
+              docker exec "$container" env \
+                | grep -q '^OPS_API_URL=http://ro-platform-shadow-api:3000$'
+              if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
+                exit 1
+              fi
+            done
+            docker exec -i ro-taskbot node - <<'NODE'
+          const { createOpsApiClient } = require('./api-client');
+          createOpsApiClient().listNotificationEvents({ pending: true, limit: 1 })
+            .then(({ events }) => {
+              if (!Array.isArray(events)) process.exit(1);
+              console.log(`Taskbot Yandex API probe passed (${events.length} pending sample rows)`);
+            })
+            .catch((error) => {
+              console.error(error?.message || error);
+              process.exit(1);
+            });
+          NODE
           REMOTE

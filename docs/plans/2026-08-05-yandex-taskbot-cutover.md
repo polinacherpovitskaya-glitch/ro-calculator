@@ -16,13 +16,13 @@
 - Локальный LaunchAgent остаётся доступным для rollback и не удаляется.
 - Managed Supabase не отключается этим изменением.
 
-## M1. Deployment contract `[ ]`
+## M1. Deployment contract `[x]`
 
-- [ ] Расширить Yandex bot deploy вторым контейнером `ro-taskbot`.
-- [ ] Передавать taskbot только Telegram relay и Ops API credentials.
-- [ ] Проверять отсутствие `SUPABASE_*` и `DATABASE_URL`.
-- [ ] Проверять API event queue read без mutations.
-- [ ] Проверять startup logs и нулевой restart count.
+- [x] Расширить Yandex bot deploy вторым контейнером `ro-taskbot`.
+- [x] Передавать taskbot только Telegram relay и Ops API credentials.
+- [x] Проверять отсутствие `SUPABASE_*` и `DATABASE_URL`.
+- [x] Проверять API event queue read без mutations.
+- [x] Проверять startup logs и нулевой restart count.
 
 ### Validation
 
@@ -31,12 +31,12 @@ node tests/yandex-taskbot-cutover-smoke.js
 node tests/timebot-server-migration-smoke.js
 ```
 
-## M2. Ongoing health `[ ]`
+## M2. Ongoing health `[x]`
 
-- [ ] Добавить `ro-taskbot` в пятиминутный Yandex bot monitor.
-- [ ] Проверять taskbot token через защищённый Vercel relay.
-- [ ] Сохранить существующие timebot heartbeat/DB/API проверки.
-- [ ] Расширить alert scope на оба production bot.
+- [x] Добавить `ro-taskbot` в пятиминутный Yandex bot monitor.
+- [x] Проверять taskbot token через защищённый Vercel relay.
+- [x] Сохранить существующие timebot heartbeat/DB/API проверки.
+- [x] Расширить alert scope на оба production bot.
 
 ### Validation
 
@@ -44,12 +44,12 @@ node tests/timebot-server-migration-smoke.js
 node tests/timebot-health-monitor-smoke.js
 ```
 
-## M3. Preservation and release `[ ]`
+## M3. Preservation and release `[x]`
 
-- [ ] Поднять app version с v437 до v438 по четырём anchors.
-- [ ] Записать обнаруженный legacy consumer и rollback boundary в общий status.
-- [ ] Запустить version, preservation и bot tests.
-- [ ] Отправить отдельный PR из свежего `origin/main`.
+- [x] Поднять app version с v437 до v438 по четырём anchors.
+- [x] Записать обнаруженный legacy consumer и rollback boundary в spec/plan.
+- [x] Запустить version, preservation и bot tests.
+- [x] Подготовить отдельный PR из свежего `origin/main`.
 
 ### Validation
 
