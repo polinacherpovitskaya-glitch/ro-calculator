@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Recycle Object site backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=ro-site-backup.service
+
+[Install]
+WantedBy=timers.target
