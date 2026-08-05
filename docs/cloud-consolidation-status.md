@@ -5,9 +5,10 @@
 - Current phase: M6/M7 — завершение cutover сайта Recycle Object и окно
   наблюдения.
 - Plan file: `docs/plans/2026-08-04-russia-cloud-consolidation.md`.
-- Status: green for M3–M5 и основной data-plane M6. Калькулятор и сайт RePanel
-  работают в Yandex; `recycleobject.ru` остаётся на разрешённом Vercel
-  frontend, но database/Auth/Storage уже обслуживаются из Yandex. Старые
+- Status: green for M3–M5 и основной runtime/data-plane M6. Калькулятор и сайт
+  RePanel работают в Yandex; `recycleobject.ru` остаётся на разрешённом Vercel
+  frontend, а database/Auth/Storage обслуживаются из Yandex. Неиспользуемый AI
+  генератор удалён вместе с Gemini/Yandex credentials. Старые stateful
   providers сохранены как rollback и не удалены.
 - Last updated: 2026-08-05.
 
@@ -81,6 +82,19 @@
   manifest; Storage archive полностью traversed.
 - Временные локальные/VM-файлы с ключами, password hash и merge SQL удалены
   после подтверждения независимых копий.
+- После подтверждения владельца, что генератор описаний не используется, из
+  production удалены AI-кнопка, client handler и server route. Ручное поле и
+  все существующие описания сохранены. Gemini/Yandex AI env удалены из Vercel,
+  неиспользованный scoped Yandex key удалён; service account остался без ключей.
+- Google Fonts runtime удалён: Montserrat и Alfa Slab One self-hosted внутри
+  Vercel build. Preview и production Chrome подтвердили локальную загрузку
+  обоих шрифтов и отсутствие Google font links.
+- Site PR `#6` self-hosted шрифты, а site PR `#7` удалил неиспользуемый AI
+  runtime. Vercel production Ready; повторный public audit проверил 122 URL и
+  41 mold без ошибок.
+- Подтверждено, что два cron сайта имеют одного scheduler owner — Vercel — и
+  работают с Yandex database. `payment-recovery?dry=1` вернул dry summary без
+  mutations, email или платежных side effects.
 
 ## M2 evidence
 
@@ -114,13 +128,10 @@
 ## In progress
 
 - Наблюдение за тремя production cutover и ежедневными Yandex backups.
-- Аудит оставшегося Google Gemini runtime и Vercel cron ownership сайта RO.
 - Безопасные integration smokes без реального списания и дублирующих сообщений.
 
 ## Next
 
-- Перенести или отключить Gemini, чтобы Google не оставался runtime provider.
-- Проверить cron jobs и single-writer ownership на Vercel/Yandex.
 - Повторять restore drill на свежих scheduled backups в окне наблюдения.
 - Продолжать 14-дневное наблюдение; Supabase/Railway/Firebase не удалять без
   отдельного подтверждения владельца.
@@ -150,7 +161,6 @@
 - Блокеров сохранности данных нет.
 - Физический decommission старых providers намеренно заблокирован до окончания
   окна наблюдения и отдельного подтверждения владельца.
-- Google Gemini остаётся последней обнаруженной лишней runtime-зависимостью.
 
 ## Commands
 
@@ -188,6 +198,7 @@ node tests/version-smoke.js
 | 2026-08-05 | M6 | RO site cutover backups | private versioned upload + full read-back SHA-256 | source/pre/post copies verified | daily automation |
 | 2026-08-05 | M6 | `ro-site-backup.timer` | DB dump, Storage tar, upload, download, SHA-256 | first run success; 4 objects | monitor timer |
 | 2026-08-05 | M7 | Scheduled RO site backup | isolated Supabase restore + manifest comparison + Storage traversal | 65 tables / 43 176 rows; Auth 1/1; Storage 420 | observe |
+| 2026-08-05 | M6 | RO site AI/fonts + Vercel cron | Fontsource, AI feature removal, Chrome admin/font checks, public audit, dry cron smoke | Google/Yandex AI runtime and credentials removed; public flows green | observe |
 
 ## Smoke / demo checklist
 
@@ -208,5 +219,6 @@ node tests/version-smoke.js
   remote read-back verification.
 - [x] Fresh scheduled RO site backup passed isolated database restore and
   Storage archive traversal.
-- [ ] Google Gemini is removed or replaced.
+- [x] Неиспользуемый AI description runtime и Gemini/Yandex AI credentials
+  удалены; ручное поле описания и существующие данные сохранены.
 - [ ] 14-day observation window and fresh post-cutover restore drill complete.
