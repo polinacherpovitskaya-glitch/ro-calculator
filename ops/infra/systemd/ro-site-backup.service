@@ -1,0 +1,17 @@
+[Unit]
+Description=Recycle Object site Supabase backup to Yandex Object Storage
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=robot
+Group=robot
+EnvironmentFile=/home/robot/ro-site-backup/backup.env
+ExecStart=/usr/bin/bash /home/robot/ro-site-backup/backup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -6,6 +6,10 @@ on:
       - 'ops/migration/cloud-consolidation-preservation.json'
       - 'scripts/cloud-consolidation/**'
       - 'tests/cloud-consolidation-preservation-smoke.js'
+      - 'tests/ro-site-backup-smoke.js'
+      - 'ops/infra/scripts/backup-ro-site-supabase.sh'
+      - 'ops/infra/scripts/restore-ro-site-supabase-drill.sh'
+      - 'ops/infra/systemd/ro-site-backup.*'
       - '.github/workflows/cloud-consolidation-preservation.yml'
   push:
     branches:
@@ -14,6 +18,10 @@ on:
       - 'ops/migration/cloud-consolidation-preservation.json'
       - 'scripts/cloud-consolidation/**'
       - 'tests/cloud-consolidation-preservation-smoke.js'
+      - 'tests/ro-site-backup-smoke.js'
+      - 'ops/infra/scripts/backup-ro-site-supabase.sh'
+      - 'ops/infra/scripts/restore-ro-site-supabase-drill.sh'
+      - 'ops/infra/systemd/ro-site-backup.*'
       - '.github/workflows/cloud-consolidation-preservation.yml'
   workflow_dispatch:
     inputs:
@@ -49,6 +57,7 @@ jobs:
         run: |
           node tests/cloud-consolidation-preservation-smoke.js
           node tests/supabase-preservation-export-smoke.js
+          node tests/ro-site-backup-smoke.js
 
       - name: Validate preservation manifest
         env:
