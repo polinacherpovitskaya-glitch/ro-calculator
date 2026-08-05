@@ -5,10 +5,11 @@
 - Current phase: M6/M7 — завершение cutover сайта Recycle Object и окно
   наблюдения.
 - Plan file: `docs/plans/2026-08-04-russia-cloud-consolidation.md`.
-- Status: green for M3–M5 и основной data-plane M6. Калькулятор и сайт RePanel
+- Status: green for M3–M5 и основной runtime/data-plane M6. Калькулятор и сайт RePanel
   работают в Yandex; `recycleobject.ru` остаётся на разрешённом Vercel
-  frontend, но database/Auth/Storage уже обслуживаются из Yandex. Старые
-  providers сохранены как rollback и не удалены.
+  frontend, но database/Auth/Storage и AI уже обслуживаются из Yandex. Старые
+  providers сохранены как rollback и не удалены; неиспользуемый Gemini
+  credential ждёт финального admin smoke перед удалением из Vercel.
 - Last updated: 2026-08-05.
 
 ## Done
@@ -81,6 +82,18 @@
   manifest; Storage archive полностью traversed.
 - Временные локальные/VM-файлы с ключами, password hash и merge SQL удалены
   после подтверждения независимых копий.
+- Production-генератор описаний сайта RO перенесён с Gemini на YandexGPT 5
+  Lite через service account с минимальной ролью и scoped API key. В AI теперь
+  уходят только название и категория, а `x-data-logging-enabled` установлен в
+  `false`; изображения и Storage URL не передаются.
+- Google Fonts runtime удалён: Montserrat и Alfa Slab One self-hosted внутри
+  Vercel build. Preview и production Chrome подтвердили локальную загрузку
+  обоих шрифтов и отсутствие Google font links.
+- Site PR `#6` merged, Vercel production Ready; повторный public audit проверил
+  122 URL и 41 mold без ошибок.
+- Подтверждено, что два cron сайта имеют одного scheduler owner — Vercel — и
+  работают с Yandex database. `payment-recovery?dry=1` вернул dry summary без
+  mutations, email или платежных side effects.
 
 ## M2 evidence
 
@@ -114,13 +127,14 @@
 ## In progress
 
 - Наблюдение за тремя production cutover и ежедневными Yandex backups.
-- Аудит оставшегося Google Gemini runtime и Vercel cron ownership сайта RO.
+- Авторизованный admin smoke YandexGPT и удаление уже неиспользуемого Gemini
+  credential из Vercel.
 - Безопасные integration smokes без реального списания и дублирующих сообщений.
 
 ## Next
 
-- Перенести или отключить Gemini, чтобы Google не оставался runtime provider.
-- Проверить cron jobs и single-writer ownership на Vercel/Yandex.
+- Выполнить контрольную генерацию описания из admin session и удалить
+  `GEMINI_API_KEY` из Vercel Development/Preview/Production.
 - Повторять restore drill на свежих scheduled backups в окне наблюдения.
 - Продолжать 14-дневное наблюдение; Supabase/Railway/Firebase не удалять без
   отдельного подтверждения владельца.
@@ -150,7 +164,8 @@
 - Блокеров сохранности данных нет.
 - Физический decommission старых providers намеренно заблокирован до окончания
   окна наблюдения и отдельного подтверждения владельца.
-- Google Gemini остаётся последней обнаруженной лишней runtime-зависимостью.
+- Удаление неиспользуемого Gemini credential заблокировано только финальным
+  авторизованным admin smoke; production route уже работает на YandexGPT.
 
 ## Commands
 
@@ -188,6 +203,7 @@ node tests/version-smoke.js
 | 2026-08-05 | M6 | RO site cutover backups | private versioned upload + full read-back SHA-256 | source/pre/post copies verified | daily automation |
 | 2026-08-05 | M6 | `ro-site-backup.timer` | DB dump, Storage tar, upload, download, SHA-256 | first run success; 4 objects | monitor timer |
 | 2026-08-05 | M7 | Scheduled RO site backup | isolated Supabase restore + manifest comparison + Storage traversal | 65 tables / 43 176 rows; Auth 1/1; Storage 420 | observe |
+| 2026-08-05 | M6 | RO site AI/fonts + Vercel cron | YandexGPT/Fontsource cutover, Chrome font checks, public audit, dry cron smoke | Google runtime removed; public flows green | admin AI smoke, remove old env |
 
 ## Smoke / demo checklist
 
@@ -208,5 +224,6 @@ node tests/version-smoke.js
   remote read-back verification.
 - [x] Fresh scheduled RO site backup passed isolated database restore and
   Storage archive traversal.
-- [ ] Google Gemini is removed or replaced.
+- [x] Google Gemini runtime is replaced by YandexGPT; old env is unused and
+  pending removal after the final admin smoke.
 - [ ] 14-day observation window and fresh post-cutover restore drill complete.
