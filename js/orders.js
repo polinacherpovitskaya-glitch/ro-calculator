@@ -1029,22 +1029,22 @@ const Orders = {
         const oldStatus = order.status;
         const managerName = App.getCurrentEmployeeName();
 
-        await updateOrderStatus(orderId, actualStatus);
-        await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
+        try {
+            await updateOrderStatus(orderId, actualStatus);
+        } catch (error) {
+            console.error('Orders.onBoardDrop updateOrderStatus failed:', error);
+            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+            this.render();
+            return;
+        }
 
-        await this._syncReadyGoodsByStatus(orderId, order, oldStatus, actualStatus);
-
+        // The primary write has already succeeded. Reflect it immediately instead
+        // of leaving a stale card on screen while warehouse sync may time out.
         order.status = actualStatus;
-
-        await this.addChangeRecord(orderId, {
-            field: 'status',
-            old_value: App.statusLabel(oldStatus),
-            new_value: App.statusLabel(actualStatus),
-            manager: managerName || 'Неизвестный',
-        });
-
-        App.toast(`Статус: ${App.statusLabel(actualStatus)}`);
         this.render();
+        App.toast(`Статус сохранён: ${App.statusLabel(actualStatus)}`);
+
+        await this._finishStatusTransition(orderId, order, oldStatus, actualStatus, managerName || 'Неизвестный');
     },
 
     toggleSection(key) {
@@ -1264,21 +1264,74 @@ const Orders = {
 
         const managerName = App.getCurrentEmployeeName();
 
-        await updateOrderStatus(orderId, newStatus);
         const order = this.allOrders.find(item => item.id === orderId);
-        await this._syncWarehouseByStatus(orderId, oldStatus, newStatus, order && order.order_name, managerName || 'Неизвестный');
+        try {
+            await updateOrderStatus(orderId, newStatus);
+        } catch (error) {
+            console.error('Orders.onStatusChange updateOrderStatus failed:', error);
+            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+            this.render();
+            return;
+        }
 
-        await this._syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus);
+        // Keep the local list aligned with the successful remote write before
+        // running slower, independent warehouse/history side effects.
+        if (order) order.status = newStatus;
+        this.render();
+        App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
 
-        await this.addChangeRecord(orderId, {
-            field: 'status',
-            old_value: App.statusLabel(oldStatus),
-            new_value: App.statusLabel(newStatus),
-            manager: managerName || 'Неизвестный',
+        await this._finishStatusTransition(orderId, order, oldStatus, newStatus, managerName || 'Неизвестный');
+        this.loadList();
+    },
+
+    async _finishStatusTransition(orderId, order, oldStatus, newStatus, managerName) {
+        const effects = [
+            {
+                key: 'warehouse',
+                label: 'склада',
+                run: () => this._syncWarehouseByStatus(
+                    orderId,
+                    oldStatus,
+                    newStatus,
+                    order && order.order_name,
+                    managerName || 'Неизвестный'
+                ),
+            },
+            {
+                key: 'ready_goods',
+                label: 'готовой продукции',
+                run: () => this._syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus),
+            },
+            {
+                key: 'history',
+                label: 'истории изменений',
+                run: () => this.addChangeRecord(orderId, {
+                    field: 'status',
+                    old_value: App.statusLabel(oldStatus),
+                    new_value: App.statusLabel(newStatus),
+                    manager: managerName || 'Неизвестный',
+                }),
+            },
+        ];
+
+        const results = await Promise.allSettled(effects.map(effect => Promise.resolve().then(effect.run)));
+        const failed = [];
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled') return;
+            const effect = effects[index];
+            failed.push(effect);
+            console.error(`Orders status side effect failed (${effect.key}):`, result.reason);
         });
 
-        App.toast(`Статус: ${App.statusLabel(newStatus)}`);
-        this.loadList();
+        if (failed.length > 0) {
+            const labels = failed.map(effect => effect.label).join(', ');
+            App.toast(`Статус сохранён, но не завершилась синхронизация ${labels}. Не меняйте статус повторно; обновите страницу через минуту.`);
+        }
+
+        return {
+            ok: failed.length === 0,
+            failed: failed.map(effect => effect.key),
+        };
     },
 
     _isConsumedStatus(status) {

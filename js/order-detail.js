@@ -1239,29 +1239,23 @@ const OrderDetail = {
         }
         const managerName = prompt('Имя менеджера (для истории):') || 'Неизвестный';
 
-        await updateOrderStatus(this.currentOrder.id, newStatus);
-        if (typeof Orders !== 'undefined' && Orders._syncWarehouseByStatus) {
-            await Orders._syncWarehouseByStatus(
-                this.currentOrder.id,
-                o.status,
-                newStatus,
-                this.currentOrder.order_name || o.order_name,
-                managerName
-            );
-            if (Orders._syncReadyGoodsByStatus) {
-                await Orders._syncReadyGoodsByStatus(this.currentOrder.id, this.currentOrder, o.status, newStatus);
-            }
+        const oldStatus = o.status;
+        try {
+            await updateOrderStatus(this.currentOrder.id, newStatus);
+        } catch (error) {
+            console.error('OrderDetail.changeStatus updateOrderStatus failed:', error);
+            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+            return;
         }
-        await Orders.addChangeRecord(this.currentOrder.id, {
-            field: 'status',
-            old_value: App.statusLabel(o.status),
-            new_value: App.statusLabel(newStatus),
-            manager: managerName,
-        });
 
+        // Confirm the successful primary write before any slower warehouse work.
         this.currentOrder.status = newStatus;
         this.renderHeader();
-        App.toast(`Статус: ${App.statusLabel(newStatus)}`);
+        App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
+
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
+            await Orders._finishStatusTransition(this.currentOrder.id, this.currentOrder, oldStatus, newStatus, managerName);
+        }
     },
 
     openInCalculator() {

@@ -4643,6 +4643,59 @@ async function smokeOrderStatusWarehouseSync(context) {
     }
 }
 
+async function smokeStatusTransitionConfirmsPrimaryWriteBeforeSideEffects(context) {
+    context.__ordersUpdateCalls = [];
+    context.updateOrderStatus = async (orderId, status) => {
+        context.__ordersUpdateCalls.push({ orderId: Number(orderId), status: String(status) });
+    };
+
+    vm.runInContext(`
+        globalThis.__statusTransitionToasts = [];
+        globalThis.__statusTransitionRenderCount = 0;
+        globalThis.__statusTransitionLoadListCount = 0;
+        globalThis.__statusTransitionReadyGoodsCount = 0;
+        globalThis.__statusTransitionHistoryCount = 0;
+        globalThis.__statusTransitionWarehouseStarted = false;
+        globalThis.__statusTransitionWarehousePromise = new Promise((resolve, reject) => {
+            globalThis.__resolveStatusTransitionWarehouse = resolve;
+            globalThis.__rejectStatusTransitionWarehouse = reject;
+        });
+        App.toast = (message) => { globalThis.__statusTransitionToasts.push(String(message || '')); };
+        Orders.allOrders = [{ id: 42, order_name: 'Immediate Status Order', status: 'draft' }];
+        Orders.render = () => { globalThis.__statusTransitionRenderCount += 1; };
+        Orders.loadList = () => { globalThis.__statusTransitionLoadListCount += 1; };
+        Orders._syncWarehouseByStatus = async () => {
+            globalThis.__statusTransitionWarehouseStarted = true;
+            return globalThis.__statusTransitionWarehousePromise;
+        };
+        Orders._syncReadyGoodsByStatus = async () => {
+            globalThis.__statusTransitionReadyGoodsCount += 1;
+        };
+        Orders.addChangeRecord = async () => {
+            globalThis.__statusTransitionHistoryCount += 1;
+        };
+        globalThis.__statusTransitionPromise = Orders.onStatusChange(42, 'production_casting', 'draft');
+    `, context);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.deepEqual(clone(context.__ordersUpdateCalls), [{ orderId: 42, status: 'production_casting' }]);
+    assert.equal(vm.runInContext(`Orders.allOrders[0].status`, context), 'production_casting');
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionRenderCount`, context), 1);
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionLoadListCount`, context), 0);
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionWarehouseStarted`, context), true);
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionReadyGoodsCount`, context), 1);
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionHistoryCount`, context), 1);
+    assert.ok(clone(context.__statusTransitionToasts).some(message => /статус сохранён.*production_casting/i.test(message)));
+
+    vm.runInContext(`globalThis.__rejectStatusTransitionWarehouse(new Error('warehouse timeout'))`, context);
+    await vm.runInContext(`globalThis.__statusTransitionPromise`, context);
+
+    assert.equal(vm.runInContext(`Orders.allOrders[0].status`, context), 'production_casting');
+    assert.equal(vm.runInContext(`globalThis.__statusTransitionLoadListCount`, context), 1);
+    assert.ok(clone(context.__statusTransitionToasts).some(message => /статус сохранён, но не завершилась синхронизация склада/i.test(message)));
+}
+
 async function smokeCompletedStatusGuardBlocksUntilAllCollected(context) {
     context.__projectHardwareState = { checks: { '42:501': true } };
     context.__warehouseHistory = [{
@@ -8866,6 +8919,7 @@ async function main() {
     await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
     await smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context);
     await smokeOrderStatusWarehouseSync(context);
+    await smokeStatusTransitionConfirmsPrimaryWriteBeforeSideEffects(context);
     await smokeCompletedStatusGuardBlocksUntilAllCollected(context);
     await smokeOrderDetailCompletedGuard(context);
     await smokeProductionPlanCompletedGuard(context);
