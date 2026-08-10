@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru" data-retired-host="calc2">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="refresh" content="0; url=https://calc.recycleobject.ru/">
+  <link rel="canonical" href="https://calc.recycleobject.ru/">
+  <title>Калькулятор переехал</title>
+  <script>
+    (() => {
+      const target = new URL('https://calc.recycleobject.ru/');
+      if (location.pathname === '/floor' || location.pathname.startsWith('/floor/')) {
+        target.pathname = location.pathname;
+      }
+      target.search = location.search;
+      target.hash = location.hash;
+      location.replace(target.toString());
+    })();
+  </script>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; font: 16px/1.5 system-ui, sans-serif; color: #172033; background: #f5f7fb; }
+    main { max-width: 560px; padding: 32px; border: 1px solid #dce3ef; border-radius: 20px; background: #fff; box-shadow: 0 18px 60px rgba(15, 23, 42, .08); }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p { margin: 0 0 20px; color: #536078; }
+    a { display: inline-block; padding: 12px 18px; border-radius: 12px; color: #fff; background: #2f5bea; font-weight: 700; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Калькулятор теперь один</h1>
+    <p>Перенаправляем на актуальный рабочий адрес.</p>
+    <a href="https://calc.recycleobject.ru/">Открыть calc.recycleobject.ru</a>
+  </main>
+</body>
+</html>

@@ -10,7 +10,7 @@ import {
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, 'deploy/static-yandex');
-const BUCKET = process.env.RO_YANDEX_BUCKET || 'calc2.recycleobject.ru';
+const BUCKET = process.env.RO_YANDEX_BUCKET || 'calc.recycleobject.ru';
 const STORAGE_ORIGIN = process.env.RO_YANDEX_STORAGE_ORIGIN || `https://storage.yandexcloud.net/${BUCKET}`;
 
 const MIRROR_ORDER_STATUSES = new Set([
@@ -299,10 +299,10 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data));
 }
 
-// The browser asks the static mirror for a small, route-specific subset of the
+// The browser asks the production snapshot for a small, route-specific subset of the
 // snapshot (auth accounts on boot, orders only on the orders page, etc.). Keep
 // those files independent so a cold session never has to download the whole
-// mirror just to render the login selector.
+// application just to render the login selector.
 export function buildBootstrapShardPayloads(bootstrap) {
   const data = bootstrap?.data && typeof bootstrap.data === 'object' ? bootstrap.data : {};
   return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, {
@@ -324,11 +324,11 @@ function writeBootstrapShards(bootstrap) {
 
 // Core tables that must always contain rows in a healthy production snapshot.
 // Every platform fetch in buildBootstrapSnapshot() degrades independently so
-// one API error cannot publish an empty production mirror unnoticed.
+// one API error cannot publish an empty production snapshot unnoticed.
 const REQUIRED_BOOTSTRAP_TABLES = ['authAccounts', 'employees', 'orders', 'orderItems', 'settingsRows'];
 
 // Refuse to publish a degraded snapshot. Publishing an empty bootstrap.json breaks
-// calc2 for everyone offline — no login accounts, no orders, the app can't hydrate
+// calc for everyone offline — no login accounts, no orders, the app can't hydrate
 // (the витрина and #gantt read it too). Throwing here fails the build step; the
 // upload step has no `if: always()`, so it is skipped and the CDN keeps the
 // last-good snapshot until a later run catches the platform API healthy.
@@ -345,7 +345,7 @@ export function assertHealthyBootstrap(bootstrap) {
     throw new Error(
       `Refusing to publish a degraded bootstrap snapshot: required table(s) empty [${empty.join(', ')}] `
       + `(counts ${JSON.stringify(counts)}). The Yandex platform API was likely unreachable during the build. `
-      + 'Failing the build so the CDN keeps the last-good snapshot instead of emptying calc2.'
+      + 'Failing the build so the CDN keeps the last-good production snapshot.'
     );
   }
   return counts;
@@ -353,7 +353,7 @@ export function assertHealthyBootstrap(bootstrap) {
 
 // Copy the public production-floor витрина into <out>/floor and publish its
 // curated read-only snapshot (plan.json + orders/<id>.json) alongside it.
-// Non-fatal: if the snapshot build fails, the calc2 mirror must still sync and
+// Non-fatal: if the snapshot build fails, the calculator must still sync and
 // the CDN keeps the previous good floor snapshot.
 // Витрина грузит app.js/style.css по НЕверсионированным URL, а CDN отдаёт их с
 // immutable-кэшем на год — из-за этого обновления кода не доходили до цеха.

@@ -70,6 +70,7 @@ jobs:
           node tests/platform-client-smoke.js
           node tests/save-reliability-smoke.js
           node tests/bootstrap-guard-smoke.js
+          node tests/single-calculator-deploy-smoke.js
           node tests/yandex-backup-workflow-smoke.js
           node tests/cloud-consolidation-preservation-smoke.js
           node tests/supabase-preservation-export-smoke.js
@@ -96,10 +97,10 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     # Vercel hosts only the protected Telegram transport relay. Application
-    # pages, API and data are deployed to Yandex.
-    # Relay deploy must not gate the Yandex static updates.
+    # pages, API and data are deployed to Yandex by the downstream calculator
+    # static workflow.
     # When the token expires the workflow used to fail outright and hide that
-    # the static mirrors still shipped a fresh build. Treat the Vercel job as
+    # the calculator still ships through its dedicated workflow. Treat the Vercel job as
     # advisory and rely on the post-deploy verification + Telegram alert to
     # surface the real failure to the team.
     continue-on-error: true
@@ -182,7 +183,7 @@ jobs:
             echo " Telegram relay did NOT receive this commit."
             echo " Calculator pages remain available on Yandex:"
             echo "   - https://calc.recycleobject.ru/"
-            echo "   - https://calc2.recycleobject.ru/"
+            echo "   - https://calc2.recycleobject.ru/ redirects to calc"
             echo " To restore the Vercel relay deploy:"
             echo "   1. Generate a new token at https://vercel.com/account/tokens"
             echo "   2. Update the VERCEL_TOKEN secret in GitHub repo settings"
