@@ -1,7 +1,7 @@
 # Надёжное сохранение калькулятора без VPN
 
-**Дата:** 2026-08-10  
-**Статус:** implementation ready  
+**Дата:** 2026-08-10
+**Статус:** implementation ready
 **Область:** `calc.recycleobject.ru`, `calc2.recycleobject.ru`, Yandex platform API
 
 ## Проблема
