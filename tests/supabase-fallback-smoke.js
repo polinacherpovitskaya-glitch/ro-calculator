@@ -2515,6 +2515,96 @@ async function main() {
 
     {
         const context = createContext();
+        const orderId = 777126;
+        let atomicPayload = null;
+        context.createPlatformClient = () => ({
+            async saveOrderSnapshot(payload) {
+                atomicPayload = JSON.parse(JSON.stringify(payload));
+                return {
+                    data: {
+                        order: {
+                            ...payload.order,
+                            status: 'production_casting',
+                            updated_at: '2026-08-10T12:00:00.000Z',
+                        },
+                        items: payload.items,
+                    },
+                    error: null,
+                };
+            },
+            from() {
+                throw new Error('atomic calculator save must not fall back to split table writes');
+            },
+        });
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const savedOrderId = await vm.runInContext(`
+            saveOrder(
+                {
+                    id: ${orderId},
+                    order_name: 'Atomic platform save',
+                    status: 'draft',
+                    margin_percent_plan: 37.5
+                },
+                [{ item_number: 1, item_type: 'product', product_name: 'Atomic item', quantity: 50 }]
+            )
+        `, context);
+
+        assert.equal(savedOrderId, orderId);
+        assert.equal(atomicPayload.order.id, orderId);
+        assert.equal(atomicPayload.items.length, 1);
+        assert.equal(atomicPayload.items[0].order_id, orderId);
+        assert.equal(atomicPayload.items[0].id, orderId * 1000 + 1);
+        assert.equal(atomicPayload.allowEmptyItemsDelete, false);
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
+        assert.equal(cachedOrders[0].status, 'production_casting', 'local backup should use server-preserved workflow status');
+        assert.equal(cachedItems[0].product_name, 'Atomic item');
+        assert.equal(context.localStorage.getItem('ro_calc_dirty_datasets'), null, 'complete atomic save should clear dirty markers');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 777127;
+        const legacyFactory = context.createPlatformClient;
+        let atomicAttempts = 0;
+        context.createPlatformClient = () => {
+            const client = legacyFactory();
+            client.saveOrderSnapshot = async () => {
+                atomicAttempts += 1;
+                return { data: null, error: { code: '404', status: 404, message: 'Not Found' } };
+            };
+            return client;
+        };
+        context.__tableRows.orders = [{ id: orderId, order_name: 'Before deploy window', status: 'draft' }];
+        context.__tableRows.order_items = [];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const savedOrderId = await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'Deploy window fallback', status: 'draft' },
+                [{ item_number: 1, item_type: 'product', product_name: 'Fallback item', quantity: 25 }]
+            )
+        `, context);
+
+        assert.equal(savedOrderId, orderId);
+        assert.equal(atomicAttempts, 1);
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'orders' && call.action === 'update'),
+            true,
+            'old API deploy window should fall back to the compatibility order write',
+        );
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'upsert'),
+            true,
+            'old API deploy window should still persist order items',
+        );
+    }
+
+    {
+        const context = createContext();
         const orderId = 777125;
         context.__tableRows.orders = [{
             id: orderId,

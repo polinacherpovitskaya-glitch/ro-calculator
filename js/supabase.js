@@ -2309,6 +2309,60 @@ async function saveOrder(order, items = []) {
         // the exact write timestamp in localStorage so its stale snapshot cannot
         // win the freshness comparison on the next page load.
         localBackupOrder.updated_at = orderData.updated_at;
+        const allowEmptyItemsDelete = order && (
+            order.__allowEmptyItemsDelete === true
+            || order.allow_empty_items_delete === true
+        );
+        const itemWriteTimestamp = new Date().toISOString();
+        const itemRows = (Array.isArray(items) ? items : []).map((item, i) => {
+            const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
+            filtered.order_id = orderId;
+            filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
+            filtered.created_at = item.created_at || itemWriteTimestamp;
+            filtered.updated_at = itemWriteTimestamp;
+            return filtered;
+        });
+
+        // The Yandex platform can persist the header and complete item set in a
+        // single transaction. Keep the query-builder sequence below as a
+        // compatibility fallback for old/test transports only.
+        if (typeof supabaseClient.saveOrderSnapshot === 'function') {
+            try {
+                const { data, error } = await _withRemoteTimeout('write', 'save complete order', () => (
+                    supabaseClient.saveOrderSnapshot({
+                        order: orderData,
+                        items: itemRows,
+                        allowEmptyItemsDelete,
+                    })
+                ));
+                const atomicEndpointUnavailable = error
+                    && [404, 405].includes(Number(error.status || error.code));
+                if (atomicEndpointUnavailable) {
+                    // During deploy the static bundle can reach production a few
+                    // minutes before the API container. Use the old safe sequence
+                    // only for that explicit compatibility window.
+                    console.warn('[saveOrder] Atomic endpoint is not deployed yet; using compatibility save path');
+                } else if (error || !data?.order) {
+                    const saveError = error || { code: 'INVALID_SAVE_RESPONSE', message: 'пустой ответ сервера' };
+                    _markSharedDatabaseProblem(saveError);
+                    throw new Error('Не удалось сохранить заказ целиком: ' + (saveError.message || saveError.code || 'ошибка базы'));
+                } else {
+                    localBackupOrder.status = data.order.status || localBackupOrder.status || 'draft';
+                    localBackupOrder.deleted_at = data.order.deleted_at || localBackupOrder.deleted_at || null;
+                    localBackupOrder.updated_at = data.order.updated_at || orderData.updated_at;
+                    if (Array.isArray(data.items)) {
+                        localBackupItems = data.items.map(item => _hydrateOrderItemRow(item));
+                    }
+                    _saveOrderLocally(localBackupOrder, localBackupItems);
+                    _clearLocalDatasetDirty(['orders', 'orderItems']);
+                    _invalidateBootstrapCache(['orders', 'orderItems']);
+                    return orderId;
+                }
+            } catch (error) {
+                saveEmergencyLocalCopy(error);
+                throw error;
+            }
+        }
 
         try {
             // Try update first if order exists, otherwise insert
@@ -2319,11 +2373,6 @@ async function saveOrder(order, items = []) {
                 _markSharedDatabaseProblem(existingError);
                 throw new Error('Не удалось проверить заказ перед сохранением: ' + (existingError.message || existingError.code || 'ошибка базы'));
             }
-
-            const allowEmptyItemsDelete = order && (
-                order.__allowEmptyItemsDelete === true
-                || order.allow_empty_items_delete === true
-            );
 
             if (existing) {
                 const existingSnapshot = _parseJsonObjectSnapshot(existing.calculator_data);
@@ -2367,15 +2416,7 @@ async function saveOrder(order, items = []) {
             }
 
             if (items.length > 0) {
-                const nowIso = new Date().toISOString();
-                const rows = items.map((item, i) => {
-                    const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
-                    filtered.order_id = orderId;
-                    filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
-                    filtered.created_at = item.created_at || nowIso;
-                    filtered.updated_at = nowIso;
-                    return filtered;
-                });
+                const rows = itemRows;
                 const { error: upsertItemsError } = await _withRemoteTimeout('write', 'upsert order items', () => supabaseClient
                     .from('order_items')
                     .upsert(rows, { onConflict: 'id' }));

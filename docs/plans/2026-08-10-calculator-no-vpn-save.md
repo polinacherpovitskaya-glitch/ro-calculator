@@ -2,31 +2,31 @@
 
 **Spec:** `docs/specs/2026-08-10-calculator-no-vpn-save.md`
 
-## M1. Контракт `[ ]`
+## M1. Контракт `[x]`
 
-- [ ] Добавить атомарный `POST /api/compat/order-save`.
-- [ ] Сохранить workflow/deleted status и объединение `calculator_data`.
-- [ ] Синхронизировать позиции и stale cleanup в одной транзакции.
-- [ ] Покрыть empty-items safety и idempotent replay API-тестами.
+- [x] Добавить атомарный `POST /api/compat/order-save`.
+- [x] Сохранить workflow/deleted status и объединение `calculator_data`.
+- [x] Синхронизировать позиции и stale cleanup в одной транзакции.
+- [x] Покрыть empty-items safety и idempotent replay API-тестами.
 
-## M2. Browser transport `[ ]`
+## M2. Browser transport `[x]`
 
-- [ ] Добавить `PlatformClient.saveOrderSnapshot()`.
-- [ ] Повторять временный сбой с тем же `Idempotency-Key`.
-- [ ] Покрыть `503 -> 200` regression smoke.
+- [x] Добавить `PlatformClient.saveOrderSnapshot()`.
+- [x] Повторять временный сбой с тем же `Idempotency-Key`.
+- [x] Покрыть `503 -> 200` regression smoke.
 
-## M3. Calculator data layer `[ ]`
+## M3. Calculator data layer `[x]`
 
-- [ ] Переключить production `saveOrder()` на atomic endpoint.
-- [ ] Сохранить старый query-builder как fallback.
-- [ ] Обновлять local backup/dirty flags только после полного успеха.
-- [ ] Добавить data-layer regression smoke.
+- [x] Переключить production `saveOrder()` на atomic endpoint.
+- [x] Сохранить старый query-builder как fallback.
+- [x] Обновлять local backup/dirty flags только после полного успеха.
+- [x] Добавить data-layer regression smoke.
 
 ## M4. Релиз `[ ]`
 
-- [ ] Обновить app version с `v439` до следующей версии по `origin/main`.
-- [ ] Обновить cache-bust для изменённых production scripts.
-- [ ] Запустить calculator, platform, API, version и Yandex smokes.
+- [x] Обновить app version с `v439` до следующей версии по `origin/main`.
+- [x] Обновить cache-bust для изменённых production scripts.
+- [x] Запустить calculator, platform, API, version и Yandex smokes.
 - [ ] Запушить PR и дождаться deploy + live smoke workflows.
 - [ ] Проверить версию и health на обоих production-доменах.
 

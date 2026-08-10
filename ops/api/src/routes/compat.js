@@ -207,6 +207,139 @@ async function writeRow(client, table, primaryKey, row, previousSourceId = null)
   );
 }
 
+function parseJsonObjectSnapshot(value) {
+  if (!value) return {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) return cloneRow(value);
+  if (typeof value !== 'string') return {};
+  let parsed = value;
+  for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? cloneRow(parsed) : {};
+}
+
+function syncOrderStatusSnapshot(calculatorData, status, updatedAt) {
+  const snapshot = parseJsonObjectSnapshot(calculatorData);
+  snapshot.status = status || 'draft';
+  if (updatedAt) snapshot.updated_at = updatedAt;
+  return JSON.stringify(snapshot);
+}
+
+function normalizeOrderSaveItems(rawItems, orderId) {
+  if (!Array.isArray(rawItems)) {
+    throw new CompatError(400, 'INVALID_ORDER_ITEMS', 'Позиции заказа должны быть массивом');
+  }
+  if (rawItems.length > 1000) {
+    throw new CompatError(413, 'ORDER_ITEMS_LIMIT', 'В одном заказе допускается не более 1000 позиций');
+  }
+
+  const seenIds = new Set();
+  return rawItems.map((rawItem) => {
+    if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
+      throw new CompatError(400, 'INVALID_ORDER_ITEM', 'Каждая позиция заказа должна быть объектом');
+    }
+    const item = { ...cloneRow(rawItem), order_id: orderId };
+    const itemId = sourceId(item, ['id']);
+    if (seenIds.has(itemId)) {
+      throw new CompatError(400, 'DUPLICATE_ORDER_ITEM', `Позиция ${itemId} передана несколько раз`);
+    }
+    seenIds.add(itemId);
+    return item;
+  });
+}
+
+export async function executeAtomicOrderSave(client, body) {
+  const incomingOrder = cloneRow(body?.order);
+  if (!incomingOrder || typeof incomingOrder !== 'object' || Array.isArray(incomingOrder)) {
+    throw new CompatError(400, 'INVALID_ORDER', 'Для сохранения нужен объект заказа');
+  }
+  const orderId = incomingOrder.id;
+  sourceId(incomingOrder, ['id']);
+  const incomingItems = normalizeOrderSaveItems(body?.items || [], orderId);
+  const allowEmptyItemsDelete = body?.allowEmptyItemsDelete === true;
+
+  // Every legacy save used to lock/write these tables in separate requests.
+  // Taking both locks in a stable order makes the order header and item set one
+  // indivisible snapshot while remaining compatible with /query mutations.
+  for (const table of ['order_items', 'orders']) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`compat:${table}`]);
+  }
+
+  const orderRows = await readRows(client, 'orders', true);
+  const itemRows = await readRows(client, 'order_items', true);
+  const existingOrder = orderRows.find((row) => equalValue(row?.id, orderId)) || null;
+  const nowIso = new Date().toISOString();
+  const savedOrder = existingOrder
+    ? { ...existingOrder, ...incomingOrder }
+    : { ...incomingOrder, created_at: incomingOrder.created_at || nowIso };
+
+  if (existingOrder) {
+    savedOrder.calculator_data = JSON.stringify({
+      ...parseJsonObjectSnapshot(existingOrder.calculator_data),
+      ...parseJsonObjectSnapshot(incomingOrder.calculator_data),
+    });
+    if (existingOrder.status === 'deleted') {
+      savedOrder.status = 'deleted';
+      savedOrder.deleted_at = existingOrder.deleted_at || savedOrder.deleted_at || nowIso;
+    } else if (
+      (incomingOrder.status || 'draft') === 'draft'
+      && existingOrder.status
+      && !['draft', 'calculated'].includes(existingOrder.status)
+    ) {
+      savedOrder.status = existingOrder.status;
+    }
+  }
+  savedOrder.updated_at = incomingOrder.updated_at || nowIso;
+  savedOrder.calculator_data = syncOrderStatusSnapshot(
+    savedOrder.calculator_data,
+    savedOrder.status || 'draft',
+    savedOrder.updated_at,
+  );
+  await writeRow(client, 'orders', ['id'], savedOrder);
+
+  const existingItemsForOrder = itemRows.filter((item) => equalValue(item?.order_id, orderId));
+  let savedItems = [];
+  if (incomingItems.length > 0) {
+    const incomingIds = new Set(incomingItems.map((item) => sourceId(item, ['id'])));
+    for (const incomingItem of incomingItems) {
+      const current = itemRows.find((item) => equalValue(item?.id, incomingItem.id));
+      const savedItem = current ? { ...current, ...incomingItem, order_id: orderId } : incomingItem;
+      await writeRow(client, 'order_items', ['id'], savedItem);
+      savedItems.push(savedItem);
+    }
+    for (const staleItem of existingItemsForOrder) {
+      const staleId = sourceId(staleItem, ['id']);
+      if (incomingIds.has(staleId)) continue;
+      await client.query(
+        `DELETE FROM compat_rows WHERE table_name = 'order_items' AND source_id = $1`,
+        [staleId],
+      );
+    }
+  } else if (existingItemsForOrder.length > 0 && existingOrder && !allowEmptyItemsDelete) {
+    savedItems = existingItemsForOrder;
+  } else {
+    for (const staleItem of existingItemsForOrder) {
+      await client.query(
+        `DELETE FROM compat_rows WHERE table_name = 'order_items' AND source_id = $1`,
+        [sourceId(staleItem, ['id'])],
+      );
+    }
+  }
+
+  return {
+    data: {
+      order: savedOrder,
+      items: savedItems,
+      preserved_empty_items: incomingItems.length === 0 && savedItems.length > 0,
+    },
+    error: null,
+  };
+}
+
 function conflictColumns(body, primaryKey) {
   const explicit = String(body.onConflict || '')
     .split(',')
@@ -327,6 +460,13 @@ async function executeMutation(req, client, table, primaryKey, body) {
   const projected = safeRows.map((row) => projectRow(row, body.columns));
   return { data: cardinalityResult(projected, body.cardinality), error: null };
 }
+
+router.post('/order-save', requireAuth, asyncHandler(async (req, res) => {
+  return withIdempotency(req, res, async () => {
+    const result = await withTransaction((client) => executeAtomicOrderSave(client, req.body || {}));
+    res.json(result);
+  });
+}));
 
 router.post('/query', requireAuth, asyncHandler(async (req, res) => {
   const body = req.body || {};
