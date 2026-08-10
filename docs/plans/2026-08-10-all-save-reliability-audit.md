@@ -9,11 +9,11 @@
 - [x] Подтвердить, что compat/storage не повторяют краткий сбой.
 - [x] Подтвердить concurrency gap до фиксации idempotency response.
 
-## M2. Серверная идемпотентность `[ ]`
+## M2. Серверная идемпотентность `[x]`
 
 - [x] Атомарно резервировать одинаковые idempotency keys до мутации.
-- [ ] Проверить одновременный replay с generated-id insert.
-- [ ] Сохранить conflict-защиту ключа для другого method/path.
+- [x] Проверить одновременный replay с generated-id insert.
+- [x] Сохранить conflict-защиту ключа для другого method/path.
 
 ## M3. Общий mutation transport `[x]`
 
@@ -32,7 +32,7 @@
 ## M5. Релиз `[ ]`
 
 - [ ] Прогнать полный статический, API и браузерный набор.
-- [ ] Получить следующую версию от свежего `origin/main` и обновить anchors.
+- [x] Получить следующую версию от свежего `origin/main` и обновить anchors.
 - [ ] Запушить PR, пройти PostgreSQL CI и объединить.
 - [ ] Дождаться API/static/live/mirror/write-back deploy workflows.
 - [ ] Проверить версию, API/DB health и авторизованную страницу на обоих доменах.
