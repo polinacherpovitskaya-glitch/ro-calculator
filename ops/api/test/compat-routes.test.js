@@ -61,6 +61,7 @@ test('compat route filters, projects, mutates and replays writes idempotently', 
   const port = await startServer(t);
   const cookie = await login(port);
   const baseId = Date.now() * 1000;
+  const insertKey = crypto.randomUUID();
   t.after(async () => {
     await getPool().query(
       `DELETE FROM compat_rows
@@ -68,9 +69,9 @@ test('compat route filters, projects, mutates and replays writes idempotently', 
           AND source_id IN ($1, $2)`,
       [String(baseId), String(baseId + 1)],
     );
+    await getPool().query('DELETE FROM idempotency_keys WHERE key = $1', [insertKey]);
   });
 
-  const insertKey = crypto.randomUUID();
   const insertBody = {
     table: 'app_colors',
     action: 'insert',
@@ -91,6 +92,13 @@ test('compat route filters, projects, mutates and replays writes idempotently', 
   const replayed = await compatQuery(port, cookie, insertBody, insertKey);
   assert.equal(replayed.status, 200);
   assert.equal((await replayed.json()).data.length, 2);
+
+  const conflicting = await compatOrderSave(port, cookie, {
+    order: { id: baseId },
+    items: [],
+  }, insertKey);
+  assert.equal(conflicting.status, 409);
+  assert.equal((await conflicting.json()).error.code, 'IDEMPOTENCY_KEY_CONFLICT');
 
   const selected = await compatQuery(port, cookie, {
     table: 'app_colors',
@@ -114,6 +122,52 @@ test('compat route filters, projects, mutates and replays writes idempotently', 
     cardinality: 'single',
   });
   assert.deepEqual((await updated.json()).data, { id: baseId, name: 'Тёмно-синий' });
+});
+
+test('concurrent compat retries with one key execute a generated-id insert once', async (t) => {
+  const port = await startServer(t);
+  const cookie = await login(port);
+  const key = crypto.randomUUID();
+  const marker = `Concurrent replay ${key}`;
+  const values = Array.from({ length: 64 }, (_, rank) => ({ name: marker, rank }));
+
+  t.after(async () => {
+    await getPool().query(
+      `DELETE FROM compat_rows
+        WHERE table_name = 'app_colors'
+          AND data->>'name' = $1`,
+      [marker],
+    );
+    await getPool().query('DELETE FROM idempotency_keys WHERE key = $1', [key]);
+  });
+
+  const body = {
+    table: 'app_colors',
+    action: 'insert',
+    values,
+    columns: 'id,name,rank',
+    returning: true,
+  };
+  const [first, second] = await Promise.all([
+    compatQuery(port, cookie, body, key),
+    compatQuery(port, cookie, body, key),
+  ]);
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  const firstBody = await first.json();
+  const secondBody = await second.json();
+  assert.deepEqual(secondBody, firstBody, 'the concurrent caller must receive the cached first response');
+  assert.equal(firstBody.data.length, values.length);
+
+  const selected = await compatQuery(port, cookie, {
+    table: 'app_colors',
+    action: 'select',
+    columns: 'id,name,rank',
+    filters: [{ op: 'eq', column: 'name', value: marker }],
+  });
+  assert.equal(selected.status, 200);
+  assert.equal((await selected.json()).data.length, values.length, 'the insert must not run twice');
 });
 
 test('compat route supports generated numeric ids and embedded JSON projection', async (t) => {

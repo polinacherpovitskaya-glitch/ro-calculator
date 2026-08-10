@@ -70,13 +70,18 @@ function _markSupabaseAccessProblem(error) {
 
 function _isSharedDatabaseConnectivityError(error) {
     const message = String(error?.message || error || '').toLowerCase();
-    const code = String(error?.code || error?.status || '').toLowerCase();
+    const code = String(error?.code || '').toLowerCase();
+    const status = Number(error?.status || 0);
     return _isSupabaseAccessError(error)
+        || [502, 503, 504].includes(status)
         || code === '502'
         || code === '503'
         || code === '504'
         || code === 'timeout'
+        || code === 'network_error'
+        || code === 'aborterror'
         || message.includes('timeout')
+        || message.includes('aborted')
         || message.includes('bad gateway')
         || message.includes('response code 502')
         || message.includes('failed to fetch')
@@ -7812,7 +7817,16 @@ async function _withRemoteTimeout(kind, label, executor) {
             Promise.resolve().then(executor),
             new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
         ]);
-        _clearSharedDatabaseProblem();
+        // PlatformClient reports exhausted network retries in the Supabase-like
+        // `{ data, error }` result shape. Do not treat that resolved wrapper as
+        // a healthy request: keep the warning truthful until a later request
+        // actually succeeds. A transient first-attempt failure is invisible
+        // here because the transport resolves only after its retry succeeds.
+        if (result?.error && _isSharedDatabaseConnectivityError(result.error)) {
+            _markSharedDatabaseProblem(result.error);
+        } else {
+            _clearSharedDatabaseProblem();
+        }
         return result;
     } catch (error) {
         _markSharedDatabaseProblem(error);

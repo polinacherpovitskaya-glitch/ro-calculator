@@ -35,7 +35,7 @@
         return new Promise(resolve => global.setTimeout(resolve, ms));
     }
 
-    async function postMutationJson(url, body, idempotencyKey) {
+    async function postMutation(url, buildOptions, idempotencyKey) {
         let lastError = null;
         for (let attempt = 0; attempt < MUTATION_ATTEMPTS; attempt += 1) {
             const controller = typeof global.AbortController === 'function'
@@ -45,16 +45,15 @@
                 ? global.setTimeout(() => controller.abort(), MUTATION_ATTEMPT_TIMEOUT_MS)
                 : null;
             try {
+                const options = typeof buildOptions === 'function' ? buildOptions() : {};
                 const response = await global.fetch(url, {
-                    method: 'POST',
                     credentials: 'include',
                     cache: 'no-store',
+                    ...options,
                     headers: {
-                        'Content-Type': 'application/json',
-                        Accept: 'application/json',
+                        ...(options.headers || {}),
                         'Idempotency-Key': idempotencyKey,
                     },
-                    body: JSON.stringify(body),
                     ...(controller ? { signal: controller.signal } : {}),
                 });
                 const payload = await response.json().catch(() => ({}));
@@ -71,6 +70,17 @@
             await wait(MUTATION_RETRY_DELAY_MS);
         }
         throw lastError || new Error('Platform mutation failed');
+    }
+
+    async function postMutationJson(url, body, idempotencyKey) {
+        return postMutation(url, () => ({
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify(body),
+        }), idempotencyKey);
     }
 
     function encodeObjectPath(path) {
@@ -188,8 +198,6 @@
 
         async execute() {
             const mutation = this.action !== 'select';
-            const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-            if (mutation) headers['Idempotency-Key'] = requestId();
             const body = {
                 table: this.table,
                 action: this.action,
@@ -204,14 +212,22 @@
                 returning: this.returning,
             };
             try {
-                const response = await global.fetch(`${this.client.apiUrl}/api/compat/query`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    cache: 'no-store',
-                    headers,
-                    body: JSON.stringify(body),
-                });
-                const payload = await response.json().catch(() => ({}));
+                const { response, payload } = mutation
+                    ? await postMutationJson(
+                        `${this.client.apiUrl}/api/compat/query`,
+                        body,
+                        requestId(),
+                    )
+                    : await (async () => {
+                        const response = await global.fetch(`${this.client.apiUrl}/api/compat/query`, {
+                            method: 'POST',
+                            credentials: 'include',
+                            cache: 'no-store',
+                            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                            body: JSON.stringify(body),
+                        });
+                        return { response, payload: await response.json().catch(() => ({})) };
+                    })();
                 if (!response.ok) return { data: null, error: apiError(payload, response.status) };
                 return {
                     data: payload?.data ?? null,
@@ -243,23 +259,23 @@
 
         async upload(path, file, options = {}) {
             try {
-                const form = new FormData();
-                form.append('file', file, file?.name || 'upload');
-                form.append('path', String(path || ''));
-                form.append('upsert', options.upsert ? 'true' : 'false');
-                form.append('contentType', options.contentType || file?.type || 'application/octet-stream');
-                const response = await global.fetch(
+                const result = await postMutation(
                     `${this.client.apiUrl}/api/storage/${encodeURIComponent(this.bucket)}/upload`,
-                    {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: { 'Idempotency-Key': requestId() },
-                        body: form,
+                    () => {
+                        const form = new FormData();
+                        form.append('file', file, file?.name || 'upload');
+                        form.append('path', String(path || ''));
+                        form.append('upsert', options.upsert ? 'true' : 'false');
+                        form.append('contentType', options.contentType || file?.type || 'application/octet-stream');
+                        return {
+                            method: 'POST',
+                            body: form,
+                        };
                     },
+                    requestId(),
                 );
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) return { data: null, error: apiError(payload, response.status) };
-                return { data: payload.data, error: null };
+                if (!result.response.ok) return { data: null, error: apiError(result.payload, result.response.status) };
+                return { data: result.payload.data, error: null };
             } catch (error) {
                 return { data: null, error: apiError({ code: 'NETWORK_ERROR', message: error?.message || error }, 0) };
             }
@@ -292,21 +308,13 @@
 
         async remove(paths) {
             try {
-                const response = await global.fetch(
+                const result = await postMutationJson(
                     `${this.client.apiUrl}/api/storage/${encodeURIComponent(this.bucket)}/remove`,
-                    {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Idempotency-Key': requestId(),
-                        },
-                        body: JSON.stringify({ paths: Array.isArray(paths) ? paths : [paths] }),
-                    },
+                    { paths: Array.isArray(paths) ? paths : [paths] },
+                    requestId(),
                 );
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) return { data: null, error: apiError(payload, response.status) };
-                return { data: payload.data, error: null };
+                if (!result.response.ok) return { data: null, error: apiError(result.payload, result.response.status) };
+                return { data: result.payload.data, error: null };
             } catch (error) {
                 return { data: null, error: apiError({ code: 'NETWORK_ERROR', message: error?.message || error }, 0) };
             }
