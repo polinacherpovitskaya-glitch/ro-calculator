@@ -7,6 +7,9 @@
     'use strict';
 
     const DEFAULT_API_URL = 'https://api.recycleobject.ru';
+    const MUTATION_ATTEMPTS = 2;
+    const MUTATION_ATTEMPT_TIMEOUT_MS = 12000;
+    const MUTATION_RETRY_DELAY_MS = 250;
 
     function requestId() {
         if (global.crypto && typeof global.crypto.randomUUID === 'function') {
@@ -22,6 +25,52 @@
             message: String(error?.message || `Platform API error ${status || ''}`).trim(),
             status: Number(status) || 0,
         };
+    }
+
+    function isRetryableMutationStatus(status) {
+        return [502, 503, 504].includes(Number(status));
+    }
+
+    function wait(ms) {
+        return new Promise(resolve => global.setTimeout(resolve, ms));
+    }
+
+    async function postMutationJson(url, body, idempotencyKey) {
+        let lastError = null;
+        for (let attempt = 0; attempt < MUTATION_ATTEMPTS; attempt += 1) {
+            const controller = typeof global.AbortController === 'function'
+                ? new global.AbortController()
+                : null;
+            const timer = controller && typeof global.setTimeout === 'function'
+                ? global.setTimeout(() => controller.abort(), MUTATION_ATTEMPT_TIMEOUT_MS)
+                : null;
+            try {
+                const response = await global.fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        'Idempotency-Key': idempotencyKey,
+                    },
+                    body: JSON.stringify(body),
+                    ...(controller ? { signal: controller.signal } : {}),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (response.ok || !isRetryableMutationStatus(response.status) || attempt === MUTATION_ATTEMPTS - 1) {
+                    return { response, payload };
+                }
+                lastError = apiError(payload, response.status);
+            } catch (error) {
+                lastError = error;
+                if (attempt === MUTATION_ATTEMPTS - 1) throw error;
+            } finally {
+                if (timer) global.clearTimeout(timer);
+            }
+            await wait(MUTATION_RETRY_DELAY_MS);
+        }
+        throw lastError || new Error('Platform mutation failed');
     }
 
     function encodeObjectPath(path) {
@@ -141,25 +190,26 @@
             const mutation = this.action !== 'select';
             const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
             if (mutation) headers['Idempotency-Key'] = requestId();
+            const body = {
+                table: this.table,
+                action: this.action,
+                columns: this.columns,
+                values: this.values,
+                filters: this.filters,
+                orders: this.orders,
+                limit: Number.isInteger(this.limitValue) ? this.limitValue : undefined,
+                range: this.rangeValue,
+                cardinality: this.cardinality,
+                onConflict: this.onConflict,
+                returning: this.returning,
+            };
             try {
                 const response = await global.fetch(`${this.client.apiUrl}/api/compat/query`, {
                     method: 'POST',
                     credentials: 'include',
                     cache: 'no-store',
                     headers,
-                    body: JSON.stringify({
-                        table: this.table,
-                        action: this.action,
-                        columns: this.columns,
-                        values: this.values,
-                        filters: this.filters,
-                        orders: this.orders,
-                        limit: Number.isInteger(this.limitValue) ? this.limitValue : undefined,
-                        range: this.rangeValue,
-                        cardinality: this.cardinality,
-                        onConflict: this.onConflict,
-                        returning: this.returning,
-                    }),
+                    body: JSON.stringify(body),
                 });
                 const payload = await response.json().catch(() => ({}));
                 if (!response.ok) return { data: null, error: apiError(payload, response.status) };
@@ -287,6 +337,32 @@
 
         from(table) {
             return new PlatformQuery(this, table);
+        }
+
+        async saveOrderSnapshot(payload = {}) {
+            try {
+                const result = await postMutationJson(
+                    `${this.apiUrl}/api/compat/order-save`,
+                    {
+                        order: payload.order,
+                        items: Array.isArray(payload.items) ? payload.items : [],
+                        allowEmptyItemsDelete: payload.allowEmptyItemsDelete === true,
+                    },
+                    requestId(),
+                );
+                if (!result.response.ok) {
+                    return { data: null, error: apiError(result.payload, result.response.status) };
+                }
+                return {
+                    data: result.payload?.data ?? null,
+                    error: result.payload?.error ? apiError(result.payload.error, result.response.status) : null,
+                };
+            } catch (error) {
+                return {
+                    data: null,
+                    error: apiError({ code: 'NETWORK_ERROR', message: error?.message || error }, 0),
+                };
+            }
         }
     }
 

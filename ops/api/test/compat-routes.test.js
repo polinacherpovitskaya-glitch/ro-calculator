@@ -45,6 +45,18 @@ async function compatQuery(port, cookie, body, key = crypto.randomUUID()) {
   });
 }
 
+async function compatOrderSave(port, cookie, body, key = crypto.randomUUID()) {
+  return fetch(`http://127.0.0.1:${port}/api/compat/order-save`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      cookie,
+      'Idempotency-Key': key,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 test('compat route filters, projects, mutates and replays writes idempotently', async (t) => {
   const port = await startServer(t);
   const cookie = await login(port);
@@ -130,6 +142,96 @@ test('compat route supports generated numeric ids and embedded JSON projection',
       [String(body.data.id)],
     );
   });
+});
+
+test('atomic calculator save preserves status and replaces the complete item snapshot', async (t) => {
+  const port = await startServer(t);
+  const cookie = await login(port);
+  const orderId = Date.now() * 1000;
+  const currentItemId = orderId + 1;
+  const staleItemId = orderId + 2;
+  const saveKey = crypto.randomUUID();
+  t.after(async () => {
+    await getPool().query(
+      `DELETE FROM compat_rows
+        WHERE (table_name = 'orders' AND source_id = $1)
+           OR (table_name = 'order_items' AND source_id IN ($2, $3))`,
+      [String(orderId), String(currentItemId), String(staleItemId)],
+    );
+  });
+
+  assert.equal((await compatQuery(port, cookie, {
+    table: 'orders',
+    action: 'insert',
+    values: {
+      id: orderId,
+      order_name: 'Atomic save smoke',
+      status: 'production_casting',
+      calculator_data: JSON.stringify({ id: orderId, status: 'production_casting', legacy: true }),
+    },
+  })).status, 200);
+  assert.equal((await compatQuery(port, cookie, {
+    table: 'order_items',
+    action: 'insert',
+    values: [
+      { id: currentItemId, order_id: orderId, item_number: 1, product_name: 'Before' },
+      { id: staleItemId, order_id: orderId, item_number: 2, product_name: 'Stale' },
+    ],
+  })).status, 200);
+
+  const saved = await compatOrderSave(port, cookie, {
+    order: {
+      id: orderId,
+      order_name: 'Atomic save smoke updated',
+      status: 'draft',
+      updated_at: '2026-08-10T12:00:00.000Z',
+      calculator_data: JSON.stringify({ id: orderId, status: 'draft', current: true }),
+    },
+    items: [{
+      id: currentItemId,
+      order_id: orderId,
+      item_number: 1,
+      product_name: 'After',
+    }],
+    allowEmptyItemsDelete: false,
+  }, saveKey);
+  assert.equal(saved.status, 200);
+  const savedBody = await saved.json();
+  assert.equal(savedBody.data.order.status, 'production_casting', 'draft save must not roll back workflow status');
+  assert.equal(savedBody.data.items.length, 1);
+  assert.equal(savedBody.data.items[0].product_name, 'After');
+  assert.equal(JSON.parse(savedBody.data.order.calculator_data).legacy, true, 'existing calculator snapshot fields survive');
+  assert.equal(JSON.parse(savedBody.data.order.calculator_data).current, true, 'incoming calculator snapshot fields are merged');
+  assert.equal(JSON.parse(savedBody.data.order.calculator_data).status, 'production_casting');
+
+  const replayed = await compatOrderSave(port, cookie, {
+    order: { id: orderId, status: 'draft' },
+    items: [],
+  }, saveKey);
+  assert.equal(replayed.status, 200);
+  assert.deepEqual(await replayed.json(), savedBody, 'same idempotency key must replay the first complete response');
+
+  const selectedItems = await compatQuery(port, cookie, {
+    table: 'order_items',
+    action: 'select',
+    columns: 'id,order_id,product_name',
+    filters: [{ op: 'eq', column: 'order_id', value: orderId }],
+  });
+  assert.deepEqual((await selectedItems.json()).data, [{
+    id: currentItemId,
+    order_id: orderId,
+    product_name: 'After',
+  }]);
+
+  const emptySave = await compatOrderSave(port, cookie, {
+    order: { id: orderId, order_name: 'Keep existing items', status: 'draft' },
+    items: [],
+    allowEmptyItemsDelete: false,
+  });
+  assert.equal(emptySave.status, 200);
+  const emptyBody = await emptySave.json();
+  assert.equal(emptyBody.data.preserved_empty_items, true);
+  assert.equal(emptyBody.data.items.length, 1, 'empty save must preserve existing items by default');
 });
 
 test('calculator CORS preflight allows both production mirrors with credentials', async (t) => {
