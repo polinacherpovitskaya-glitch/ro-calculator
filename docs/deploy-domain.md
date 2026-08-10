@@ -1,79 +1,87 @@
-# Deploying the calculator domain
+# Deployment домена калькулятора
 
-The reliable deployment path is:
-
-1. push to `main`;
-2. GitHub Actions runs `Deploy GitHub Pages`;
-3. the workflow deploys the same commit to GitHub Pages and Vercel;
-4. Vercel aliases the production deployment to `calc.recycleobject.ru`;
-5. `Live site smoke` checks `https://calc.recycleobject.ru/` and verifies `js/version.json`.
-
-Current production URL:
+Единственный рабочий адрес приложения:
 
 ```text
 https://calc.recycleobject.ru/
 ```
 
-Backup Pages URL:
+`https://calc2.recycleobject.ru/` больше не является зеркалом приложения. Он
+получает только лёгкую redirect-страницу и нужен для совместимости со старыми
+закладками. Публичная витрина цеха теперь открывается по адресу:
 
 ```text
-https://polinacherpovitskaya-glitch.github.io/ro-calculator/
+https://calc.recycleobject.ru/floor/
 ```
 
-## Required GitHub Secrets
+## Release flow
 
-The production deploy job needs these repository secrets:
+1. Push или merge в `main` запускает `Deploy GitHub Pages`.
+2. Verify job выполняет repo-local smoke tests. Vercel job отдельно публикует
+   только защищённый Telegram relay; он не хостит приложение.
+3. После успешного release gate workflow `Calculator static deploy` один раз
+   собирает snapshot данных и статический bundle.
+4. Bundle загружается только в Object Storage bucket `calc.recycleobject.ru`:
+   ассеты параллельно, затем HTML, затем `js/version.json` как финальный маркер.
+5. В `calc2.recycleobject.ru` публикуются только redirect entry points
+   (`index.html`, `404.html`, `floor/index.html`). Старые объекты не удаляются.
+6. После публикации запускаются `Live site smoke`, `Calculator platform smoke`
+   и `Calculator write-back smoke`.
+
+У статического deploy приложения нет cron. Он запускается на релиз или вручную,
+поэтому неизменившийся код больше не публикуется повторно каждые 30 минут.
+Отдельный `Calculator data refresh` обновляет только `data/` и `floor/`, чтобы
+резервный snapshot и производственный календарь не устаревали между релизами.
+Периодические live/write-back smokes остаются мониторингом доступности и
+сохранения данных; они ничего не деплоят.
+
+## Required GitHub secrets
+
+Полная публикация приложения требует:
+
+```text
+OPS_BOT_TOKEN
+YC_OAUTH_TOKEN
+```
+
+Relay-only Vercel job использует:
 
 ```text
 VERCEL_TOKEN
 VERCEL_ORG_ID
 VERCEL_PROJECT_ID
+TELEGRAM_RELAY_SECRET
 ```
 
-The deploy fails early if any of these secrets are missing, so the domain cannot silently stay on an old version.
+## Ручной запуск и проверка
 
-## Current DNS
+Повторно опубликовать текущий `main`:
 
-`calc.recycleobject.ru` currently points to Vercel:
-
-```text
-calc.recycleobject.ru A 76.76.21.21
+```sh
+gh workflow run "Calculator static deploy"
 ```
 
-Keep this while the Vercel production deploy is used.
-
-## Optional: move `calc.recycleobject.ru` to GitHub Pages
-
-Only do this if we intentionally stop using Vercel. At the DNS provider, replace the current Vercel record for `calc.recycleobject.ru` with one CNAME record:
-
-```text
-calc.recycleobject.ru CNAME polinacherpovitskaya-glitch.github.io
-```
-
-Remove conflicting A records for the same host, especially:
-
-```text
-76.76.21.21
-```
-
-After DNS has propagated, enable the custom domain in GitHub Pages:
-
-```text
-calc.recycleobject.ru
-```
-
-Then add a root-level `CNAME` file with:
-
-```text
-calc.recycleobject.ru
-```
-
-Finally run the smoke manually against the domain:
+Проверить приложение вручную:
 
 ```sh
 gh workflow run "Live site smoke" -f live_url=https://calc.recycleobject.ru/
+gh workflow run "Calculator platform smoke" -f live_url=https://calc.recycleobject.ru/
+gh workflow run "Calculator write-back smoke"
 ```
 
-## Why this is necessary
+Проверка версии и редиректа без браузера:
 
-`calc.recycleobject.ru` points to Vercel, so a GitHub Pages deploy alone does not update it. The production workflow now deploys to both hosts and the live smoke checks the real domain, preventing the repository from being on a new version while `calc.recycleobject.ru` still serves an old one.
+```sh
+curl -fsSL 'https://calc.recycleobject.ru/js/version.json?cb=manual'
+curl -fsSL 'https://calc2.recycleobject.ru/?cb=manual'
+```
+
+## Cache и порядок публикации
+
+HTML, bootstrap/floor JSON и `js/version.json` всегда получают
+`no-cache, no-store, must-revalidate`. Версионированные JS/CSS и изображения
+можно кэшировать как immutable. `js/version.json` отправляется последним, поэтому
+появление новой версии означает, что её HTML и ассеты уже находятся в бакете.
+
+Начавшийся deploy не отменяется новым запуском: следующий релиз ждёт своей
+очереди, чтобы Object Storage не оставался в частично обновлённом состоянии.

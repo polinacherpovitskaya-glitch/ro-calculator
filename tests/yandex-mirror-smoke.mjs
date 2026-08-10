@@ -9,7 +9,7 @@ fs.mkdirSync(outputDir, { recursive: true });
 
 const versionMeta = JSON.parse(fs.readFileSync(path.join(root, 'js', 'version.json'), 'utf8'));
 const expectedVersion = versionMeta.version;
-const baseOrigin = process.env.RO_YANDEX_URL || 'https://calc2.recycleobject.ru/';
+const baseOrigin = process.env.RO_YANDEX_URL || 'https://calc.recycleobject.ru/';
 const smokeUserId = process.env.RO_SMOKE_USER_ID || '1772715209137';
 const smokeBearerToken = String(process.env.RO_SMOKE_BEARER_TOKEN || '').trim();
 
@@ -52,12 +52,12 @@ async function authenticate(page) {
     };
   }, smokeUserId);
 
-  assert.equal(result.ok, true, `Yandex mirror auth failed: ${JSON.stringify(result)}`);
+  assert.equal(result.ok, true, `Calculator auth failed: ${JSON.stringify(result)}`);
 }
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
-  assert.ok(smokeBearerToken, 'RO_SMOKE_BEARER_TOKEN is required for authenticated mirror API checks');
+  assert.ok(smokeBearerToken, 'RO_SMOKE_BEARER_TOKEN is required for authenticated calculator API checks');
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     ignoreHTTPSErrors: true,
@@ -247,21 +247,21 @@ async function main() {
       fullPage: true,
     });
 
-    assert.equal(state.appVersion, expectedVersion, `Expected mirror version ${expectedVersion}, got ${state.appVersion}`);
+    assert.equal(state.appVersion, expectedVersion, `Expected calculator version ${expectedVersion}, got ${state.appVersion}`);
     assert.equal(state.bootstrap.ok, true, `Yandex bootstrap must load: ${JSON.stringify(state.bootstrap)}`);
     assert.ok(state.bootstrap.warehouseItems > 0, `Expected warehouse items in bootstrap, got ${state.bootstrap.warehouseItems}`);
     assert.ok(state.bootstrap.orders > 0, `Expected project orders in bootstrap, got ${state.bootstrap.orders}`);
     assert.ok(state.bootstrap.draftOrders > 0, `Expected draft orders in bootstrap, got ${state.bootstrap.draftOrders}`);
-    assert.ok(state.bootstrap.cancelledOrders > 0, `Expected cancelled orders in mirror bootstrap, got ${state.bootstrap.cancelledOrders}`);
+    assert.ok(state.bootstrap.cancelledOrders > 0, `Expected cancelled orders in calculator bootstrap, got ${state.bootstrap.cancelledOrders}`);
     assert.ok(state.bootstrap.orderItems > 0, `Expected order items in bootstrap, got ${state.bootstrap.orderItems}`);
     assert.ok(state.bootstrap.chinaPurchases > 0, `Expected China purchases in bootstrap, got ${state.bootstrap.chinaPurchases}`);
     assert.ok(state.bootstrap.shipments >= 0, `Expected shipments field in bootstrap, got ${state.bootstrap.shipments}`);
-    assert.ok(state.warehouseItemCount > 0, `Expected warehouse items from mirror fallback, got ${state.warehouseItemCount}`);
-    assert.ok(state.ordersCount > 0, `Expected orders from mirror fallback, got ${state.ordersCount}`);
+    assert.ok(state.warehouseItemCount > 0, `Expected warehouse items from production fallback, got ${state.warehouseItemCount}`);
+    assert.ok(state.ordersCount > 0, `Expected orders from production fallback, got ${state.ordersCount}`);
     assert.ok(state.demandOrderItemCount > 0, `Expected on-demand order items from Yandex API, got ${state.demandOrderItemCount}`);
     assert.ok(state.orderItemsCount > 0, `Expected opened order items in local cache, got ${state.orderItemsCount}`);
-    assert.ok(state.chinaPurchaseCount > 0, `Expected China purchases from mirror fallback, got ${state.chinaPurchaseCount}`);
-    assert.ok(state.shipmentsCount >= 0, `Expected shipments from mirror fallback, got ${state.shipmentsCount}`);
+    assert.ok(state.chinaPurchaseCount > 0, `Expected China purchases from production fallback, got ${state.chinaPurchaseCount}`);
+    assert.ok(state.shipmentsCount >= 0, `Expected shipments from production fallback, got ${state.shipmentsCount}`);
     assert.ok(state.demandRowsCount > 0, `Expected at least one project hardware demand row, got ${JSON.stringify(state.demandOrder)}`);
     assert.equal(state.shipmentPickerState.formVisible, true, `Expected shipment receipt form to open: ${JSON.stringify(state.shipmentPickerState)}`);
     assert.equal(state.shipmentPickerState.selectExists, true, `Expected shipment warehouse-position picker select: ${JSON.stringify(state.shipmentPickerState)}`);
@@ -270,8 +270,8 @@ async function main() {
       `Expected warehouse positions in shipment receipt picker, got ${JSON.stringify(state.shipmentPickerState)}`
     );
     assert.equal(state.platformApiUrl, 'https://api.recycleobject.ru');
-    assert.ok(yandexPlatformRequests > 0, 'Mirror must read from the Yandex-hosted platform API');
-    assert.equal(blockedLegacySupabaseRequests, 0, 'Mirror must not request the legacy Supabase host');
+    assert.ok(yandexPlatformRequests > 0, 'Calculator must read from the Yandex-hosted platform API');
+    assert.equal(blockedLegacySupabaseRequests, 0, 'Calculator must not request the legacy Supabase host');
 
     console.log(JSON.stringify({
       ok: true,

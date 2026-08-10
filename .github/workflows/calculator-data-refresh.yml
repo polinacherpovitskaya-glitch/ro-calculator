@@ -1,0 +1,117 @@
+name: Calculator data refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,37 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculator-object-storage-write
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  RO_YANDEX_BUCKET: calc.recycleobject.ru
+  UPLOAD_PARALLELISM: 12
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build fresh calculator data
+        env:
+          OPS_API_URL: https://api.recycleobject.ru
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+          for attempt in 1 2 3; do
+            if node scripts/build-yandex-static.mjs; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Data snapshot failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "Data snapshot attempt ${attempt}/3 failed; retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Upload data and production floor only
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${YC_OAUTH_TOKEN:-}"
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+
+          upload_data_file() {
+            local file="$1"
+            local rel="${file#deploy/static-yandex/}"
+            local content_type="application/octet-stream"
+            local cache_control="public, max-age=31536000, immutable"
+            case "$file" in
+              *.html)
+                content_type="text/html; charset=utf-8"
+                cache_control="no-cache, no-store, must-revalidate"
+                ;;
+              *.css) content_type="text/css; charset=utf-8" ;;
+              *.js) content_type="application/javascript; charset=utf-8" ;;
+              *.json)
+                content_type="application/json; charset=utf-8"
+                cache_control="no-cache, no-store, must-revalidate"
+                ;;
+              *.png) content_type="image/png" ;;
+              *.jpg|*.jpeg) content_type="image/jpeg" ;;
+              *.svg) content_type="image/svg+xml" ;;
+              *.webp) content_type="image/webp" ;;
+            esac
+            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type" --cache-control "$cache_control"
+          }
+          export -f upload_data_file
+
+          find deploy/static-yandex/data deploy/static-yandex/floor -type f -print0 \
+            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_data_file "$1"' _
+          yc config unset token >/dev/null
+
+      - name: Verify refreshed snapshot
+        run: |
+          set -euo pipefail
+          expected="$(node -e 'console.log(require("./deploy/static-yandex/data/bootstrap.json").generated_at || "")')"
+          for attempt in 1 2 3 4; do
+            actual="$(
+              curl -fsSL --max-time 20 \
+                "https://${RO_YANDEX_BUCKET}/data/bootstrap.json?cb=${GITHUB_RUN_ID}-${attempt}" \
+                | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).generated_at||"")}catch{console.log("")}})'
+            )" || actual=""
+            if [ -n "$expected" ] && [ "$actual" = "$expected" ]; then
+              echo "Calculator data refreshed at ${actual}"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1

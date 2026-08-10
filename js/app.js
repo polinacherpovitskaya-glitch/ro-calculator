@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v441';
+const APP_VERSION = 'v442';
 
 const App = {
     currentPage: 'orders',
@@ -4352,7 +4352,7 @@ const Calculator = {
             const attachments = normalizeColorAttachments(this.items[idx]);
             this.items[idx].color_solution_attachment = attachments.concat(loaded);
             if (loaded.some(att => att.compressed)) {
-                App.toast('Картинки цветового решения сжаты, чтобы заказ сохранялся на calc2');
+                App.toast('Картинки цветового решения сжаты, чтобы заказ сохранялся без ошибок');
             }
             this.renderItemBlock(idx);
             this.scheduleAutosave();

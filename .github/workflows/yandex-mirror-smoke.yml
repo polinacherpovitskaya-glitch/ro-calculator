@@ -1,17 +1,15 @@
-name: Yandex mirror smoke
+name: Calculator platform smoke
 
 on:
   workflow_dispatch:
     inputs:
       live_url:
-        description: 'Yandex mirror URL to smoke-test. Defaults to calc2.recycleobject.ru.'
+        description: 'Calculator URL to smoke-test. Defaults to calc.recycleobject.ru.'
         required: false
         type: string
-  schedule:
-    - cron: '11 */2 * * *'
   workflow_run:
     workflows:
-      - Yandex static mirror sync
+      - Calculator static deploy
     types:
       - completed
 
@@ -42,9 +40,9 @@ jobs:
       - name: Install Playwright package
         run: npm install --no-save playwright@1.54.2
 
-      - name: Run Yandex mirror smoke
+      - name: Run calculator platform smoke
         env:
-          RO_YANDEX_URL: ${{ inputs.live_url || 'https://calc2.recycleobject.ru/' }}
+          RO_YANDEX_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
           RO_SMOKE_USER_ID: 1772715209137
           RO_SMOKE_BEARER_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
         run: node tests/yandex-mirror-smoke.mjs
@@ -53,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-mirror-smoke-artifacts
+          name: calculator-platform-smoke-artifacts
           path: output/playwright/yandex-mirror-smoke
           if-no-files-found: ignore
 
@@ -67,8 +65,8 @@ jobs:
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALERT_WORKFLOW: Yandex mirror smoke
-          ALERT_SCOPE: calc2 direct Yandex database and static hosting
+          ALERT_WORKFLOW: Calculator platform smoke
+          ALERT_SCOPE: calc production static hosting and Yandex platform API
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
@@ -79,8 +77,8 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          ALERT_WORKFLOW: Yandex mirror smoke
-          ALERT_SCOPE: calc2 direct Yandex database and static hosting
+          ALERT_WORKFLOW: Calculator platform smoke
+          ALERT_SCOPE: calc production static hosting and Yandex platform API
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

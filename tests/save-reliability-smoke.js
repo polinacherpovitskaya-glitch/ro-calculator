@@ -23,7 +23,7 @@ class TestCustomEvent {
 }
 
 const windowObject = {
-  location: { protocol: 'https:', origin: 'https://calc2.recycleobject.ru' },
+  location: { protocol: 'https:', origin: 'https://calc.recycleobject.ru' },
   addEventListener() {},
   dispatchEvent(event) {
     statusEvents.push({ type: event.type, detail: event.detail });

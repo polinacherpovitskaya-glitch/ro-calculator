@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { assertHealthyBootstrap, buildBootstrapShardPayloads } from '../scripts/build-yandex-static.mjs';
 
-// Guards the static mirrors against publishing an empty bootstrap.json when
+// Guards the production calculator against publishing an empty bootstrap.json when
 // the Yandex platform API is unreachable during the CI build (each fetch swallows errors into an
-// empty array). A degraded snapshot empties calc2 for everyone offline — no login
+// empty array). A degraded snapshot empties calc for everyone offline — no login
 // accounts, no orders — so the build must fail instead of deploying it.
 
 function makeBootstrap(overrides = {}) {
@@ -37,9 +37,10 @@ const yandexSync = fs.readFileSync(path.join(process.cwd(), '.github/workflows/y
 assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deployed without immutable one-year cache');
 assert.match(
   yandexSync,
-  /max-parallel:\s*1/,
-  'static mirrors must build sequentially to avoid doubling heavy bootstrap reads',
+  /RO_YANDEX_BUCKET:\s*calc\.recycleobject\.ru/,
+  'the guarded snapshot must build once for the canonical calculator bucket',
 );
+assert.doesNotMatch(yandexSync, /matrix:/, 'the production snapshot must not be built once per mirror');
 assert.match(
   yandexSync,
   /concurrency:[\s\S]*cancel-in-progress:\s*false/,

@@ -1,9 +1,7 @@
-name: Yandex static mirror sync
+name: Calculator static deploy
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_run:
     workflows:
       - Deploy GitHub Pages
@@ -14,28 +12,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: yandex-static-mirror
+  group: calculator-object-storage-write
   cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  RO_YANDEX_BUCKET: calc.recycleobject.ru
+  RO_RETIRED_BUCKET: calc2.recycleobject.ru
+  UPLOAD_PARALLELISM: 12
 
 jobs:
-  sync:
+  deploy:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        bucket:
-          - calc.recycleobject.ru
-          - calc2.recycleobject.ru
-    env:
-      RO_YANDEX_BUCKET: ${{ matrix.bucket }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -46,19 +38,18 @@ jobs:
         with:
           node-version: '24'
 
-      # SHA вместо ручных
-      # ?v=N, чтобы calc2 никогда не отставал от calc из-за браузерного кэша.
+      # SHA replaces hand-maintained ?v=N references in the deploy snapshot, so
+      # every release gets unique immutable asset URLs.
       - name: Cache-bust asset versions with commit SHA
         run: |
           sha="${GITHUB_SHA::10}"
           find . -name "*.html" -not -path "./node_modules/*" -print0 \
             | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
 
-      - name: Build Yandex static bundle
+      - name: Build calculator static bundle
         env:
           OPS_API_URL: https://api.recycleobject.ru
           OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
-          RO_YANDEX_BUCKET: ${{ env.RO_YANDEX_BUCKET }}
         run: |
           set -euo pipefail
           test -n "${OPS_BOT_TOKEN:-}"
@@ -81,13 +72,13 @@ jobs:
           curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
           echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
 
-      - name: Upload mirror to Yandex Object Storage
+      - name: Upload calculator to Yandex Object Storage
         env:
           YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
-            echo "YC_OAUTH_TOKEN secret is required to sync ${RO_YANDEX_BUCKET}" >&2
+            echo "YC_OAUTH_TOKEN secret is required to deploy ${RO_YANDEX_BUCKET}" >&2
             exit 1
           fi
 
@@ -121,14 +112,17 @@ jobs:
             esac
             yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type" --cache-control "$cache_control"
           }
+          export -f upload_one
 
-          while IFS= read -r -d '' file; do
-            upload_one "$file"
-          done < <(find deploy/static-yandex -type f -print0)
+          # Publish immutable assets/data first. HTML can only point at files
+          # that are already present; js/version.json is the final release marker.
+          find deploy/static-yandex -type f ! -name '*.html' ! -path 'deploy/static-yandex/js/version.json' -print0 \
+            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_one "$1"' _
+          find deploy/static-yandex -type f -name '*.html' -print0 \
+            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_one "$1"' _
+          upload_one deploy/static-yandex/js/version.json
 
-          yc config unset token >/dev/null
-
-      - name: Verify published Yandex version
+      - name: Verify published calculator version
         run: |
           set -euo pipefail
           expected="$(node -e 'console.log(require("./js/version.json").version)')"
@@ -147,10 +141,32 @@ jobs:
           done
           exit 1
 
+      - name: Retire calc2 application entry points
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${YC_OAUTH_TOKEN:-}"
+          for object_key in index.html 404.html floor/index.html; do
+            yc storage s3 cp ops/calc2-redirect.html "s3://${RO_RETIRED_BUCKET}/${object_key}" \
+              --content-type "text/html; charset=utf-8" \
+              --cache-control "no-cache, no-store, must-revalidate"
+          done
+          yc config unset token >/dev/null
+
+      - name: Verify calc2 redirect
+        run: |
+          set -euo pipefail
+          for path in '' 'floor/'; do
+            body="$(curl -fsSL --max-time 20 "https://${RO_RETIRED_BUCKET}/${path}?cb=${GITHUB_RUN_ID}")"
+            grep -q 'data-retired-host="calc2"' <<<"$body"
+            grep -q 'https://calc.recycleobject.ru/' <<<"$body"
+          done
+
       - name: Upload bundle artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-static-${{ matrix.bucket }}
+          name: calculator-static-bundle
           path: deploy/static-yandex
           if-no-files-found: ignore

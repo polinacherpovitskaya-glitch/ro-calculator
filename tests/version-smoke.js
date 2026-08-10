@@ -26,9 +26,9 @@ assert.match(appJs, /searchParams\.set\('reload'/, 'Update action should add a c
 assert.match(appJs, /dataset\.targetVersion/, 'Update banner should remember the exact remote version shown to the user');
 assert.match(indexHtml, /CURRENT_HTML_VERSION = 'v\d+'/, 'index.html should include an early HTML-version bootstrap for stale cached documents');
 assert.match(indexHtml, /ro_calc_force_update_attempts/, 'index.html should guard repeated forced update attempts');
-assert.match(yandexStaticSync, /--cache-control "\$cache_control"/, 'calc2 sync must upload explicit cache-control metadata');
-assert.match(yandexStaticSync, /no-cache, no-store, must-revalidate/, 'calc2 HTML/version files must be uploaded as non-cacheable');
-assert.match(yandexStaticSync, /data\/bootstrap\.json/, 'calc2 bootstrap snapshot must be uploaded as non-cacheable');
+assert.match(yandexStaticSync, /--cache-control "\$cache_control"/, 'calculator deploy must upload explicit cache-control metadata');
+assert.match(yandexStaticSync, /no-cache, no-store, must-revalidate/, 'calculator HTML/version files must be uploaded as non-cacheable');
+assert.match(yandexStaticSync, /data\/bootstrap\.json/, 'calculator bootstrap snapshot must be uploaded as non-cacheable');
 assert.match(supabaseJs, /searchParams\.set\('_ro_ts'/, 'Bootstrap fetches must add a cache-busting timestamp');
 
 const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);

@@ -51,8 +51,8 @@ const PRODUCT_TYPES = new Set(['product', 'pendant']);
 const isExtraLine = it => String(it.item_type) === 'extra_cost';
 const isProductLike = it => PRODUCT_TYPES.has(String(it.item_type || 'product'));
 
-// Colour swatches / photos live under the calc2 asset root (img/colors/NNN.png).
-const ASSET_BASE = (process.env.RO_FLOOR_ASSET_BASE || 'https://calc2.recycleobject.ru/').replace(/\/+$/, '') + '/';
+// Colour swatches / photos live under the canonical calculator asset root.
+const ASSET_BASE = (process.env.RO_FLOOR_ASSET_BASE || 'https://calc.recycleobject.ru/').replace(/\/+$/, '') + '/';
 const assetUrl = p => (!p ? null : (/^https?:\/\//i.test(p) ? p : ASSET_BASE + String(p).replace(/^\/+/, '')));
 
 // Фото фурнитуры хранятся в бандле приложения: js/warehouse_photos.js —
@@ -205,7 +205,7 @@ function flattenItems(rawItems) {
     });
 }
 
-// ---------- mirror Gantt.applyLoadedData assembly ----------
+// ---------- production Gantt.applyLoadedData assembly ----------
 function normalizePlanState(state) {
     const raw = state && typeof state === 'object' ? state : {};
     const manual_start_dates = {};

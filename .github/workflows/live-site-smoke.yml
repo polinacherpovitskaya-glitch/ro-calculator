@@ -11,7 +11,7 @@ on:
     - cron: '17 */4 * * *'
   workflow_run:
     workflows:
-      - Deploy GitHub Pages
+      - Calculator static deploy
     types:
       - completed
 
@@ -61,7 +61,7 @@ jobs:
 
           if [ "${actual}" != "${expected}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Live smoke skipped::${RO_LIVE_URL} is still ${actual}, expected ${expected}. The Deploy GitHub Pages workflow already reports the stale Vercel deployment."
+            echo "::notice title=Live smoke skipped::${RO_LIVE_URL} is still ${actual}, expected ${expected}. The calculator static deploy did not publish the expected release."
           fi
 
       - name: Install Playwright package

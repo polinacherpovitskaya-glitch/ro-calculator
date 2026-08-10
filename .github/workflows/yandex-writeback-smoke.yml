@@ -1,4 +1,4 @@
-name: Yandex write-back smoke
+name: Calculator write-back smoke
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '23 * * * *'
   workflow_run:
     workflows:
-      - Yandex static mirror sync
+      - Calculator static deploy
       - Yandex timebot deploy
     types:
       - completed
@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Run Yandex write-back smoke
+      - name: Run calculator write-back smoke
         env:
           OPS_API_URL: https://api.recycleobject.ru
           OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
@@ -43,7 +43,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-writeback-smoke-artifacts
+          name: calculator-writeback-smoke-artifacts
           path: output/yandex-writeback-smoke
           if-no-files-found: ignore
 
@@ -57,7 +57,7 @@ jobs:
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALERT_WORKFLOW: Yandex write-back smoke
+          ALERT_WORKFLOW: Calculator write-back smoke
           ALERT_SCOPE: Yandex API + PostgreSQL settings/time_entries write path
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -69,7 +69,7 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          ALERT_WORKFLOW: Yandex write-back smoke
+          ALERT_WORKFLOW: Calculator write-back smoke
           ALERT_SCOPE: Yandex API + PostgreSQL settings/time_entries write path
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
