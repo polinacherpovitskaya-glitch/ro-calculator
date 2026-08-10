@@ -67,6 +67,8 @@ jobs:
           node tests/seasonal-capacity-consensus-smoke.js
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
+          node tests/platform-client-smoke.js
+          node tests/save-reliability-smoke.js
           node tests/bootstrap-guard-smoke.js
           node tests/yandex-backup-workflow-smoke.js
           node tests/cloud-consolidation-preservation-smoke.js
