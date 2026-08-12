@@ -277,6 +277,9 @@ function createContext() {
                                     result.limit = () => result;
                                     return result;
                                 },
+                                limit() {
+                                    return resolveRows();
+                                },
                             };
                         },
                         async upsert(payload) {
@@ -3029,6 +3032,45 @@ async function main() {
         const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
         assert.equal(dirtyMap.orders, undefined, 'successful dirty order sync should clear orders dirty flag');
         assert.equal(dirtyMap.orderItems, undefined, 'successful dirty order sync should clear orderItems dirty flag');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1780700000001;
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'Recovered calculator save',
+                status: 'draft',
+                created_at: '2026-08-12T11:40:00.000Z',
+                updated_at: '2026-08-12T11:41:00.000Z'
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: '${orderId}-product-1',
+                order_id: ${orderId},
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'Recovered item',
+                quantity: 250,
+                created_at: '2026-08-12T11:40:00.000Z',
+                updated_at: '2026-08-12T11:41:00.000Z'
+            }]);
+            _markLocalDatasetDirty(['orders', 'orderItems']);
+            window.__roSharedDatabaseProblem = 'network timeout';
+        `, context);
+
+        const recoveryComplete = await vm.runInContext('_runSharedDatabaseRecoveryProbe()', context);
+
+        assert.equal(recoveryComplete, true, 'recovery probe should finish after the dirty calculator save is synced');
+        assert.equal(context.__tableRows.orders.some(order => String(order.id) === String(orderId)), true, 'recovery probe should automatically upsert the dirty order');
+        assert.equal(context.__tableRows.order_items.some(item => String(item.order_id) === String(orderId)), true, 'recovery probe should automatically upsert the dirty order items');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(dirtyMap.orders, undefined, 'recovery probe should clear the orders dirty flag after remote confirmation');
+        assert.equal(dirtyMap.orderItems, undefined, 'recovery probe should clear the orderItems dirty flag after remote confirmation');
+        assert.equal(context.__roSharedDatabaseProblem, undefined, 'successful recovery should clear the connectivity warning');
+        assert.equal(context.__roLocalUnsyncedChanges, undefined, 'successful recovery should clear the local unsynced warning');
     }
 
     console.log('supabase fallback smoke checks passed');
