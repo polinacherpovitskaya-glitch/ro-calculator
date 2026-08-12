@@ -14,11 +14,11 @@
 - [x] Покрыть автоматическую синхронизацию после восстановления связи.
 - [x] Проверить очистку dirty-флагов только после успешной удалённой записи.
 
-## M3. Релиз `[ ]`
+## M3. Релиз `[x]`
 
-- [ ] Поднять четыре version anchor с актуального `origin/main`.
-- [ ] Обновить cache-bust изменённого `js/supabase.js`.
-- [ ] Запустить data-layer, save, order-flow и version smokes.
+- [x] Поднять четыре version anchor с актуального `origin/main`.
+- [x] Обновить cache-bust изменённого `js/supabase.js`.
+- [x] Запустить data-layer, save, order-flow и version smokes.
 
 ## Команды проверки
 
