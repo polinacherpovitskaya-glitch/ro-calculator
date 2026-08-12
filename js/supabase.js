@@ -105,23 +105,60 @@ function _notifySharedDatabaseProblem(error) {
 // Пока держится проблема со связью — активно проверяем восстановление, чтобы
 // баннер гас САМ, как только база снова отвечает (а не висел до следующей записи).
 let _sharedDbRecoveryTimer = null;
-function _startSharedDatabaseRecoveryProbe() {
-    if (typeof window === 'undefined' || _sharedDbRecoveryTimer) return;
-    const stop = () => {
-        if (_sharedDbRecoveryTimer) { clearInterval(_sharedDbRecoveryTimer); _sharedDbRecoveryTimer = null; }
-    };
-    const probe = async () => {
-        if (!window.__roSharedDatabaseProblem) { stop(); return; }
-        if (!isSupabaseReady()) return;
+let _sharedDbRecoveryProbePromise = null;
+
+function _hasDirtyLocalOrderData() {
+    const dirtyMap = _readLocalDirtyDatasets();
+    return !!(dirtyMap.orders || dirtyMap.orderItems);
+}
+
+function _runSharedDatabaseRecoveryProbe() {
+    if (_sharedDbRecoveryProbePromise) return _sharedDbRecoveryProbePromise;
+
+    _sharedDbRecoveryProbePromise = (async () => {
+        if (typeof window === 'undefined' || !isSupabaseReady()) return false;
+        if (window.__roSupabaseAccessProblem) return true;
+        if (!window.__roSharedDatabaseProblem && !_hasDirtyLocalOrderData()) return true;
+
         try {
             await _withRemoteTimeout('load', 'db recovery probe', () => supabaseClient
                 .from('settings')
                 .select('key')
                 .limit(1)
                 .then(({ error }) => { if (error) throw error; return true; }));
-            // успех → _withRemoteTimeout уже снял флаг и погасил баннер
-            stop();
-        } catch (e) { /* всё ещё недоступна — ждём следующего тика */ }
+
+            if (_hasDirtyLocalOrderData()) {
+                const syncResult = await syncDirtyLocalOrders({ silent: false });
+                if (syncResult?.error) {
+                    // A validation/access failure needs user action, not a
+                    // permanent 12-second retry loop. Connectivity failures keep
+                    // the recovery timer alive and will be retried safely.
+                    return !_isSharedDatabaseConnectivityError(syncResult.error);
+                }
+            }
+
+            return !window.__roSharedDatabaseProblem && !_hasDirtyLocalOrderData();
+        } catch (e) {
+            return false;
+        }
+    })().finally(() => {
+        _sharedDbRecoveryProbePromise = null;
+    });
+
+    return _sharedDbRecoveryProbePromise;
+}
+
+function _startSharedDatabaseRecoveryProbe() {
+    if (typeof window === 'undefined' || _sharedDbRecoveryTimer) return;
+    const stop = () => {
+        if (_sharedDbRecoveryTimer) { clearInterval(_sharedDbRecoveryTimer); _sharedDbRecoveryTimer = null; }
+    };
+    const probe = async () => {
+        if (window.__roSupabaseAccessProblem) { stop(); return; }
+        if (!window.__roSharedDatabaseProblem && !_hasDirtyLocalOrderData()) { stop(); return; }
+        if (!isSupabaseReady()) return;
+        const recoveryComplete = await _runSharedDatabaseRecoveryProbe();
+        if (recoveryComplete) stop();
     };
     _sharedDbRecoveryTimer = setInterval(probe, 12000);
     if (!window.__roDbRecoveryFocusBound) {
@@ -2301,6 +2338,13 @@ async function saveOrder(order, items = []) {
         const saveEmergencyLocalCopy = (error) => {
             _saveOrderLocally(localBackupOrder, localBackupItems);
             _markLocalDatasetDirty(['orders', 'orderItems']);
+            // The first connectivity probe can finish just before the failed
+            // write creates its dirty local backup. Start the recovery cycle
+            // again after marking the order so that this snapshot is not left
+            // waiting for a page reload or a future focus event.
+            if (typeof window !== 'undefined' && window.__roSharedDatabaseProblem) {
+                _startSharedDatabaseRecoveryProbe();
+            }
             console.warn('[saveOrder] Saved emergency local copy after remote save failed', {
                 orderId,
                 reason: error && (error.message || error.code || error),
