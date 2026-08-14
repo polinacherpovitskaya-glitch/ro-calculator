@@ -824,6 +824,7 @@ const TimeTrack = {
             baseHours: safeBaseHours,
             baseHoursSemimonth: safeBaseHoursSemimonth,
             baseRate: hasSalary ? (baseRateFromSalary || overtimeRate || fallbackRate) : 0,
+            hourlyRate: overtimeRate || fallbackRate,
             overtimeRate: overtimeRate || fallbackRate,
             weekendRate: weekendRate || fallbackRate,
             holidayRate: holidayRate || fallbackRate,
@@ -832,6 +833,33 @@ const TimeTrack = {
 
     formatMoney(v) {
         return `${(parseFloat(v) || 0).toLocaleString('ru-RU')} ₽`;
+    },
+
+    formatPayrollHours(v) {
+        return (parseFloat(v) || 0).toLocaleString('ru-RU', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        });
+    },
+
+    renderPayrollBreakdown(row) {
+        const components = [];
+        const pushComponent = (label, hours, rate, amount) => {
+            if (!(hours > 0)) return;
+            components.push(
+                `${label}: ${this.formatPayrollHours(hours)} ч × ${this.formatMoney(rate)} = <strong>${this.formatMoney(amount)}</strong>`
+            );
+        };
+
+        pushComponent('Будни', row.hourlyHours, row.hourlyRate, row.payHourly);
+        pushComponent('Сверх оклада', row.overtimeHours, row.overtimeRate, row.payOvertime);
+        pushComponent('Выходные', row.weekendHours, row.weekendRate, row.payWeekend);
+        pushComponent('Праздники', row.holidayHours, row.holidayRate, row.payHoliday);
+
+        const premium = row.premiumAmount > 0
+            ? `<div style="margin-top:3px;color:var(--success);font-weight:600;">Надбавка к обычной ставке: +${this.formatMoney(row.premiumAmount)}</div>`
+            : '';
+        return `<div style="font-size:11px;line-height:1.45;white-space:nowrap;">${components.join('<br>')}${premium}</div>`;
     },
 
     calculateProductionPayrollForMonth(monthPrefixInput) {
@@ -900,22 +928,40 @@ const TimeTrack = {
                 const weekendHours = row.weekendByHalf[half.key] || 0;
                 const holidayHours = row.holidayByHalf[half.key] || 0;
                 const inBaseHours = cfg.hasSalary ? Math.min(regularHours, baseHoursPerHalf) : 0;
-                const overtimeHours = cfg.hasSalary ? Math.max(0, regularHours - baseHoursPerHalf) : regularHours;
+                const hourlyHours = cfg.hasSalary ? 0 : regularHours;
+                const overtimeHours = cfg.hasSalary ? Math.max(0, regularHours - baseHoursPerHalf) : 0;
+                const payHourly = hourlyHours * cfg.hourlyRate;
                 const payOvertime = overtimeHours * cfg.overtimeRate;
                 const payWeekend = weekendHours * cfg.weekendRate;
                 const payHoliday = holidayHours * cfg.holidayRate;
+                const totalHours = regularHours + weekendHours + holidayHours;
+                const premiumAmount = cfg.hasSalary ? 0 : Math.max(0,
+                    weekendHours * (cfg.weekendRate - cfg.hourlyRate) +
+                    holidayHours * (cfg.holidayRate - cfg.hourlyRate)
+                );
                 return {
                     employeeName: row.employee.name || 'Сотрудник',
                     periodKey: half.key,
                     periodLabel: half.label,
                     payrollProfile: cfg.payrollProfile,
                     hasSalary: cfg.hasSalary,
+                    totalHours,
                     regularHours,
                     inBaseHours,
+                    hourlyHours,
                     overtimeHours,
                     weekendHours,
                     holidayHours,
-                    totalPay: payOvertime + payWeekend + payHoliday,
+                    hourlyRate: cfg.hourlyRate,
+                    overtimeRate: cfg.overtimeRate,
+                    weekendRate: cfg.weekendRate,
+                    holidayRate: cfg.holidayRate,
+                    payHourly,
+                    payOvertime,
+                    payWeekend,
+                    payHoliday,
+                    premiumAmount,
+                    totalPay: payHourly + payOvertime + payWeekend + payHoliday,
                 };
             });
         }).sort((a, b) => {
@@ -961,7 +1007,7 @@ const TimeTrack = {
         const visibleTotal = nonZeroRows.reduce((sum, row) => sum + (row.totalPay || 0), 0);
         if (totalEl) totalEl.textContent = this.formatMoney(nonZeroRows.length ? visibleTotal : total);
 
-        let payrollNote = `Расчёт показан за ${this.formatPayrollMonthLabel(selectedMonth)}.`;
+        let payrollNote = `Расчёт показан за ${this.formatPayrollMonthLabel(selectedMonth)}. Для почасовых сотрудников это вся оплата по табелю; для сотрудников на окладе — только доплаты сверх оклада.`;
         const hasCurrentMonthHours = (this.entries || []).some(entry => String(entry?.date || '').startsWith(`${this.getCurrentMonthPrefix()}-`));
         if (selectedMonth !== this.getCurrentMonthPrefix() && !hasCurrentMonthHours && (this.entries || []).length > 0) {
             payrollNote += ' За текущий месяц часов пока нет, поэтому открыт последний месяц с записями.';
@@ -972,7 +1018,7 @@ const TimeTrack = {
         }
 
         if (!nonZeroRows.length) {
-            tableBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">За ${this.formatPayrollMonthLabel(selectedMonth)} часов ещё нет</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">За ${this.formatPayrollMonthLabel(selectedMonth)} часов ещё нет</td></tr>`;
             return;
         }
 
@@ -980,11 +1026,13 @@ const TimeTrack = {
             <tr>
                 <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
                 <td>${this.esc(r.periodLabel)}</td>
+                <td class="text-right">${r.totalHours.toFixed(2)}</td>
                 <td class="text-right">${r.regularHours.toFixed(2)}</td>
                 <td class="text-right">${r.inBaseHours.toFixed(2)}</td>
                 <td class="text-right">${r.overtimeHours.toFixed(2)}</td>
                 <td class="text-right">${r.weekendHours.toFixed(2)}</td>
                 <td class="text-right">${r.holidayHours.toFixed(2)}</td>
+                <td>${this.renderPayrollBreakdown(r)}</td>
                 <td class="text-right" style="font-weight:700;">${this.formatMoney(r.totalPay)}</td>
             </tr>
         `).join('');

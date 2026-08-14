@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=432">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v443';
+        const CURRENT_HTML_VERSION = 'v444';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v443</span></span>
+            <span>Калькулятор <span id="app-version">v444</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -1582,7 +1582,7 @@
                     <div class="stat-value" id="tt-projects-count">0</div>
                 </div>
                 <div class="stat-card" id="tt-pay-stat-card">
-                    <div class="stat-label">Почасовая оплата / месяц</div>
+                    <div class="stat-label">По табелю / месяц</div>
                     <div class="stat-value" id="tt-month-pay">0 ₽</div>
                 </div>
             </div>
@@ -1690,7 +1690,7 @@
 
             <div class="card" id="tt-payroll-card">
                 <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                    <h3>Почасовая оплата и переработки</h3>
+                    <h3>Оплата по табелю и доплаты</h3>
                     <div style="display:flex;align-items:center;gap:8px;">
                         <span class="text-muted" style="font-size:12px;">Месяц расчёта</span>
                         <select id="tt-payroll-month" onchange="TimeTrack.renderPayrollSummary()" style="min-width:160px;"></select>
@@ -1703,16 +1703,18 @@
                             <tr>
                                 <th>Сотрудник</th>
                                 <th>Период</th>
+                                <th class="text-right">Всего (ч)</th>
                                 <th class="text-right">Будни (ч)</th>
                                 <th class="text-right">В окладе (ч)</th>
                                 <th class="text-right">Сверх (ч)</th>
                                 <th class="text-right">Выходные (ч)</th>
                                 <th class="text-right">Праздники (ч)</th>
-                                <th class="text-right">К выплате (₽)</th>
+                                <th>Ставки и расчёт</th>
+                                <th class="text-right">По табелю (₽)</th>
                             </tr>
                         </thead>
                         <tbody id="tt-payroll-body">
-                            <tr><td colspan="8" class="text-center text-muted">Нет данных</td></tr>
+                            <tr><td colspan="10" class="text-center text-muted">Нет данных</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3613,7 +3615,7 @@
 <script src="js/supabase.js?v=443"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=432"></script>
-<script src="js/app.js?v=443"></script>
+<script src="js/app.js?v=444"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=439"></script>
 <script src="js/orders.js?v=439"></script>
@@ -3622,7 +3624,7 @@
     <script src="js/molds.js?v=411"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
-<script src="js/timetrack.js?v=64"></script>
+<script src="js/timetrack.js?v=65"></script>
 <script src="js/projects.js?v=3"></script>
 <script src="js/tasks.js?v=58"></script>
 <script src="js/bugs.js?v=7"></script>
