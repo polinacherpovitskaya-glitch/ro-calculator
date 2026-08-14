@@ -211,12 +211,54 @@ function smokeSemimonthPayroll(context) {
 
     assert.ok(jenyaFirst, 'Женя first-half row should exist');
     assert.equal(jenyaFirst.inBaseHours, 0);
-    assert.equal(jenyaFirst.overtimeHours, 10);
+    assert.equal(jenyaFirst.hourlyHours, 10);
+    assert.equal(jenyaFirst.overtimeHours, 0);
     assert.equal(Math.round(jenyaFirst.totalPay), 5000);
 
     assert.ok(jenyaSecond, 'Женя second-half row should exist');
+    assert.equal(jenyaSecond.hourlyHours, 0);
     assert.equal(jenyaSecond.overtimeHours, 0);
     assert.equal(Math.round(jenyaSecond.totalPay), 0);
+}
+
+function smokeHourlyWeekendPremiumBreakdown(context) {
+    vm.runInContext(`
+        TimeTrack.entries = [
+            { worker_name: 'Илья', employee_id: 20, date: '2026-08-03', hours: 72.7 },
+            { worker_name: 'Илья', employee_id: 20, date: '2026-08-08', hours: 7.3 },
+        ];
+        TimeTrack.employees = [{
+            id: 20,
+            name: 'Илья',
+            role: 'production',
+            is_active: true,
+            payroll_profile: 'hourly',
+            pay_overtime_hour_rate: 500,
+            pay_weekend_hour_rate: 750,
+            pay_holiday_hour_rate: 750,
+        }];
+        TimeTrack.isWeekend = date => date === '2026-08-08';
+        TimeTrack.parseHolidaySet = () => new Set();
+    `, context);
+
+    const result = vm.runInContext(`TimeTrack.calculateProductionPayrollForMonth('2026-08')`, context);
+    const ilya = result.rows.find(row => row.employeeName === 'Илья' && row.periodKey === 'first');
+
+    assert.ok(ilya, 'Илья first-half row should exist');
+    assert.equal(ilya.totalHours, 80);
+    assert.equal(ilya.regularHours, 72.7);
+    assert.equal(ilya.hourlyHours, 72.7);
+    assert.equal(ilya.overtimeHours, 0);
+    assert.equal(ilya.weekendHours, 7.3);
+    assert.equal(ilya.payHourly, 36350);
+    assert.equal(ilya.payWeekend, 5475);
+    assert.equal(ilya.totalPay, 41825);
+    assert.equal(ilya.premiumAmount, 1825);
+
+    const breakdown = vm.runInContext(`TimeTrack.renderPayrollBreakdown(TimeTrack.calculateProductionPayrollForMonth('2026-08').rows.find(row => row.employeeName === 'Илья' && row.periodKey === 'first'))`, context);
+    assert.match(breakdown, /Будни: 72,7 ч × 500 ₽ = <strong>36[\s\u00a0]?350 ₽<\/strong>/);
+    assert.match(breakdown, /Выходные: 7,3 ч × 750 ₽ = <strong>5[\s\u00a0]?475 ₽<\/strong>/);
+    assert.match(breakdown, /Надбавка к обычной ставке: \+1[\s\u00a0]?825 ₽/);
 }
 
 function smokePreviousMonthPayrollSelection(context) {
@@ -272,7 +314,8 @@ function smokePreviousMonthPayrollSelection(context) {
 
     assert.ok(jenyaSecond, 'Женя previous-month second-half row should exist');
     assert.equal(jenyaSecond.regularHours, 8);
-    assert.equal(jenyaSecond.overtimeHours, 8);
+    assert.equal(jenyaSecond.hourlyHours, 8);
+    assert.equal(jenyaSecond.overtimeHours, 0);
     assert.equal(Math.round(jenyaSecond.totalPay), 4000);
 }
 
@@ -509,6 +552,7 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/timetrack.js');
 smokeSemimonthPayroll(context);
+smokeHourlyWeekendPremiumBreakdown(context);
 smokePreviousMonthPayrollSelection(context);
 smokeDailyStatusAndCanonicalGrouping(context);
     await smokeMoscowDateAndLegacyRepair(context);
