@@ -702,6 +702,56 @@ async function smokeShipmentPickerUsesLoadedCacheBeforeNetwork() {
     assert.equal(context.__reservationLoadCalls, 0, 'receipt picker should use the loaded reservation snapshot without waiting for the network');
 }
 
+async function smokeProjectHardwareDetailBatchesAreBounded() {
+    const context = buildWarehouseContext();
+    const orders = Array.from({ length: 95 }, (_, index) => ({
+        id: 9000 + index,
+        order_name: `Batch order ${index + 1}`,
+        status: 'production_hardware',
+    }));
+    context.__projectHardwareBatchCalls = [];
+    context.__projectHardwareBatchActive = 0;
+    context.__projectHardwareBatchMaxActive = 0;
+    context.loadOrderItemsByOrderIds = async (orderIds, options = {}) => {
+        context.__projectHardwareBatchCalls.push({ orderIds: clone(orderIds), options: clone(options) });
+        context.__projectHardwareBatchActive += 1;
+        context.__projectHardwareBatchMaxActive = Math.max(
+            context.__projectHardwareBatchMaxActive,
+            context.__projectHardwareBatchActive,
+        );
+        await new Promise(resolve => setTimeout(resolve, 5));
+        context.__projectHardwareBatchActive -= 1;
+        return orderIds.map(orderId => ({
+            order_id: Number(orderId),
+            item_type: 'hardware',
+            quantity: 1,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: Number(orderId) + 10000,
+        }));
+    };
+    context.loadOrder = async () => {
+        throw new Error('bounded batch loader should not call loadOrder when summary loading is available');
+    };
+    context.__projectHardwareBatchOrders = clone(orders);
+
+    const details = await vm.runInContext(
+        `Warehouse._loadProjectHardwareOrderDetails(globalThis.__projectHardwareBatchOrders)`,
+        context,
+    );
+
+    assert.equal(details.size, 95);
+    assert.equal(context.__projectHardwareBatchCalls.length, 3, '95 orders should load in three bounded batches');
+    context.__projectHardwareBatchCalls.forEach(call => {
+        assert.equal(call.options.summary, true, 'project hardware batches must use the lightweight summary projection');
+        assert.ok(call.orderIds.length <= 40, 'a project hardware batch must stay within the request-size cap');
+    });
+    assert.ok(context.__projectHardwareBatchMaxActive <= 2, 'project hardware loading must cap concurrent requests');
+    assert.deepEqual(
+        context.__projectHardwareBatchCalls.flatMap(call => call.orderIds).sort((a, b) => a - b),
+        orders.map(order => order.id),
+    );
+}
+
 async function main() {
     await smokeManualFormQtyUsesLatestSharedStock();
     await smokeProjectHardwareReadyToggleIsIdempotent();
@@ -713,6 +763,7 @@ async function main() {
     await smokeShipmentSelectUsesFreshPickerCache();
     await smokeShipmentPickerSurvivesReservationLoadFailure();
     await smokeShipmentPickerUsesLoadedCacheBeforeNetwork();
+    await smokeProjectHardwareDetailBatchesAreBounded();
     console.log('warehouse migration smoke checks passed');
 }
 

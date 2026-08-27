@@ -6069,18 +6069,22 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     }];
     context.__warehouseHistory = [];
     context.__projectHardwareItemLoadCalls = [];
+    context.__projectHardwareFullOrderLoadCalls = [];
     context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
     context.saveProjectHardwareState = async (state) => {
         context.__savedProjectHardwareState = clone(state);
         context.__projectHardwareState = clone(state);
     };
     context.loadOrders = async () => clone(context.__orders);
-    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-    context.loadOrderItemsByOrderIds = async (orderIds) => {
-        context.__projectHardwareItemLoadCalls.push(clone(orderIds));
-        assert.equal(orderIds.length, 1, 'project hardware view must not bulk-load bulky item_data for all active orders');
-        const orderId = Number(orderIds[0]);
-        return clone(context.__orderDetails[orderId]?.items || []).map(item => ({ ...item, order_id: orderId }));
+    context.loadOrder = async (orderId) => {
+        context.__projectHardwareFullOrderLoadCalls.push(Number(orderId));
+        return clone(context.__orderDetails[Number(orderId)] || null);
+    };
+    context.loadOrderItemsByOrderIds = async (orderIds, options = {}) => {
+        context.__projectHardwareItemLoadCalls.push({ orderIds: clone(orderIds), options: clone(options) });
+        assert.equal(options.summary, true, 'project hardware batches must exclude bulky item_data attachments');
+        return orderIds.flatMap(orderId => clone(context.__orderDetails[Number(orderId)]?.items || [])
+            .map(item => ({ ...item, order_id: Number(orderId) })));
     };
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
@@ -6122,11 +6126,12 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
-    assert.equal(context.__projectHardwareItemLoadCalls.length, 4);
-    assert.deepEqual(
-        context.__projectHardwareItemLoadCalls.map(ids => ids[0]).sort((a, b) => a - b),
-        [100, 200, 300, 400]
-    );
+    assert.equal(context.__projectHardwareItemLoadCalls.length, 3);
+    context.__projectHardwareItemLoadCalls.forEach(call => {
+        assert.deepEqual(call.orderIds.slice().sort((a, b) => a - b), [100, 200, 300, 400]);
+        assert.equal(call.options.summary, true);
+    });
+    assert.equal(context.__projectHardwareFullOrderLoadCalls.length, 0, 'batched project hardware reads must avoid per-order loadOrder calls');
     assert.match(html, /Включая завершённые заказы: 1/);
     assert.match(html, /Delivery Hardware/);
     assert.match(html, /Collected Hardware/);
