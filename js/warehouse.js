@@ -225,6 +225,8 @@ const DEFAULT_MOLD_CAPACITY_BY_TYPE = {
 const BLANK_HARDWARE_FILTER_KEY = 'blank_hardware';
 const BLANK_HARDWARE_LOW_STOCK_THRESHOLD = 1000;
 const MOLD_USAGE_ALERT_STEP = 1000;
+const PROJECT_HARDWARE_ORDER_ITEMS_BATCH_SIZE = 40;
+const PROJECT_HARDWARE_ORDER_ITEMS_MAX_CONCURRENCY = 2;
 const MOLD_USAGE_ALERT_ASSIGNEE_FALLBACKS = {
     lesha: 1772827635013,
     anastasia: 1741700002000,
@@ -5191,12 +5193,7 @@ const Warehouse = {
             return { reservationsChanged: false, stateChanged: false, shortage: false };
         }
 
-        const details = await Promise.all(trackedOrders.map(o => loadOrder(o.id).catch(() => null)));
-        const detailByOrderId = new Map();
-        details.filter(Boolean).forEach(detail => {
-            const order = detail.order || {};
-            detailByOrderId.set(Number(order.id), detail);
-        });
+        const detailByOrderId = await this._loadProjectHardwareOrderDetails(trackedOrders) || new Map();
 
         const demandRows = [];
         trackedOrders.forEach(order => {
@@ -5918,31 +5915,73 @@ const Warehouse = {
     },
 
     async _loadProjectHardwareOrderDetails(orders = []) {
-        if (typeof loadOrderItemsByOrderIds !== 'function') return null;
         const list = (orders || [])
-            .filter(order => order && Number.isFinite(Number(order.id)) && Number(order.id) > 0);
+            .filter(order => order && Number.isFinite(Number(order.id)) && Number(order.id) > 0)
+            .filter((order, index, source) => source.findIndex(candidate => Number(candidate.id) === Number(order.id)) === index);
         if (!list.length) return new Map();
 
         const details = new Map();
-        let cursor = 0;
-        const workers = Array.from({ length: Math.min(4, list.length) }, async () => {
-            while (cursor < list.length) {
-                const order = list[cursor++];
-                const orderId = Number(order.id);
-                let rows = null;
-                try {
-                    rows = await loadOrderItemsByOrderIds([orderId]);
-                } catch (error) {
-                    console.warn('Warehouse._loadProjectHardwareOrderDetails item load failed:', orderId, error);
+        list.forEach(order => {
+            details.set(Number(order.id), { order, items: [] });
+        });
+
+        if (typeof loadOrderItemsByOrderIds === 'function') {
+            const batches = [];
+            for (let index = 0; index < list.length; index += PROJECT_HARDWARE_ORDER_ITEMS_BATCH_SIZE) {
+                batches.push(list.slice(index, index + PROJECT_HARDWARE_ORDER_ITEMS_BATCH_SIZE));
+            }
+
+            let batchCursor = 0;
+            const workers = Array.from({
+                length: Math.min(PROJECT_HARDWARE_ORDER_ITEMS_MAX_CONCURRENCY, batches.length),
+            }, async () => {
+                while (batchCursor < batches.length) {
+                    const batch = batches[batchCursor++];
+                    const orderIds = batch.map(order => Number(order.id));
+                    let rows = null;
+                    try {
+                        rows = await loadOrderItemsByOrderIds(orderIds, { summary: true });
+                    } catch (error) {
+                        console.warn('Warehouse._loadProjectHardwareOrderDetails item batch failed:', orderIds, error);
+                    }
+                    if (!Array.isArray(rows)) continue;
+
+                    const itemsByOrderId = new Map();
+                    rows.forEach(row => {
+                        const orderId = Number(row && row.order_id || 0);
+                        if (!orderId) return;
+                        if (!itemsByOrderId.has(orderId)) itemsByOrderId.set(orderId, []);
+                        itemsByOrderId.get(orderId).push(row);
+                    });
+                    batch.forEach(order => {
+                        const orderId = Number(order.id);
+                        details.set(orderId, {
+                            order,
+                            items: itemsByOrderId.get(orderId) || [],
+                        });
+                    });
                 }
-                if (!Array.isArray(rows)) continue;
-                details.set(orderId, {
-                    order,
-                    items: rows.filter(row => Number(row && row.order_id) === orderId),
-                });
+            });
+            await Promise.all(workers);
+            return details;
+        }
+
+        if (typeof loadOrder !== 'function') return null;
+        let orderCursor = 0;
+        const fallbackWorkers = Array.from({
+            length: Math.min(PROJECT_HARDWARE_ORDER_ITEMS_MAX_CONCURRENCY, list.length),
+        }, async () => {
+            while (orderCursor < list.length) {
+                const order = list[orderCursor++];
+                try {
+                    const detail = await loadOrder(Number(order.id));
+                    if (detail) details.set(Number(order.id), detail);
+                } catch (error) {
+                    console.warn('Warehouse._loadProjectHardwareOrderDetails order load failed:', Number(order.id), error);
+                }
             }
         });
-        await Promise.all(workers);
+        await Promise.all(fallbackWorkers);
         return details;
     },
 

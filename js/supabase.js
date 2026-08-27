@@ -2999,6 +2999,11 @@ const ORDER_ITEM_CALC_FIELDS = [
     'packaging_source', 'packaging_price_per_unit', 'packaging_delivery_per_unit',
     'packaging_delivery_total', 'packaging_assembly_speed', 'packaging_qty',
     'packaging_warehouse_item_id', 'packaging_warehouse_sku',
+    // Legacy/general warehouse rows and explicit NFC links are also consumed by
+    // the lightweight project-hardware loader.
+    'source', 'warehouse_item_id', 'qty',
+    'nfc_warehouse_item_id', 'nfc_warehouse_name', 'nfc_warehouse_sku',
+    'builtin_hw_warehouse_sku',
     'sell_price_hardware', 'sell_price_packaging', 'printing_qty',
     // Pendant calculation inputs. Photo/base64 attachment fields stay excluded.
     'elements', 'cords', 'carabiners', 'cord', 'carabiner', 'packaging',
