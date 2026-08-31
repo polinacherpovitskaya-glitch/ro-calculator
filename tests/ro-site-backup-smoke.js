@@ -15,6 +15,14 @@ assert.match(script, /storage s3 cp/, 'artifacts must be copied to Yandex Object
 assert.match(script, /auth_users/, 'manifest must record Auth user counts');
 assert.match(script, /storage_objects/, 'manifest must record Storage object counts');
 assert.match(script, /-maxdepth 1/, 'local rotation must remain scoped to the backup directory');
+assert.match(script, /RO_SITE_MIN_FREE_BYTES/, 'backup must expose a configurable disk free-space guard');
+assert.match(script, /available_bytes/, 'backup must measure free space before writing artifacts');
+assert.match(script, /cleanup_incomplete_backup/, 'failed backup must clean only its incomplete generation');
+assert.match(script, /trap cleanup_incomplete_backup EXIT/, 'incomplete-generation cleanup must run on every exit');
+assert.ok(
+    script.indexOf('\nprune_expired_local_backups\n') < script.indexOf('docker exec "$pg_container"'),
+    'expired local generations must be pruned before the next pg_dump starts'
+);
 assert.doesNotMatch(script, /storage s3 rm|docker\s+(?:rm|volume\s+rm)|dropdb/, 'backup must not remove remote or production state');
 
 assert.match(service, /User=robot/, 'service must run as the unprivileged VM operator');

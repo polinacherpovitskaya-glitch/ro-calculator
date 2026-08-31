@@ -35,6 +35,36 @@ assert.match(
 );
 assert.match(
     workflow,
+    /RO_YANDEX_LOCAL_BACKUP_RETENTION_DAYS:\s*7/,
+    'VM copies must have an explicit seven-day local retention policy'
+);
+assert.match(
+    workflow,
+    /RO_YANDEX_MIN_FREE_BYTES:\s*2147483648/,
+    'VM backup must reserve two GiB before creating a new dump'
+);
+assert.match(
+    workflow,
+    /find "\$REMOTE_TARGET_DIR" -maxdepth 1 -type f[\s\S]*-mtime "\+\$RETENTION_DAYS" -delete/,
+    'VM rotation must stay scoped to expired target database copies'
+);
+assert.match(
+    workflow,
+    /available_bytes=.*df --output=avail -B1 "\$REMOTE_TARGET_DIR"/,
+    'VM backup must measure free space after local rotation'
+);
+assert.match(
+    workflow,
+    /remote_target_tmp="\$\{REMOTE_TARGET_FILE\}\.partial"/,
+    'VM backup must write through a uniquely scoped partial file'
+);
+assert.match(
+    workflow,
+    /cleanup_remote_backup[\s\S]*rm -f -- "\$remote_target_tmp"[\s\S]*trap cleanup_remote_backup EXIT/,
+    'failed VM dumps must remove their partial and current-generation files'
+);
+assert.match(
+    workflow,
     /target-yandex-postgres-\*\.dump/,
     'active Yandex database must be uploaded and downloaded for verification'
 );
@@ -65,8 +95,8 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(
     workflow,
-    /(?:^|\s)-delete(?:\s|$)|storage s3api delete-object/m,
-    'backup workflow must preserve every VM and cloud generation'
+    /storage s3(?:api)? (?:rm|delete-object)/,
+    'backup workflow must preserve every cloud generation'
 );
 
 console.log('yandex backup workflow smoke checks passed');

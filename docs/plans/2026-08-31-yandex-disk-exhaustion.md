@@ -11,17 +11,17 @@
 - [x] Запустить PostgreSQL, дождаться healthy и затем запустить calculator API.
 - [x] Проверить публичный health с `db.ok=true`.
 
-## M2. Безопасная локальная ротация `[ ]`
+## M2. Безопасная локальная ротация `[x]`
 
-- [ ] Запускать site-backup rotation до создания нового dump/archive.
-- [ ] Добавить disk free-space guard и cleanup неполного текущего поколения.
-- [ ] Ограничить локальные daily-копии активной PostgreSQL семью днями.
-- [ ] Сохранить cloud generations, cutover bundles, containers и volumes.
+- [x] Запускать site-backup rotation до создания нового dump/archive.
+- [x] Добавить disk free-space guard и cleanup неполного текущего поколения.
+- [x] Ограничить локальные daily-копии активной PostgreSQL семью днями.
+- [x] Сохранить cloud generations, cutover bundles, containers и volumes.
 
-## M3. Регрессии и релиз `[ ]`
+## M3. Регрессии и релиз `[x]`
 
-- [ ] Расширить site-backup и workflow smoke-проверки.
-- [ ] Поднять четыре version anchor от свежего `origin/main`.
-- [ ] Запустить backup, syntax и version smokes.
-- [ ] Применить безопасную ротацию к уже загруженным локальным копиям на VM.
-- [ ] Проверить свободное место, контейнеры и публичный health после ротации.
+- [x] Расширить site-backup и workflow smoke-проверки.
+- [x] Поднять четыре version anchor от свежего `origin/main`.
+- [x] Запустить backup, syntax и version smokes.
+- [x] Применить безопасную ротацию к уже загруженным локальным копиям на VM.
+- [x] Проверить свободное место, контейнеры и публичный health после ротации.
