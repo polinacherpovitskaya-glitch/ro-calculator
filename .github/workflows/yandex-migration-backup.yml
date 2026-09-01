@@ -25,6 +25,8 @@ env:
   RO_YANDEX_BACKUP_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
   RO_YANDEX_MEDIA_BUCKET: ro-platform-media-b1gl59l77vb50ihub2nd
   RO_CUTOVER_STAMP: 20260728T172717Z
+  RO_YANDEX_LOCAL_BACKUP_RETENTION_DAYS: 7
+  RO_YANDEX_MIN_FREE_BYTES: 2147483648
 
 jobs:
   backup:
@@ -67,23 +69,52 @@ jobs:
             "docker exec supabase-db pg_dump -U supabase_admin -d postgres -Fc" \
             > "$source_db_file"
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
-            "STAMP='$stamp' REMOTE_TARGET_DIR='$remote_target_dir' REMOTE_TARGET_FILE='$remote_target_file' bash -s" <<'REMOTE'
+            "STAMP='$stamp' REMOTE_TARGET_DIR='$remote_target_dir' REMOTE_TARGET_FILE='$remote_target_file' RETENTION_DAYS='$RO_YANDEX_LOCAL_BACKUP_RETENTION_DAYS' MIN_FREE_BYTES='$RO_YANDEX_MIN_FREE_BYTES' bash -s" <<'REMOTE'
           set -euo pipefail
           set -a
           source /home/robot/platform/infra/.env.shadow
           set +a
           install -d -m 700 "$REMOTE_TARGET_DIR"
+
+          if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || ! [[ "$MIN_FREE_BYTES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "invalid local backup retention or disk guard" >&2
+            exit 2
+          fi
+          find "$REMOTE_TARGET_DIR" -maxdepth 1 -type f \
+            \( -name 'target-yandex-postgres-*.dump' \
+               -o -name 'target-yandex-postgres-*.dump.sha256' \
+               -o -name 'target-yandex-postgres-*.dump.partial' \) \
+            -mtime "+$RETENTION_DAYS" -delete
+          available_bytes="$(df --output=avail -B1 "$REMOTE_TARGET_DIR" | tail -n 1 | tr -d '[:space:]')"
+          if ! [[ "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < MIN_FREE_BYTES )); then
+            echo "refusing backup: ${available_bytes:-unknown} bytes free, ${MIN_FREE_BYTES} required" >&2
+            exit 1
+          fi
+
+          remote_target_tmp="${REMOTE_TARGET_FILE}.partial"
+          remote_target_checksum="${REMOTE_TARGET_FILE}.sha256"
+          cleanup_remote_backup() {
+            exit_code=$?
+            trap - EXIT
+            rm -f -- "$remote_target_tmp"
+            if (( exit_code != 0 )); then
+              rm -f -- "$REMOTE_TARGET_FILE" "$remote_target_checksum"
+            fi
+            exit "$exit_code"
+          }
+          trap cleanup_remote_backup EXIT
           docker exec ro-platform-shadow-postgres \
             pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
-            > "$REMOTE_TARGET_FILE"
-          test -s "$REMOTE_TARGET_FILE"
+            > "$remote_target_tmp"
+          test -s "$remote_target_tmp"
           docker exec -i ro-platform-shadow-postgres pg_restore --list \
-            < "$REMOTE_TARGET_FILE" >/dev/null
+            < "$remote_target_tmp" >/dev/null
+          mv "$remote_target_tmp" "$REMOTE_TARGET_FILE"
           chmod 600 "$REMOTE_TARGET_FILE"
           (
             cd "$REMOTE_TARGET_DIR"
             sha256sum "$(basename "$REMOTE_TARGET_FILE")" \
-              > "$(basename "$REMOTE_TARGET_FILE").sha256"
+              > "$(basename "$remote_target_checksum")"
           )
           REMOTE
           scp -i "$HOME/.ssh/yandex_vm" \

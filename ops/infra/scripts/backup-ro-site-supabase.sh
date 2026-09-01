@@ -10,6 +10,7 @@ database="${RO_SITE_DB_NAME:-postgres}"
 storage_dir="${RO_SITE_STORAGE_DIR:-/home/robot/sb/docker/volumes/storage}"
 remote_prefix="${RO_SITE_REMOTE_PREFIX:-ro-site/daily}"
 retention_days="${RO_SITE_LOCAL_RETENTION_DAYS:-7}"
+min_free_bytes="${RO_SITE_MIN_FREE_BYTES:-2147483648}"
 
 for required_dir in "$backup_dir" "$storage_dir"; do
   case "$required_dir" in
@@ -26,10 +27,33 @@ if ! [[ "$retention_days" =~ ^[0-9]+$ ]]; then
   echo "RO_SITE_LOCAL_RETENTION_DAYS must be a non-negative integer" >&2
   exit 2
 fi
+if ! [[ "$min_free_bytes" =~ ^[1-9][0-9]*$ ]]; then
+  echo "RO_SITE_MIN_FREE_BYTES must be a positive integer" >&2
+  exit 2
+fi
 
 test -d "$storage_dir"
 test -x "$yc_bin"
 install -d -m 700 "$backup_dir"
+
+prune_expired_local_backups() {
+  find "$backup_dir" -maxdepth 1 -type f \
+    \( -name 'ro-site-*.dump' -o -name 'ro-site-storage-*.tar.gz' \
+       -o -name 'ro-site-*.manifest.json' -o -name 'ro-site-*.SHA256SUMS' \) \
+    -mtime "+$retention_days" -delete
+}
+
+assert_minimum_free_space() {
+  local available_bytes
+  available_bytes="$(df --output=avail -B1 "$backup_dir" | tail -n 1 | tr -d '[:space:]')"
+  if ! [[ "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < min_free_bytes )); then
+    echo "refusing backup: ${available_bytes:-unknown} bytes free, ${min_free_bytes} required" >&2
+    exit 1
+  fi
+}
+
+prune_expired_local_backups
+assert_minimum_free_space
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dump_name="ro-site-${stamp}.dump"
@@ -40,6 +64,21 @@ dump_path="$backup_dir/$dump_name"
 storage_path="$backup_dir/$storage_name"
 manifest_path="$backup_dir/$manifest_name"
 checksum_path="$backup_dir/$checksum_name"
+verify_dir=""
+
+cleanup_incomplete_backup() {
+  local exit_code=$?
+  trap - EXIT
+  if [[ -n "$verify_dir" && -d "$verify_dir" ]]; then
+    find "$verify_dir" -maxdepth 1 -type f -delete || true
+    rmdir "$verify_dir" 2>/dev/null || true
+  fi
+  if (( exit_code != 0 )); then
+    rm -f -- "$dump_path" "$storage_path" "$manifest_path" "$checksum_path"
+  fi
+  exit "$exit_code"
+}
+trap cleanup_incomplete_backup EXIT
 
 docker exec "$pg_container" sh -lc \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$dump_path"
@@ -92,11 +131,7 @@ done
 )
 find "$verify_dir" -maxdepth 1 -type f -delete
 rmdir "$verify_dir"
-
-find "$backup_dir" -maxdepth 1 -type f \
-  \( -name 'ro-site-*.dump' -o -name 'ro-site-storage-*.tar.gz' \
-     -o -name 'ro-site-*.manifest.json' -o -name 'ro-site-*.SHA256SUMS' \) \
-  -mtime "+$retention_days" -delete
+verify_dir=""
 
 printf 'backup_prefix=%s\n' "$remote"
 printf 'dump_bytes=%s storage_archive_bytes=%s\n' "$dump_bytes" "$storage_bytes"
