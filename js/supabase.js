@@ -7539,11 +7539,25 @@ async function saveMarketplaceSet(mset) {
     mset.updated_at = new Date().toISOString();
 
     if (isSupabaseReady()) {
-        try {
-            const row = { id: mset.id, name: mset.name || '', set_data: JSON.stringify(mset), created_at: mset.created_at, updated_at: mset.updated_at };
-            const { error } = await supabaseClient.from('marketplace_sets').upsert(row, { onConflict: 'id' });
-            if (error) console.error('saveMarketplaceSet error:', error);
-        } catch(e) { console.error('saveMarketplaceSet exception:', e); }
+        const row = { id: mset.id, name: mset.name || '', set_data: JSON.stringify(mset), created_at: mset.created_at, updated_at: mset.updated_at };
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const { error } = await supabaseClient.from('marketplace_sets').upsert(row, { onConflict: 'id' });
+                if (error) throw error;
+                lastError = null;
+                break;
+            } catch (error) {
+                lastError = error;
+                if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300));
+            }
+        }
+
+        if (lastError) {
+            console.error('saveMarketplaceSet failed after retry:', lastError);
+            throw new Error('Набор не записан в общую базу. Проверьте соединение и повторите сохранение.');
+        }
     }
 
     const sets = getLocal(LOCAL_KEYS.marketplaceSets) || [];
