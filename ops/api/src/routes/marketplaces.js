@@ -61,6 +61,33 @@ function setPayload(row) {
   };
 }
 
+function parseLegacySetData(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function publicSiteSet(row) {
+  const id = Number(row?.id);
+  const name = String(row?.name || '').trim();
+  if (!Number.isSafeInteger(id) || id <= 0 || !name) return null;
+
+  const setData = parseLegacySetData(row?.set_data);
+  const rawShopPrice = Number(setData?.shop_actual_price);
+  return {
+    id,
+    name,
+    shop_actual_price: Number.isFinite(rawShopPrice) && rawShopPrice > 0 ? rawShopPrice : null,
+    updated_at: typeof row?.updated_at === 'string' ? row.updated_at : null,
+  };
+}
+
 async function validateComposition(client, composition) {
   if (composition === undefined) return undefined;
   if (!Array.isArray(composition)) {
@@ -114,6 +141,28 @@ router.get(
       params
     );
     res.json({ marketplace_sets: rows.map(setPayload) });
+  })
+);
+
+// Public website bridge. The calculator now writes legacy-shaped B2C sets to
+// compat_rows, while recycleobject.ru keeps its product catalog in the
+// self-hosted Supabase database. Expose only the fields the shop needs to link
+// a product and resolve its current internet-shop price.
+router.get(
+  '/site-catalog',
+  asyncHandler(async (req, res) => {
+    const { rows } = await getPool().query(
+      `SELECT data
+         FROM compat_rows
+        WHERE table_name = 'marketplace_sets'`
+    );
+    const marketplaceSets = rows
+      .map((row) => publicSiteSet(row.data))
+      .filter(Boolean)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru', { numeric: true }));
+
+    res.set('Cache-Control', 'public, max-age=15, s-maxage=30, stale-while-revalidate=300');
+    res.json({ marketplace_sets: marketplaceSets });
   })
 );
 

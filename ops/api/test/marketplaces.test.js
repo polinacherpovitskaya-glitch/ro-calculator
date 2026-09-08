@@ -103,6 +103,46 @@ test('POST and GET /api/marketplaces creates and lists marketplace sets', async 
   assert.equal(body.marketplace_sets.find((entry) => Number(entry.id) === Number(set.id)).price, 12.5);
 });
 
+test('GET /api/marketplaces/site-catalog exposes calculator shop prices without auth', async (t) => {
+  const port = await startServer(t);
+  const setId = id(7);
+  const row = {
+    id: setId,
+    name: `Website set ${setId}`,
+    set_data: JSON.stringify({
+      shop_actual_price: 1070,
+      total_cost: 469.89,
+      plastic_items: [{ blank_id: 123 }],
+    }),
+    updated_at: new Date().toISOString(),
+  };
+  await getPool().query(
+    `INSERT INTO compat_rows (table_name, source_id, data)
+     VALUES ('marketplace_sets', $1, $2)`,
+    [String(setId), row]
+  );
+  t.after(async () => {
+    await getPool().query(
+      `DELETE FROM compat_rows WHERE table_name = 'marketplace_sets' AND source_id = $1`,
+      [String(setId)]
+    );
+  });
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/marketplaces/site-catalog`);
+  const body = await res.json();
+  const exposed = body.marketplace_sets.find((entry) => Number(entry.id) === setId);
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(exposed, {
+    id: setId,
+    name: row.name,
+    shop_actual_price: 1070,
+    updated_at: row.updated_at,
+  });
+  assert.equal('set_data' in exposed, false);
+  assert.equal('plastic_items' in exposed, false);
+});
+
 test('POST /api/marketplaces validates composition warehouse references', async (t) => {
   const { port, cookie } = await setup(t);
 
