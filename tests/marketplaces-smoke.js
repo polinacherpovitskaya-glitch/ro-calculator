@@ -435,6 +435,27 @@ async function main() {
     await vm.runInContext(`Marketplaces.saveSet()`, context);
     const savedMarketplaceSet = JSON.parse(vm.runInContext(`JSON.stringify(__savedMarketplaceSet)`, context));
     assert.equal(savedMarketplaceSet.charity, 1.5, 'saved B2C set should persist charity percentage');
+
+    await vm.runInContext(`(async () => {
+        __failedSaveToasts = [];
+        __failedSaveIds = [];
+        __formHiddenAfterFailedSave = false;
+        saveMarketplaceSet = async (set) => {
+            if (!set.id) {
+                set.id = 888;
+                set.created_at = '2026-09-08T00:00:00.000Z';
+            }
+            __failedSaveIds.push(set.id);
+            throw new Error('Набор не записан в общую базу. Проверьте соединение и повторите сохранение.');
+        };
+        App.toast = (message) => __failedSaveToasts.push(message);
+        Marketplaces.hideSetForm = () => { __formHiddenAfterFailedSave = true; };
+        await Marketplaces.saveSet();
+        await Marketplaces.saveSet();
+    })()`, context);
+    assert.equal(vm.runInContext(`__formHiddenAfterFailedSave`, context), false, 'failed save should keep the form open');
+    assert.equal(vm.runInContext(`__failedSaveIds[0] === __failedSaveIds[1]`, context), true, 'manual retry should reuse the same id');
+    assert.match(String(vm.runInContext(`__failedSaveToasts.at(-1)`, context)), /не записан в общую базу/i);
     vm.runInContext(`
         Marketplaces.load = __originalMarketplacesLoad;
         delete __originalMarketplacesLoad;
@@ -994,6 +1015,17 @@ async function main() {
     assert.ok(Number(savedInlineSet.mp_margin_actual) > 0);
     assert.ok(Number(savedInlineSet.shop_margin_actual) > 0);
     assert.match(String(vm.runInContext(`document.getElementById('mp-inline-status-777').textContent`, context)), /сохранено/i);
+
+    await vm.runInContext(`(async () => {
+        __failedInlineToasts = [];
+        saveMarketplaceSet = async () => {
+            throw new Error('Набор не записан в общую базу. Проверьте соединение и повторите сохранение.');
+        };
+        App.toast = (message) => __failedInlineToasts.push(message);
+        await Marketplaces.saveInlinePrices(777);
+    })()`, context);
+    assert.match(String(vm.runInContext(`document.getElementById('mp-inline-status-777').textContent`, context)), /не сохранено/i);
+    assert.match(String(vm.runInContext(`__failedInlineToasts.at(-1)`, context)), /не записан в общую базу/i);
 
     console.log('marketplaces smoke checks passed');
 }

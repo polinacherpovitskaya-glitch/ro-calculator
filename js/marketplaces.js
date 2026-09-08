@@ -19,6 +19,8 @@ const Marketplaces = {
     _pkgItems: [],
     _productionSelection: [],
     _pendingPhoto: '',
+    _pendingSaveId: null,
+    _pendingSaveCreatedAt: null,
     _colorVariants: [],
     _inlineSaveTimers: {},
     _inlineSaveSeq: {},
@@ -507,7 +509,15 @@ const Marketplaces = {
         this._inlineSaveSeq[setId] = saveSeq;
         this._setInlinePriceStatus(setId, 'сохраняем…');
 
-        await saveMarketplaceSet(updatedSet);
+        try {
+            await saveMarketplaceSet(updatedSet);
+        } catch (error) {
+            console.error('Marketplace inline price save failed:', error);
+            if (this._inlineSaveSeq[setId] !== saveSeq) return;
+            this._setInlinePriceStatus(setId, 'не сохранено — повторите', 'var(--red)');
+            App.toast(error?.message || 'Цена не записана в общую базу. Повторите сохранение.');
+            return;
+        }
 
         if (this._inlineSaveSeq[setId] !== saveSeq) return;
         this._setInlinePriceStatus(setId, 'сохранено', 'var(--green)');
@@ -523,6 +533,8 @@ const Marketplaces = {
     showSetForm() {
         this.editingSetId = null;
         this._pendingPhoto = '';
+        this._pendingSaveId = null;
+        this._pendingSaveCreatedAt = null;
         document.getElementById('mp-form-title').textContent = 'Новый набор';
         document.getElementById('mp-set-name').value = '';
         document.getElementById('mp-set-commission').value = 46;
@@ -567,6 +579,8 @@ const Marketplaces = {
             : this._normalizeMarketplaceSet(s);
         this.editingSetId = id;
         this._pendingPhoto = normalizedSet.photo_url || '';
+        this._pendingSaveId = null;
+        this._pendingSaveCreatedAt = null;
         document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (normalizedSet.name || '');
         document.getElementById('mp-set-name').value = normalizedSet.name || '';
         document.getElementById('mp-set-commission').value = normalizedSet.commission || 46;
@@ -610,6 +624,8 @@ const Marketplaces = {
     hideSetForm() {
         document.getElementById('mp-set-form').style.display = 'none';
         this.editingSetId = null;
+        this._pendingSaveId = null;
+        this._pendingSaveCreatedAt = null;
     },
 
     // ==========================================
@@ -1465,7 +1481,8 @@ const Marketplaces = {
         const defaultPackaging = this._getDefaultPackagingConfig('form');
 
         const mset = {
-            id: this.editingSetId || undefined,
+            id: this.editingSetId || this._pendingSaveId || undefined,
+            created_at: this._pendingSaveCreatedAt || undefined,
             name,
             photo_url: this._pendingPhoto || '',
             commission: parseFloat(document.getElementById('mp-set-commission').value) || 46,
@@ -1495,10 +1512,19 @@ const Marketplaces = {
             actual_margin: this._lastCalc?.actualMargin || 0,
         };
 
-        await saveMarketplaceSet(mset);
-        App.toast('Набор сохранён');
-        this.hideSetForm();
-        await this.load();
+        try {
+            await saveMarketplaceSet(mset);
+            App.toast('Набор сохранён');
+            this.hideSetForm();
+            await this.load();
+        } catch (error) {
+            console.error('Marketplace set save failed:', error);
+            if (!this.editingSetId) {
+                this._pendingSaveId = mset.id;
+                this._pendingSaveCreatedAt = mset.created_at;
+            }
+            App.toast(error?.message || 'Набор не записан в общую базу. Повторите сохранение.');
+        }
     },
 
     async deleteSet() {
