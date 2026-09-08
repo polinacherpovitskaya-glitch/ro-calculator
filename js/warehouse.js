@@ -6320,7 +6320,16 @@ const Warehouse = {
         // the remote load here left a visibly empty receipt form whenever the
         // network was slow or temporarily unavailable.
         const grouped = await this.getItemsForPicker({ preferCurrentCache: true });
-        await this._loadMoldOrders();
+        const needsMoldOrders = this.shipmentItems.some(item =>
+            item.source === 'new' && this._isMoldCategory(item.category)
+        );
+        if (needsMoldOrders) {
+            await this._loadMoldOrders();
+        } else {
+            void this._loadMoldOrders().catch(error => {
+                console.warn('[Warehouse] Failed to preload mold orders for receipt form', error);
+            });
+        }
         const categoryOptions = WAREHOUSE_CATEGORIES.map(c =>
             `<option value="${c.key}">${c.icon} ${c.label}</option>`
         ).join('');
