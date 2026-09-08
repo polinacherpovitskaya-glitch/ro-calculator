@@ -686,7 +686,10 @@ async function smokeShipmentPickerUsesLoadedCacheBeforeNetwork() {
         context.__reservationLoadCalls += 1;
         return new Promise(() => {});
     };
-    vm.runInContext(`Warehouse.allItems = ${JSON.stringify(cachedItem ? [cachedItem] : [])};`, context);
+    vm.runInContext(`
+        Warehouse.allItems = ${JSON.stringify(cachedItem ? [cachedItem] : [])};
+        Warehouse._loadMoldOrders = () => new Promise(() => {});
+    `, context);
 
     await Promise.race([
         vm.runInContext(`Warehouse.showNewShipmentForm()`, context),
