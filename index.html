@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=432">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v449';
+        const CURRENT_HTML_VERSION = 'v450';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v449</span></span>
+            <span>Калькулятор <span id="app-version">v450</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -2411,9 +2411,14 @@
 
                 <!-- Plastic items -->
                 <div class="section-title" style="margin-top:8px;">&#9670; Пластик</div>
-                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Пластиковые элементы набора. Цвета задаются ниже в разделе «Цветовые варианты».</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Добавьте каждый молд, который нужен для одного готового товара. Цвета задаются ниже в разделе «Цветовые варианты».</div>
                 <div id="mp-plastic-items"></div>
                 <button class="btn btn-sm btn-outline" onclick="Marketplaces.addPlasticItem()" style="margin-top:4px;">+ Пластик</button>
+                <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:12px;">
+                    <input type="checkbox" id="mp-set-composite-plastic-item" oninput="Marketplaces.recalcSet()" style="margin-top:2px;">
+                    <span><b>Объединить пластиковые части в одно готовое изделие</b><br><span style="color:var(--text-muted);">Для товаров вроде кликера: себестоимость и время всех отдельных проливок суммируются, а в производстве остаётся одна товарная позиция.</span></span>
+                </label>
+                <div id="mp-composite-plastic-summary" style="display:none;margin-top:8px;padding:9px 10px;border-radius:8px;background:var(--accent-light);font-size:11px;line-height:1.45;color:var(--text-secondary);"></div>
 
                 <!-- Hardware items -->
                 <div class="section-title" style="margin-top:8px;">&#128295; Фурнитура</div>
@@ -3615,7 +3620,7 @@
 <script src="js/supabase.js?v=446"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=432"></script>
-<script src="js/app.js?v=449"></script>
+<script src="js/app.js?v=450"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=439"></script>
 <script src="js/orders.js?v=439"></script>
@@ -3638,7 +3643,7 @@
 <script src="js/china.js?v=165"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
-<script src="js/marketplaces.js?v=281"></script>
+<script src="js/marketplaces.js?v=282"></script>
 <script src="js/warehouse.js?v=446"></script>
 <script src="js/monitoring.js?v=2"></script>
 <script src="js/settings.js?v=428"></script>

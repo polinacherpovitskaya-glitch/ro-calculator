@@ -324,6 +324,12 @@ const Marketplaces = {
             (s.hw_items || []).forEach(i => parts.push(i.name || 'Фурнитура'));
             (s.pkg_items || []).forEach(i => parts.push(i.name || 'Упаковка'));
             if (this._shouldApplyDefaultPackaging(s)) parts.push('Дефолтная упаковка');
+            const compositeSummary = s.composite_plastic_item
+                ? this._getCompositePlasticSummary(s.plastic_items || [])
+                : null;
+            const compositeMeta = compositeSummary?.components.length > 1
+                ? `<div style="margin-top:3px;color:var(--accent);font-weight:600;">Составное изделие · ${compositeSummary.effectivePiecesPerHour.toLocaleString('ru-RU')} готовых/ч</div>`
+                : '';
 
             const photo = s.photo_url
                 ? `<img src="${this._esc(s.photo_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" onerror="this.style.display='none'">`
@@ -343,7 +349,7 @@ const Marketplaces = {
                 <div style="flex-shrink:0;">${photo}</div>
                 <div style="flex:1;min-width:0;">
                     <div style="font-weight:700;font-size:15px;margin-bottom:2px;">${this._esc(s.name || 'Набор')}</div>
-                    <div style="font-size:11px;color:var(--text-muted);line-height:1.3;margin-bottom:6px;">${parts.join(' + ')}</div>
+                    <div style="font-size:11px;color:var(--text-muted);line-height:1.3;margin-bottom:6px;">${parts.join(' + ')}${compositeMeta}</div>
                     <div style="font-size:12px;color:var(--text-secondary);">
                         <span style="font-weight:600;">Себестоимость: ${formatRub(cost)}</span>
                     </div>
@@ -546,6 +552,8 @@ const Marketplaces = {
         document.getElementById('mp-set-margin').value = 40;
         const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
         if (defaultPackagingEl) defaultPackagingEl.checked = true;
+        const compositePlasticEl = document.getElementById('mp-set-composite-plastic-item');
+        if (compositePlasticEl) compositePlasticEl.checked = true;
         document.getElementById('mp-set-price-manual').value = '';
         document.getElementById('mp-set-shop-price-manual').value = '';
         this._plasticItems = [];
@@ -592,6 +600,8 @@ const Marketplaces = {
         document.getElementById('mp-set-margin').value = normalizedSet.target_margin || 40;
         const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
         if (defaultPackagingEl) defaultPackagingEl.checked = this._isDefaultPackagingEnabled(normalizedSet);
+        const compositePlasticEl = document.getElementById('mp-set-composite-plastic-item');
+        if (compositePlasticEl) compositePlasticEl.checked = !!normalizedSet.composite_plastic_item;
         document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || normalizedSet.mp_suggested_price || '';
         document.getElementById('mp-set-shop-price-manual').value = normalizedSet.shop_actual_price || normalizedSet.shop_suggested_price || '';
         this._plasticItems = (normalizedSet.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
@@ -1050,6 +1060,7 @@ const Marketplaces = {
             acquiring: this._safeNumber(set.acquiring, 5),
             target_margin: this._safeNumber(set.target_margin, 40),
             default_packaging_enabled: !!set.default_packaging_enabled,
+            composite_plastic_item: !!set.composite_plastic_item,
             hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
             pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
         };
@@ -1377,6 +1388,56 @@ const Marketplaces = {
     // CALCULATION (per 1 unit of set)
     // ==========================================
 
+    _getCompositePlasticSummary(plasticItems = []) {
+        const components = (plasticItems || []).map(item => {
+            if (!item?.blank_id) return null;
+            const mold = this._plasticBlanks.find(candidate => Number(candidate.id) === Number(item.blank_id));
+            if (!mold) return null;
+            const qty = Math.max(1, parseFloat(item.qty) || 1);
+            const piecesPerHour = this._pphForMold(mold);
+            return {
+                blankId: mold.id,
+                name: mold.name || item.name || 'Пластиковая часть',
+                qty,
+                piecesPerHour,
+                weightGrams: (parseFloat(mold.weight_grams) || 0) * qty,
+            };
+        }).filter(Boolean);
+        const hoursPerFinishedItem = components.reduce((sum, component) => (
+            sum + (component.piecesPerHour > 0 ? component.qty / component.piecesPerHour : 0)
+        ), 0);
+        return {
+            components,
+            hoursPerFinishedItem,
+            effectivePiecesPerHour: hoursPerFinishedItem > 0 ? round2(1 / hoursPerFinishedItem) : 0,
+            weightGrams: round2(components.reduce((sum, component) => sum + component.weightGrams, 0)),
+        };
+    },
+
+    _renderCompositePlasticSummary() {
+        const container = document.getElementById('mp-composite-plastic-summary');
+        if (!container) return;
+        const enabled = !!document.getElementById('mp-set-composite-plastic-item')?.checked;
+        if (!enabled) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        container.style.display = '';
+        const summary = this._getCompositePlasticSummary(this._plasticItems);
+        if (summary.components.length < 2) {
+            container.innerHTML = 'Добавьте минимум две пластиковые части. Их себестоимость и время проливки будут суммированы в одном готовом изделии.';
+            return;
+        }
+
+        const parts = summary.components.map(component => (
+            `${this._esc(component.name)} ×${component.qty} — ${round2(component.piecesPerHour).toLocaleString('ru-RU')} шт/ч`
+        ));
+        container.innerHTML = `<b>Одно готовое изделие:</b> ${parts.join(' + ')}.<br>`
+            + `<b>Расчётная производительность:</b> ${summary.effectivePiecesPerHour.toLocaleString('ru-RU')} готовых изделий/ч — время отдельных проливок складывается.`;
+    },
+
     recalcSet() {
         const rates = this._normalizeChannelRates({
             commission: document.getElementById('mp-set-commission')?.value,
@@ -1394,6 +1455,7 @@ const Marketplaces = {
             pkg_items: this._pkgItems,
             default_packaging_enabled: this._getDefaultPackagingConfig('form').enabled,
         });
+        this._renderCompositePlasticSummary();
         const totalCost = breakdown.totalCost;
         const suggestedMpPrice = this._getSuggestedChannelPrice(totalCost, rates, 'marketplace');
         const suggestedShopPrice = this._getSuggestedChannelPrice(totalCost, rates, 'shop');
@@ -1496,6 +1558,7 @@ const Marketplaces = {
             acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 5,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             default_packaging_enabled: defaultPackaging.enabled,
+            composite_plastic_item: !!document.getElementById('mp-set-composite-plastic-item')?.checked,
             marketplace_pricing_version: this.B2C_PRICING_VERSION,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
             hw_items: normalizedHwItems,
@@ -1769,6 +1832,179 @@ const Marketplaces = {
         return { source: 'custom', whId: null, sku: '' };
     },
 
+    _buildPlasticProductionParts(set, batch, params) {
+        return (set.plastic_items || []).map((plasticItem, plasticIndex) => {
+            if (!plasticItem.blank_id) return null;
+            const mold = this._plasticBlanks.find(candidate => Number(candidate.id) === Number(plasticItem.blank_id));
+            if (!mold) return null;
+            const qtyPerFinishedItem = Math.max(1, parseFloat(plasticItem.qty) || 1);
+            const quantity = batch.qty * qtyPerFinishedItem;
+            const calcItem = {
+                quantity,
+                pieces_per_hour: this._pphForMold(mold),
+                weight_grams: mold.weight_grams || 0,
+                extra_molds: 0,
+                complex_design: false,
+                is_blank_mold: true,
+                is_nfc: mold.category === 'nfc',
+                nfc_programming: mold.category === 'nfc',
+                delivery_included: false,
+                printings: [],
+            };
+            const result = calculateItemCost(calcItem, params);
+
+            const assignment = batch.assignments[plasticIndex] || {};
+            let colors;
+            let colorLabel;
+            if (assignment.color_id) {
+                colors = [{
+                    id: assignment.color_id,
+                    number: assignment.color_number || '',
+                    name: assignment.color_name || '',
+                }];
+                colorLabel = colors.map(color => `${color.number || ''} ${color.name || ''}`.trim()).filter(Boolean).join(' + ');
+            } else {
+                colors = Array.isArray(plasticItem.colors) ? plasticItem.colors : [];
+                colorLabel = colors.length
+                    ? colors.map(color => `${color.number || ''} ${color.name || ''}`.trim()).filter(Boolean).join(' + ')
+                    : String(plasticItem.color_notes || '').trim();
+            }
+
+            return {
+                plasticItem,
+                plasticIndex,
+                mold,
+                qtyPerFinishedItem,
+                quantity,
+                calcItem,
+                result,
+                colors,
+                colorLabel,
+            };
+        }).filter(Boolean);
+    },
+
+    _buildStandalonePlasticOrderItem(part, set, batch, itemNumber) {
+        let productName = part.mold.name;
+        if (batch.variantName) productName += ` [${batch.variantName}]`;
+        if (part.colorLabel) productName += ` [цвет: ${part.colorLabel}]`;
+        return {
+            item_number: itemNumber,
+            item_type: 'product',
+            product_name: productName,
+            quantity: part.quantity,
+            pieces_per_hour: part.calcItem.pieces_per_hour,
+            weight_grams: part.calcItem.weight_grams,
+            extra_molds: 0,
+            complex_design: false,
+            is_blank_mold: true,
+            is_nfc: part.calcItem.is_nfc,
+            nfc_programming: part.calcItem.nfc_programming,
+            delivery_included: false,
+            printings: JSON.stringify([]),
+            cost_fot: part.result.costFot,
+            cost_indirect: part.result.costIndirect,
+            cost_plastic: part.result.costPlastic,
+            cost_mold_amortization: part.result.costMoldAmortization,
+            cost_design: 0,
+            cost_cutting: part.result.costCutting,
+            cost_cutting_indirect: part.result.costCuttingIndirect,
+            cost_nfc_tag: part.result.costNfcTag,
+            cost_nfc_programming: part.result.costNfcProgramming,
+            cost_nfc_indirect: part.result.costNfcIndirect,
+            cost_printing: 0,
+            cost_delivery: 0,
+            cost_total: part.result.costTotal,
+            sell_price_item: 0,
+            sell_price_printing: 0,
+            target_price_item: 0,
+            hours_plastic: part.result.hoursPlastic,
+            hours_cutting: part.result.hoursCutting,
+            hours_nfc: part.result.hoursNfc,
+            template_id: part.mold.id,
+            color_id: part.colors[0]?.id || null,
+            color_name: part.colors[0]?.name || part.colorLabel || '',
+            colors: JSON.stringify(part.colors),
+            color_solution_attachment: null,
+            marketplace_set_name: set.set_name || set.name || '',
+        };
+    },
+
+    _buildCompositePlasticOrderItem(parts, set, batch, itemNumber) {
+        const sumCost = key => round2(parts.reduce((sum, part) => (
+            sum + (parseFloat(part.result[key]) || 0) * part.qtyPerFinishedItem
+        ), 0));
+        const sumHours = key => round2(parts.reduce((sum, part) => sum + (parseFloat(part.result[key]) || 0), 0));
+        const componentSummary = this._getCompositePlasticSummary(parts.map(part => part.plasticItem));
+        const components = parts.map(part => ({
+            blank_id: part.mold.id,
+            name: part.mold.name || 'Пластиковая часть',
+            qty: part.qtyPerFinishedItem,
+            pieces_per_hour: part.calcItem.pieces_per_hour,
+            weight_grams: parseFloat(part.mold.weight_grams) || 0,
+            color_id: part.colors[0]?.id || null,
+            color_name: part.colors[0]?.name || part.colorLabel || '',
+            colors: part.colors,
+        }));
+        const allColors = parts.flatMap(part => part.colors || []).filter((color, index, source) => (
+            source.findIndex(candidate => String(candidate.id || '') === String(color.id || '')
+                && String(candidate.number || '') === String(color.number || '')
+                && String(candidate.name || '') === String(color.name || '')) === index
+        ));
+        const componentLabel = components.map(component => (
+            `${component.name}${component.qty === 1 ? '' : ` ×${component.qty}`}`
+        )).join(' + ');
+        const colorLabel = components
+            .filter(component => component.color_name)
+            .map(component => `${component.name}: ${component.color_name}`)
+            .join(' · ');
+        let productName = set.set_name || set.name || 'Составное изделие';
+        if (batch.variantName) productName += ` [${batch.variantName}]`;
+        productName += ` — детали: ${componentLabel}`;
+
+        return {
+            item_number: itemNumber,
+            item_type: 'product',
+            product_name: productName,
+            quantity: batch.qty,
+            pieces_per_hour: componentSummary.effectivePiecesPerHour,
+            weight_grams: componentSummary.weightGrams,
+            extra_molds: 0,
+            complex_design: false,
+            is_blank_mold: true,
+            is_nfc: parts.some(part => part.calcItem.is_nfc),
+            nfc_programming: parts.some(part => part.calcItem.nfc_programming),
+            delivery_included: false,
+            printings: JSON.stringify([]),
+            cost_fot: sumCost('costFot'),
+            cost_indirect: sumCost('costIndirect'),
+            cost_plastic: sumCost('costPlastic'),
+            cost_mold_amortization: sumCost('costMoldAmortization'),
+            cost_design: sumCost('costDesign'),
+            cost_cutting: sumCost('costCutting'),
+            cost_cutting_indirect: sumCost('costCuttingIndirect'),
+            cost_nfc_tag: sumCost('costNfcTag'),
+            cost_nfc_programming: sumCost('costNfcProgramming'),
+            cost_nfc_indirect: sumCost('costNfcIndirect'),
+            cost_printing: sumCost('costPrinting'),
+            cost_delivery: sumCost('costDelivery'),
+            cost_total: sumCost('costTotal'),
+            sell_price_item: 0,
+            sell_price_printing: 0,
+            target_price_item: 0,
+            hours_plastic: sumHours('hoursPlastic'),
+            hours_cutting: sumHours('hoursCutting'),
+            hours_nfc: sumHours('hoursNfc'),
+            template_id: null,
+            color_id: allColors[0]?.id || null,
+            color_name: colorLabel || allColors[0]?.name || '',
+            colors: JSON.stringify(allColors),
+            color_solution_attachment: null,
+            marketplace_set_name: set.set_name || set.name || '',
+            marketplace_plastic_components: components,
+        };
+    },
+
     async _createProductionOrderFromSets(selectedRows, orderName, deadlineEnd) {
         const selectedSets = selectedRows.map(r => {
             const set = this.allSets.find(s => Number(s.id) === Number(r.id));
@@ -1820,83 +2056,24 @@ const Marketplaces = {
 
             // Plastic products — per batch (variant)
             plasticBatches.forEach(batch => {
-                (s.plastic_items || []).forEach((pi, piIdx) => {
-                    if (!pi.blank_id) return;
-                    const mold = this._plasticBlanks.find(m => Number(m.id) === Number(pi.blank_id));
-                    if (!mold) return;
-                    const qty = batch.qty * (parseFloat(pi.qty) || 1);
-                    const calcItem = {
-                        quantity: qty,
-                        pieces_per_hour: this._pphForMold(mold),
-                        weight_grams: mold.weight_grams || 0,
-                        extra_molds: 0,
-                        complex_design: false,
-                        is_blank_mold: true,
-                        is_nfc: mold.category === 'nfc',
-                        nfc_programming: mold.category === 'nfc',
-                        delivery_included: false,
-                        printings: [],
-                    };
-                    const r = calculateItemCost(calcItem, params);
+                const plasticParts = this._buildPlasticProductionParts(s, batch, params);
+                if (s.composite_plastic_item && plasticParts.length > 1) {
+                    const compositeItem = this._buildCompositePlasticOrderItem(plasticParts, s, batch, itemNumber++);
+                    items.push(compositeItem);
+                    totalCosts += compositeItem.cost_total * compositeItem.quantity;
+                    totalHoursPlastic += (compositeItem.hours_plastic || 0)
+                        + (compositeItem.hours_cutting || 0)
+                        + (compositeItem.hours_nfc || 0);
+                    return;
+                }
 
-                    // Colors from variant assignment or from old per-item colors
-                    const assignment = batch.assignments[piIdx] || {};
-                    let colors, colorLabel;
-                    if (assignment.color_id) {
-                        colors = [{ id: assignment.color_id, number: assignment.color_number || '', name: assignment.color_name || '' }];
-                        colorLabel = colors.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ');
-                    } else {
-                        colors = Array.isArray(pi.colors) ? pi.colors : [];
-                        colorLabel = colors.length
-                            ? colors.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ')
-                            : String(pi.color_notes || '').trim();
-                    }
-
-                    let productName = mold.name;
-                    if (batch.variantName) productName += ` [${batch.variantName}]`;
-                    if (colorLabel) productName += ` [цвет: ${colorLabel}]`;
-                    items.push({
-                        item_number: itemNumber++,
-                        item_type: 'product',
-                        product_name: productName,
-                        quantity: qty,
-                        pieces_per_hour: calcItem.pieces_per_hour,
-                        weight_grams: calcItem.weight_grams,
-                        extra_molds: 0,
-                        complex_design: false,
-                        is_blank_mold: true,
-                        is_nfc: calcItem.is_nfc,
-                        nfc_programming: calcItem.nfc_programming,
-                        delivery_included: false,
-                        printings: JSON.stringify([]),
-                        cost_fot: r.costFot,
-                        cost_indirect: r.costIndirect,
-                        cost_plastic: r.costPlastic,
-                        cost_mold_amortization: r.costMoldAmortization,
-                        cost_design: 0,
-                        cost_cutting: r.costCutting,
-                        cost_cutting_indirect: r.costCuttingIndirect,
-                        cost_nfc_tag: r.costNfcTag,
-                        cost_nfc_programming: r.costNfcProgramming,
-                        cost_nfc_indirect: r.costNfcIndirect,
-                        cost_printing: 0,
-                        cost_delivery: 0,
-                        cost_total: r.costTotal,
-                        sell_price_item: 0,
-                        sell_price_printing: 0,
-                        target_price_item: 0,
-                        hours_plastic: r.hoursPlastic,
-                        hours_cutting: r.hoursCutting,
-                        hours_nfc: r.hoursNfc,
-                        template_id: mold.id,
-                        color_id: colors[0]?.id || null,
-                        color_name: colors[0]?.name || colorLabel || '',
-                        colors: JSON.stringify(colors),
-                        color_solution_attachment: null,
-                        marketplace_set_name: s.set_name || s.name || '',
-                    });
-                    totalCosts += r.costTotal * qty;
-                    totalHoursPlastic += (r.hoursPlastic || 0) + (r.hoursCutting || 0) + (r.hoursNfc || 0);
+                plasticParts.forEach(part => {
+                    const orderItem = this._buildStandalonePlasticOrderItem(part, s, batch, itemNumber++);
+                    items.push(orderItem);
+                    totalCosts += part.result.costTotal * part.quantity;
+                    totalHoursPlastic += (part.result.hoursPlastic || 0)
+                        + (part.result.hoursCutting || 0)
+                        + (part.result.hoursNfc || 0);
                 });
             });
 
