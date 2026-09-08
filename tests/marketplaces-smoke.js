@@ -428,6 +428,7 @@ async function main() {
         document.getElementById('mp-set-commercial').value = '6.5';
         document.getElementById('mp-set-acquiring').value = '5';
         document.getElementById('mp-set-margin').value = '40';
+        document.getElementById('mp-set-composite-plastic-item').checked = true;
         __originalMarketplacesLoad = Marketplaces.load;
         Marketplaces.load = async () => {};
     `, context);
@@ -435,6 +436,7 @@ async function main() {
     await vm.runInContext(`Marketplaces.saveSet()`, context);
     const savedMarketplaceSet = JSON.parse(vm.runInContext(`JSON.stringify(__savedMarketplaceSet)`, context));
     assert.equal(savedMarketplaceSet.charity, 1.5, 'saved B2C set should persist charity percentage');
+    assert.equal(savedMarketplaceSet.composite_plastic_item, true, 'saved B2C set should persist composite plastic mode');
 
     await vm.runInContext(`(async () => {
         __failedSaveToasts = [];
@@ -467,6 +469,7 @@ async function main() {
             name: 'Saved charity set',
             photo_url: '',
             charity: 2.25,
+            composite_plastic_item: true,
             hw_items: [],
             pkg_items: [],
             plastic_items: [],
@@ -477,6 +480,7 @@ async function main() {
     assert.equal(String(context.document.getElementById('mp-set-charity').value), '1');
     assert.equal(String(context.document.getElementById('mp-set-osn').value), '12');
     assert.equal(String(context.document.getElementById('mp-set-acquiring').value), '5');
+    assert.equal(context.document.getElementById('mp-set-composite-plastic-item').checked, true);
 
     vm.runInContext(`
         let savedOrderPayload = null;
@@ -577,6 +581,72 @@ async function main() {
         orderName: 'B2C тест',
         managerName: 'Тест',
     });
+
+    vm.runInContext(`
+        Marketplaces._plasticBlanks = [{
+            id: 701,
+            name: 'Основа кликера',
+            pph_actual: 60,
+            weight_grams: 7,
+            category: 'blank',
+        }, {
+            id: 702,
+            name: 'Звёздочка кликера',
+            pph_actual: 45,
+            weight_grams: 6,
+            category: 'blank',
+        }];
+        __clickerSummary = Marketplaces._getCompositePlasticSummary([
+            { blank_id: 701, qty: 1 },
+            { blank_id: 702, qty: 1 },
+        ]);
+        document.getElementById('mp-set-composite-plastic-item').checked = true;
+        Marketplaces._plasticItems = [
+            { blank_id: 701, qty: 1 },
+            { blank_id: 702, qty: 1 },
+        ];
+        Marketplaces._renderCompositePlasticSummary();
+        Marketplaces.allSets = [{
+            id: 5,
+            name: 'Кликер «Звезда»',
+            set_name: 'Кликер «Звезда»',
+            composite_plastic_item: true,
+            default_packaging_enabled: false,
+            mp_actual_price: 670,
+            plastic_items: [
+                { blank_id: 701, qty: 1, colors: [] },
+                { blank_id: 702, qty: 1, colors: [] },
+            ],
+            color_variants: [],
+            hw_items: [],
+            pkg_items: [],
+        }];
+    `, context);
+    const clickerSummary = JSON.parse(vm.runInContext(`JSON.stringify(__clickerSummary)`, context));
+    assert.equal(clickerSummary.components.length, 2);
+    assert.equal(clickerSummary.effectivePiecesPerHour, 25.71, '60 + 45 sequential parts should yield 25.71 finished items/hour');
+    assert.equal(clickerSummary.weightGrams, 13);
+    assert.match(context.document.getElementById('mp-composite-plastic-summary').innerHTML, /25,71 готовых изделий\/ч/);
+
+    await vm.runInContext(`Marketplaces._createProductionOrderFromSets([{ id: 5, qty: 10 }], 'Кликеры', '2026-03-31')`, context);
+    const compositeOrder = JSON.parse(vm.runInContext(`JSON.stringify(savedOrderPayload)`, context));
+    const compositeItems = JSON.parse(vm.runInContext(`JSON.stringify(savedItemsPayload)`, context));
+    const compositeProducts = compositeItems.filter(item => item.item_type === 'product');
+    assert.equal(compositeProducts.length, 1, 'composite set should create one finished product row');
+    assert.equal(compositeProducts[0].quantity, 10);
+    assert.equal(compositeProducts[0].pieces_per_hour, 25.71);
+    assert.equal(compositeProducts[0].weight_grams, 13);
+    assert.equal(compositeProducts[0].cost_total, 6, 'finished item should sum both component unit costs');
+    assert.equal(compositeProducts[0].marketplace_plastic_components.length, 2);
+    assert.match(compositeProducts[0].product_name, /Основа кликера.*Звёздочка кликера/);
+    assert.equal(compositeOrder.production_hours_plastic, 1, 'production hours should sum both separate pours');
+
+    vm.runInContext(`
+        Marketplaces.allSets[0].composite_plastic_item = false;
+    `, context);
+    await vm.runInContext(`Marketplaces._createProductionOrderFromSets([{ id: 5, qty: 10 }], 'Кликеры legacy', '2026-03-31')`, context);
+    const standaloneProducts = JSON.parse(vm.runInContext(`JSON.stringify(savedItemsPayload.filter(item => item.item_type === 'product'))`, context));
+    assert.equal(standaloneProducts.length, 2, 'ordinary set should keep separate plastic rows');
 
     vm.runInContext(`
         Marketplaces.allSets = [{
