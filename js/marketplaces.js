@@ -1048,6 +1048,14 @@ const Marketplaces = {
         return this._normalizeMarketplacePart(item, 'pkg');
     },
 
+    _isCompositePlasticSet(set) {
+        if (!set || typeof set !== 'object') return false;
+        if (Object.prototype.hasOwnProperty.call(set, 'composite_plastic_item')) {
+            return !!set.composite_plastic_item;
+        }
+        return (set.plastic_items || []).filter(item => item?.blank_id).length > 1;
+    },
+
     _normalizeMarketplaceSet(set) {
         if (!set) return set;
         return {
@@ -1060,7 +1068,7 @@ const Marketplaces = {
             acquiring: this._safeNumber(set.acquiring, 5),
             target_margin: this._safeNumber(set.target_margin, 40),
             default_packaging_enabled: !!set.default_packaging_enabled,
-            composite_plastic_item: !!set.composite_plastic_item,
+            composite_plastic_item: this._isCompositePlasticSet(set),
             hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
             pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
         };

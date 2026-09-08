@@ -131,6 +131,13 @@ async function main() {
     assert.equal(vm.runInContext(`typeof Marketplaces`, context), 'object');
     assert.equal(vm.runInContext(`typeof Warehouse`, context), 'object');
 
+    const legacyCompositeDefaults = JSON.parse(vm.runInContext(`JSON.stringify([
+        Marketplaces._normalizeMarketplaceSet({ plastic_items: [{ blank_id: 1 }, { blank_id: 2 }] }).composite_plastic_item,
+        Marketplaces._normalizeMarketplaceSet({ plastic_items: [{ blank_id: 1 }, { blank_id: 2 }], composite_plastic_item: false }).composite_plastic_item,
+        Marketplaces._normalizeMarketplaceSet({ plastic_items: [{ blank_id: 1 }] }).composite_plastic_item,
+    ])`, context));
+    assert.deepEqual(legacyCompositeDefaults, [true, false, false], 'legacy multi-part sets should default to composite without overriding explicit false');
+
     context.document.getElementById('mp-plastic-items');
     context.document.getElementById('mp-hw-items');
     context.document.getElementById('mp-pkg-items');
