@@ -98,6 +98,7 @@ function calcBlankSellPrice(cost, qty, params) {
 const Molds = {
     allMolds: [],
     editingId: null,
+    _moldComponents: [],
     _catalogPublishInFlight: false,
 
     _setCatalogPublishUi({ busy = false, message = '', state = 'idle' } = {}) {
@@ -212,16 +213,17 @@ const Molds = {
             try {
             // Приоритет: факт → среднее(min,max) → min → 1
             // Среднее = единая цена для заказчика, независимо от цвета пластика
-            const pMin = m.pph_min || 0;
-            const pMax = m.pph_max || 0;
-            const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
-            const pph = m.pph_actual || pAvg || 1;
-            const weight = m.weight_grams || 0;
-            const moldCount = m.mold_count || 1;
+            const effective = getEffectiveMoldMetrics(m, this.allMolds);
+            const pph = effective.piecesPerHour || 1;
+            const weight = effective.weightGrams || 0;
+            const moldCount = effective.moldCount || 1;
+            m.composite_summary = effective.isComposite ? effective : null;
+            m.effective_pph = effective.piecesPerHour || 0;
+            m.effective_weight_grams = effective.weightGrams || 0;
+            m.effective_mold_count = moldCount;
 
-            // Real mold total cost (including delivery)
-            const singleMoldCost = (m.cost_cny ?? 800) * (m.cny_rate ?? 12.5) + (m.delivery_cost ?? 3000);
-            m.cost_rub_calc = round2(singleMoldCost * moldCount);
+            // Real mold total cost (including all separately cast components)
+            m.cost_rub_calc = round2(effective.totalMoldCost || 0);
 
             // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
             const moldAmortPerUnit = m.cost_rub_calc / MOLD_MAX_LIFETIME;
@@ -504,9 +506,12 @@ const Molds = {
             </tr>`;
             section.molds.forEach(m => {
             const statusDot = m.status === 'active' ? 'calculated' : m.status === 'client' ? 'in_production' : 'cancelled';
-            const pph = m.pph_actual || ((m.pph_min && m.pph_max) ? Math.round((m.pph_min + m.pph_max) / 2) : m.pph_min) || 0;
-            const pphText = m.pph_actual ? `<b>${pph}</b>` : (pph > 0 ? `${pph}` : '—');
+            const pph = m.effective_pph || m.pph_actual || ((m.pph_min && m.pph_max) ? Math.round((m.pph_min + m.pph_max) / 2) : m.pph_min) || 0;
+            const pphText = pph > 0 ? `<b>${pph}</b>` : '—';
             const dimensionsText = this._formatDimensions(m);
+            const compositeLine = m.composite_summary
+                ? `<div style="font-size:10px;color:var(--accent);">2+ части · ${m.composite_summary.components.map(component => `${this.esc(component.name)} × ${component.qty}`).join(' + ')}</div>`
+                : '';
             const collectionBadge = m.collection
                 ? ` <span style="color:var(--accent);font-size:10px;font-weight:600;">${this.esc(m.collection)}</span>`
                 : '';
@@ -540,12 +545,13 @@ const Molds = {
                                     ${collectionBadge} ${nfcBadge} ${priceBadge}
                                 </div>
                                 ${m.hw_name ? `<div style="font-size:10px;color:var(--text-muted);">+ ${this.esc(m.hw_name)}</div>` : ''}
+                                ${compositeLine}
                                 ${Number(m.builtin_assembly_speed || 0) > 0 ? `<div style="font-size:10px;color:var(--orange);">🛠 ${this.esc(m.builtin_assembly_name || 'Сборка')} · ${this._formatSpeedPerMinute(m.builtin_assembly_speed)} шт/мин</div>` : ''}
                             </div>
                         </div>
                     </td>
                     <td style="text-align:center;padding:6px 4px;font-size:12px;">${pphText}</td>
-                    <td style="text-align:center;padding:6px 4px;font-size:11px;color:var(--text-muted);">${m.weight_grams || '—'}г</td>
+                    <td style="text-align:center;padding:6px 4px;font-size:11px;color:var(--text-muted);">${m.effective_weight_grams || m.weight_grams || '—'}г</td>
                     <td style="text-align:center;padding:6px 6px;font-size:11px;color:var(--text-secondary);">${this.esc(dimensionsText)}${dimensionsText !== '—' ? '<span style="color:var(--text-muted);font-size:10px;"> мм</span>' : ''}</td>
                     ${tierCells}
                     <td style="padding:6px 4px;text-align:center;">
@@ -694,8 +700,9 @@ const Molds = {
     },
 
     _renderInlineControls(mold) {
-        const inlinePph = Number(mold.pph_actual || mold.pph_max || mold.pph_min || 0) || '';
-        const inlineWeight = Number(mold.weight_grams || 0) || '';
+        const isComposite = !!mold.composite_summary;
+        const inlinePph = Number(mold.effective_pph || mold.pph_actual || mold.pph_max || mold.pph_min || 0) || '';
+        const inlineWeight = Number(mold.effective_weight_grams || mold.weight_grams || 0) || '';
         const inlineWidth = Number(mold.width_mm || 0) || '';
         const inlineHeight = Number(mold.height_mm || 0) || '';
         const inlineDepth = Number(mold.depth_mm || 0) || '';
@@ -726,14 +733,15 @@ const Molds = {
                     ${allTiersHtml}
                 </div>
                 ${costBreakdownSummary.length ? `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;"><span style="font-weight:700;color:var(--text-primary);">Себест ${formatRub(mold?.cost_breakdown?.total || 0)}</span> = ${costBreakdownSummary.join(' • ')}</div>` : ''}
+                ${isComposite ? '<div style="font-size:11px;color:var(--accent);font-weight:600;">Скорость и вес рассчитаны по составным частям. Изменить их можно в карточке бланка.</div>' : ''}
                 <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
                     <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Шт/ч</span>
-                        <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlinePph}">
+                        <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlinePph}" ${isComposite ? 'disabled' : ''}>
                     </label>
                     <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Вес, г</span>
-                        <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlineWeight}">
+                        <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlineWeight}" ${isComposite ? 'disabled' : ''}>
                     </label>
                     <div style="display:flex;gap:6px;align-items:end;padding:0 6px 0 0;">
                         <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
@@ -891,7 +899,131 @@ const Molds = {
         });
     },
 
+    _isCompositeFormEnabled() {
+        return !!document.getElementById('mold-is-composite')?.checked;
+    },
+
+    _getCompositeCandidates() {
+        return this.allMolds.filter(mold => (
+            Number(mold?.id) > 0
+            && Number(mold.id) !== Number(this.editingId)
+            && normalizeMoldComponents(mold).length < 2
+        ));
+    },
+
+    _getFormCompositeSummary() {
+        return getCompositeMoldSummary({
+            id: this.editingId,
+            mold_components: this._moldComponents,
+        }, this.allMolds);
+    },
+
+    toggleCompositeMode() {
+        const enabled = this._isCompositeFormEnabled();
+        if (enabled && this._moldComponents.length < 2) {
+            while (this._moldComponents.length < 2) this._moldComponents.push({ mold_id: 0, qty: 1 });
+        }
+        this.renderCompositeComponents();
+        this._syncCompositeFormMetrics();
+    },
+
+    addCompositeComponent() {
+        this._moldComponents.push({ mold_id: 0, qty: 1 });
+        this.renderCompositeComponents();
+        this._syncCompositeFormMetrics();
+    },
+
+    removeCompositeComponent(index) {
+        this._moldComponents.splice(index, 1);
+        this.renderCompositeComponents();
+        this._syncCompositeFormMetrics();
+    },
+
+    updateCompositeComponent(index, field, value) {
+        if (!this._moldComponents[index]) return;
+        this._moldComponents[index][field] = field === 'qty'
+            ? Math.max(1, Math.round(Number(value) || 1))
+            : (Number(value) || 0);
+        this._syncCompositeFormMetrics();
+    },
+
+    renderCompositeComponents() {
+        const enabled = this._isCompositeFormEnabled();
+        const block = document.getElementById('mold-components-block');
+        const container = document.getElementById('mold-components-list');
+        if (block) block.style.display = enabled ? '' : 'none';
+        if (!container) return;
+        if (!enabled) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const options = this._getCompositeCandidates().map(mold => {
+            const pph = getMoldOwnPiecesPerHour(mold);
+            const label = `${mold.name || `Молд #${mold.id}`} · ${pph || '—'} шт/ч · ${Number(mold.weight_grams || 0) || '—'} г`;
+            return { id: Number(mold.id), label };
+        });
+        container.innerHTML = this._moldComponents.map((component, index) => `
+            <div style="display:grid;grid-template-columns:minmax(220px,1fr) 90px 34px;gap:8px;align-items:end;margin-bottom:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                    <span>Часть ${index + 1}</span>
+                    <select onchange="Molds.updateCompositeComponent(${index}, 'mold_id', this.value)">
+                        <option value="">— Выберите молд —</option>
+                        ${options.map(option => `<option value="${option.id}" ${Number(component.mold_id) === option.id ? 'selected' : ''}>${this.esc(option.label)}</option>`).join('')}
+                    </select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                    <span>Шт. в изделии</span>
+                    <input type="number" min="1" max="20" value="${Math.max(1, Number(component.qty) || 1)}" oninput="Molds.updateCompositeComponent(${index}, 'qty', this.value)">
+                </label>
+                <button type="button" class="btn btn-outline" style="height:36px;padding:0;" onclick="Molds.removeCompositeComponent(${index})" title="Убрать часть">×</button>
+            </div>
+        `).join('');
+    },
+
+    _syncCompositeFormMetrics() {
+        const enabled = this._isCompositeFormEnabled();
+        const derivedIds = ['mold-pph-actual', 'mold-weight', 'mold-count'];
+        derivedIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.readOnly = enabled;
+        });
+        ['mold-complexity', 'mold-cost-cny', 'mold-cny-rate', 'mold-delivery-cost'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = enabled;
+        });
+
+        const summaryEl = document.getElementById('mold-components-summary');
+        if (!enabled) {
+            if (summaryEl) summaryEl.textContent = '';
+            this.recalcMoldCost();
+            return;
+        }
+
+        const summary = this._getFormCompositeSummary();
+        if (!summary) {
+            if (summaryEl) summaryEl.textContent = 'Выберите минимум две обычные формы с заполненной скоростью.';
+            document.getElementById('mold-cost-rub').value = '';
+            return;
+        }
+        document.getElementById('mold-pph-actual').value = summary.piecesPerHour;
+        document.getElementById('mold-pph-min').value = summary.piecesPerHour;
+        document.getElementById('mold-pph-max').value = summary.piecesPerHour;
+        document.getElementById('mold-weight').value = summary.weightGrams;
+        document.getElementById('mold-count').value = summary.moldCount;
+        document.getElementById('mold-cost-rub').value = summary.totalMoldCost;
+        if (summaryEl) {
+            const parts = summary.components.map(component => `${component.name}: ${component.piecesPerHour} шт/ч, ${component.weightGrams} г`);
+            summaryEl.textContent = `${parts.join(' + ')} → итог ${summary.piecesPerHour} шт/ч, ${summary.weightGrams} г, ${formatRub(summary.totalMoldCost)}`;
+        }
+    },
+
     recalcMoldCost() {
+        if (this._isCompositeFormEnabled()) {
+            const summary = this._getFormCompositeSummary();
+            document.getElementById('mold-cost-rub').value = summary ? summary.totalMoldCost : '';
+            return;
+        }
         const complexity = document.getElementById('mold-complexity').value;
         let costCny = parseFloat(document.getElementById('mold-cost-cny').value) || 0;
         const moldCount = parseInt(document.getElementById('mold-count').value) || 1;
@@ -961,6 +1093,11 @@ const Molds = {
         document.getElementById('mold-delivery-cost').value = m.delivery_cost ?? 3000;
         document.getElementById('mold-cost-rub').value = m.cost_rub_calc || '';
         document.getElementById('mold-count').value = m.mold_count || 1;
+        this._moldComponents = normalizeMoldComponents(m).map(component => ({ ...component }));
+        const compositeToggle = document.getElementById('mold-is-composite');
+        if (compositeToggle) compositeToggle.checked = this._moldComponents.length >= 2;
+        this.renderCompositeComponents();
+        this._syncCompositeFormMetrics();
         document.getElementById('mold-client').value = m.client || '';
         document.getElementById('mold-hw-name').value = m.hw_name || '';
         document.getElementById('mold-hw-price').value = m.hw_price_per_unit || '';
@@ -1076,6 +1213,11 @@ const Molds = {
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
         document.getElementById('mold-hw-delivery-total').value = 0;
+        this._moldComponents = [];
+        const compositeToggle = document.getElementById('mold-is-composite');
+        if (compositeToggle) compositeToggle.checked = false;
+        this.renderCompositeComponents();
+        this._syncCompositeFormMetrics();
         // Clear custom price fields and hints
         this._getManualPriceTiers().forEach(q => {
             const el = document.getElementById('mold-price-' + q);
@@ -1099,10 +1241,20 @@ const Molds = {
 
         this.recalcMoldCost();
 
+        const compositeEnabled = this._isCompositeFormEnabled();
+        const moldComponents = compositeEnabled ? normalizeMoldComponents(this._moldComponents) : [];
+        const compositeSummary = compositeEnabled
+            ? getCompositeMoldSummary({ id: this.editingId, mold_components: moldComponents }, this.allMolds)
+            : null;
+        if (compositeEnabled && !compositeSummary) {
+            App.toast('Выберите минимум две разные формы с заполненной скоростью');
+            return;
+        }
+
         const customPrices = this._collectCustomPrices();
         const useManualPrices = Object.keys(customPrices).length > 0;
 
-        const pphValue = parseFloat(document.getElementById('mold-pph-actual').value) || 0;
+        const pphValue = compositeSummary?.piecesPerHour || parseFloat(document.getElementById('mold-pph-actual').value) || 0;
         if (this._hwSource === 'warehouse' && !Number(this._hwWarehouseItemId || 0)) {
             App.toast('Выберите позицию со склада для встроенной фурнитуры');
             return;
@@ -1118,7 +1270,7 @@ const Molds = {
             pph_min: pphValue,
             pph_max: pphValue,
             pph_actual: pphValue || null,
-            weight_grams: parseFloat(document.getElementById('mold-weight').value) || 0,
+            weight_grams: compositeSummary?.weightGrams || parseFloat(document.getElementById('mold-weight').value) || 0,
             width_mm: parseFloat(document.getElementById('mold-width').value) || 0,
             height_mm: parseFloat(document.getElementById('mold-height').value) || 0,
             depth_mm: parseFloat(document.getElementById('mold-depth').value) || 0,
@@ -1131,8 +1283,9 @@ const Molds = {
                 const value = parseFloat(raw);
                 return Number.isFinite(value) ? value : 3000;
             })(),
-            cost_rub: parseFloat(document.getElementById('mold-cost-rub').value) || 0,
-            mold_count: parseInt(document.getElementById('mold-count').value) || 1,
+            cost_rub: compositeSummary?.totalMoldCost || parseFloat(document.getElementById('mold-cost-rub').value) || 0,
+            mold_count: compositeSummary?.moldCount || parseInt(document.getElementById('mold-count').value) || 1,
+            mold_components: moldComponents,
             client: document.getElementById('mold-client').value.trim(),
             hw_source: this._hwSource || 'custom',
             hw_name: document.getElementById('mold-hw-name').value.trim(),
@@ -1324,7 +1477,12 @@ const Molds = {
                 moldData.status = 'active';
                 moldData.catalog_enabled = true;
                 moldData.photo_url = m.photo_url || '';
-                moldData.weight_grams = Number(m.weight_grams || 0) || 0;
+                moldData.pph_actual = Number(m.effective_pph || m.pph_actual || 0) || 0;
+                moldData.pph_min = moldData.pph_actual;
+                moldData.pph_max = moldData.pph_actual;
+                moldData.weight_grams = Number(m.effective_weight_grams || m.weight_grams || 0) || 0;
+                moldData.mold_count = Number(m.effective_mold_count || m.mold_count || 1) || 1;
+                moldData.mold_components = normalizeMoldComponents(m);
                 moldData.collection = m.collection || '';
                 moldData.width_mm = Number(m.width_mm || 0) || 0;
                 moldData.height_mm = Number(m.height_mm || 0) || 0;
@@ -1439,10 +1597,10 @@ const Molds = {
                 return [t?.cost || 0, t?.sellPrice || 0, marginPct + '%', '×' + mult];
             });
             return [
-                m.name, m.category_label, m.collection || '', m.status_label, m.mold_count || 1,
+                m.name, m.category_label, m.collection || '', m.status_label, m.effective_mold_count || m.mold_count || 1,
                 m.width_mm || '', m.height_mm || '', m.depth_mm || '',
-                m.pph_min + (m.pph_max !== m.pph_min ? '-' + m.pph_max : ''), m.pph_actual || '',
-                m.weight_grams, ...tierData,
+                m.effective_pph || (m.pph_min + (m.pph_max !== m.pph_min ? '-' + m.pph_max : '')), m.effective_pph || m.pph_actual || '',
+                m.effective_weight_grams || m.weight_grams, ...tierData,
                 m.total_orders || 0, m.total_units_produced || 0,
             ];
         });

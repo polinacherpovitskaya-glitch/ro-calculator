@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=432">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v451';
+        const CURRENT_HTML_VERSION = 'v452';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v451</span></span>
+            <span>Калькулятор <span id="app-version">v452</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -1073,7 +1073,7 @@
                     <div class="form-group">
                         <label>Кол-во молдов в изделии</label>
                         <input type="number" min="1" max="5" id="mold-count" value="1">
-                        <span class="form-hint">Напр. подставка = 2 молда</span>
+                        <span class="form-hint">Для одинаковых форм; разные части добавляются ниже</span>
                     </div>
                     <div class="form-group">
                         <label>Курс юаня (&#8381;)</label>
@@ -1087,6 +1087,18 @@
                     <div class="form-group">
                         <label>Стоимость ИТОГО (&#8381;)</label>
                         <input type="number" min="0" id="mold-cost-rub" readonly style="background:#f5f5f5;font-weight:700">
+                    </div>
+                </div>
+                <div style="margin:10px 0 12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);">
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;">
+                        <input type="checkbox" id="mold-is-composite" onchange="Molds.toggleCompositeMode()">
+                        <span>Изделие состоит из нескольких отдельно проливаемых частей</span>
+                    </label>
+                    <div class="form-hint" style="margin:5px 0 0 24px;">Например, кликер: основа 60 шт/ч + звёздочка 45 шт/ч. Система сложит время, вес и стоимость форм.</div>
+                    <div id="mold-components-block" style="display:none;margin-top:12px;">
+                        <div id="mold-components-list"></div>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="Molds.addCompositeComponent()">+ Добавить часть</button>
+                        <div id="mold-components-summary" style="margin-top:10px;padding:9px 10px;border-radius:8px;background:rgba(69,125,255,.08);color:var(--text-secondary);font-size:11px;line-height:1.45;"></div>
                     </div>
                 </div>
                 <div class="form-row">
@@ -3617,16 +3629,16 @@
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=446"></script>
+<script src="js/supabase.js?v=452"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=432"></script>
-<script src="js/app.js?v=451"></script>
+<script src="js/calculator.js?v=452"></script>
+<script src="js/app.js?v=452"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=439"></script>
 <script src="js/orders.js?v=439"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
-    <script src="js/molds.js?v=411"></script>
+    <script src="js/molds.js?v=452"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
 <script src="js/timetrack.js?v=65"></script>

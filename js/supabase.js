@@ -1122,6 +1122,20 @@ function _isLocalMoldNewer(localMold, remoteMold) {
 function _normalizeMoldRecord(mold) {
     if (!mold || typeof mold !== 'object') return mold;
     const normalized = { ...mold };
+    if (typeof normalizeMoldComponents === 'function') {
+        normalized.mold_components = normalizeMoldComponents(normalized);
+    } else {
+        let components = normalized.mold_components;
+        if (typeof components === 'string') {
+            try { components = JSON.parse(components); } catch (_) { components = []; }
+        }
+        normalized.mold_components = Array.isArray(components)
+            ? components.map(component => ({
+                mold_id: Number(component?.mold_id ?? component?.blank_id ?? component?.id),
+                qty: Math.max(1, Math.round(Number(component?.qty) || 1)),
+            })).filter(component => Number.isFinite(component.mold_id) && component.mold_id > 0)
+            : [];
+    }
     if (normalized.hw_name === undefined) normalized.hw_name = '';
     if (normalized.hw_price_per_unit === undefined) normalized.hw_price_per_unit = 0;
     if (normalized.hw_delivery_total === undefined) normalized.hw_delivery_total = 0;
@@ -1680,7 +1694,7 @@ function _getLocalTemplates() {
     // In localStorage mode, otherwise derive templates from molds (source of truth)
     const molds = getLocal(LOCAL_KEYS.molds);
     if (molds && molds.length > 0) {
-        return molds.map(m => _moldToTemplate(m));
+        return molds.map(m => _moldToTemplate(m, molds));
     }
     return getDefaultTemplates();
 }
@@ -1721,6 +1735,7 @@ function _templateToMold(template, index = 0) {
         cny_rate: Number(template.cny_rate || 0) || 0,
         delivery_cost: Number(template.delivery_cost || 0) || 0,
         mold_count: Math.max(1, Number(template.mold_count || 1) || 1),
+        mold_components: Array.isArray(template.mold_components) ? template.mold_components : [],
         complexity: template.complexity || 'simple',
         total_orders: Number(template.total_orders || 0) || 0,
         total_units_produced: Number(template.total_units_produced || 0) || 0,
@@ -1844,15 +1859,19 @@ function _hydrateMissingMoldFields(mold, legacyIndexes = []) {
 function getDefaultTemplates() {
     // Auto-generate from default molds (blanks catalog is the source of truth)
     const molds = getDefaultMolds();
-    return molds.map(m => _moldToTemplate(m));
+    return molds.map(m => _moldToTemplate(m, molds));
 }
 
 /** Convert a mold object to a template object (single source of truth) */
-function _moldToTemplate(m) {
+function _moldToTemplate(m, allMolds = []) {
     const mold = _normalizeMoldRecord(m);
-    const pAct = Number(mold.pph_actual || mold.pieces_per_hour_actual || mold.pieces_per_hour || mold.pieces_per_hour_avg || 0) || 0;
-    const pMin = Number(mold.pph_min || mold.pieces_per_hour_min || pAct || 0) || 0;
-    const pMax = Number(mold.pph_max || mold.pieces_per_hour_max || pAct || pMin || 0) || 0;
+    const effective = typeof getEffectiveMoldMetrics === 'function'
+        ? getEffectiveMoldMetrics(mold, allMolds)
+        : null;
+    const effectivePph = effective?.isComposite ? Number(effective.piecesPerHour || 0) : 0;
+    const pAct = effectivePph || Number(mold.pph_actual || mold.pieces_per_hour_actual || mold.pieces_per_hour || mold.pieces_per_hour_avg || 0) || 0;
+    const pMin = effectivePph || Number(mold.pph_min || mold.pieces_per_hour_min || pAct || 0) || 0;
+    const pMax = effectivePph || Number(mold.pph_max || mold.pieces_per_hour_max || pAct || pMin || 0) || 0;
     const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
     const displayValue = pAct || pAvg || pMin || pMax || 0;
     const display = displayValue === 0 ? '—' : (pMin > 0 && pMax > 0 && pMin !== pMax ? `${pMin}-${pMax}` : String(displayValue));
@@ -1872,7 +1891,7 @@ function _moldToTemplate(m) {
         pieces_per_hour_avg: pAvg,
         pph_actual: pAct || null,
         pieces_per_hour: pAct || pAvg || 0,
-        weight_grams: mold.weight_grams,
+        weight_grams: effective?.isComposite ? effective.weightGrams : mold.weight_grams,
         size: _formatDimensionText(mold.width_mm, mold.height_mm, mold.depth_mm),
         width_mm: mold.width_mm || 0,
         height_mm: mold.height_mm || 0,
@@ -1896,7 +1915,9 @@ function _moldToTemplate(m) {
         cost_cny: mold.cost_cny || 0,
         cny_rate: mold.cny_rate || 0,
         delivery_cost: mold.delivery_cost || 0,
-        mold_count: mold.mold_count || 1,
+        mold_count: effective?.isComposite ? effective.moldCount : (mold.mold_count || 1),
+        mold_components: Array.isArray(mold.mold_components) ? mold.mold_components : [],
+        composite_mold_total_cost: effective?.isComposite ? effective.totalMoldCost : 0,
         complexity: mold.complexity || 'simple',
     };
 }
@@ -1906,7 +1927,7 @@ function refreshTemplatesFromMolds(molds) {
     const existingTemplates = _getLocalTemplates();
     const legacyIndex = _buildLegacyMoldIndex(existingTemplates);
     const templates = (molds || []).map(m => {
-        const template = _moldToTemplate(m);
+        const template = _moldToTemplate(m, molds || []);
         const legacy = _findLegacyMoldRecord(template, legacyIndex);
         if (legacy) {
             if (!template.photo_url && legacy.photo_url) template.photo_url = String(legacy.photo_url).trim();

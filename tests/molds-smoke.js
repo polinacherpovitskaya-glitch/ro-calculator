@@ -12,6 +12,10 @@ function createElement(id = '') {
         style: {},
         src: '',
         files: [],
+        options: [],
+        checked: false,
+        disabled: false,
+        readOnly: false,
         classList: {
             _values: new Set(),
             add() {},
@@ -149,9 +153,30 @@ function runScript(context, relativePath) {
 
 async function main() {
     const context = createContext();
+    runScript(context, 'js/calculator.js');
     context.calculateItemCost = () => ({ costTotal: 100, costMoldAmortization: 0 });
     context.App.params = { taxRate: 0.07, vatRate: 0.05, charityRate: 0.01 };
     runScript(context, 'js/molds.js');
+
+    const compositeSummary = JSON.parse(vm.runInContext(`JSON.stringify(getCompositeMoldSummary({
+        id: 3,
+        mold_components: [{ mold_id: 1, qty: 1 }, { mold_id: 2, qty: 1 }]
+    }, [
+        { id: 1, name: 'Основа', pph_actual: 60, weight_grams: 7, cost_cny: 800, cny_rate: 15, delivery_cost: 3000, mold_count: 1 },
+        { id: 2, name: 'Звёздочка', pph_actual: 45, weight_grams: 2, cost_cny: 800, cny_rate: 15, delivery_cost: 3000, mold_count: 1 }
+    ]))`, context));
+    assert.equal(compositeSummary.piecesPerHour, 25.71, '60 + 45 sequential castings should yield 25.71 finished items/hour');
+    assert.equal(compositeSummary.weightGrams, 9, 'composite weight should sum every separately cast part');
+    assert.equal(compositeSummary.moldCount, 2, 'composite mold count should include both molds');
+    assert.equal(compositeSummary.totalMoldCost, 30000, 'composite mold cost should sum both component molds');
+
+    const legacySummary = JSON.parse(vm.runInContext(`JSON.stringify(getEffectiveMoldMetrics({
+        id: 4, pph_actual: 60, weight_grams: 7, cost_cny: 800, cny_rate: 15, delivery_cost: 3000, mold_count: 2
+    }, []))`, context));
+    assert.equal(legacySummary.isComposite, false, 'legacy mold_count records should keep legacy calculation');
+    assert.equal(legacySummary.piecesPerHour, 60);
+    assert.equal(legacySummary.weightGrams, 7);
+    assert.equal(legacySummary.totalMoldCost, 30000);
 
     assert.equal(
         vm.runInContext('Number(getBlankKeepRate(App.params, 0.45).toFixed(3))', context),
@@ -359,6 +384,48 @@ async function main() {
     assert.equal(context.__savedFormMold.hw_price_per_unit, 10);
     assert.equal(context.__savedFormMold.use_manual_prices, true);
     assert.deepEqual(context.__savedFormMold.custom_prices, { 10: 1500, 50: 1250 });
+
+    context.__savedCompositeMold = null;
+    context.saveMold = async (mold) => {
+        context.__savedCompositeMold = JSON.parse(JSON.stringify(mold));
+        return { mold, remoteOk: true };
+    };
+    vm.runInContext(`
+        Molds.editingId = 103;
+        Molds.allMolds = [
+            { id: 101, name: 'Кликер — основа', pph_actual: 60, weight_grams: 7, cost_cny: 800, cny_rate: 15, delivery_cost: 3000, mold_count: 1 },
+            { id: 102, name: 'Кликер — звёздочка', pph_actual: 45, weight_grams: 6, cost_cny: 800, cny_rate: 15, delivery_cost: 3000, mold_count: 1 }
+        ];
+        Molds._moldComponents = [{ mold_id: 101, qty: 1 }, { mold_id: 102, qty: 1 }];
+        document.getElementById('mold-is-composite').checked = true;
+        document.getElementById('mold-name').value = 'Кликер';
+        document.getElementById('mold-status').value = 'active';
+        document.getElementById('mold-complexity').value = 'simple';
+        document.getElementById('mold-cost-cny').value = '800';
+        document.getElementById('mold-cny-rate').value = '15';
+        document.getElementById('mold-delivery-cost').value = '3000';
+        document.getElementById('mold-width').value = '35';
+        document.getElementById('mold-height').value = '30';
+        document.getElementById('mold-depth').value = '25';
+        document.getElementById('mold-client').value = '';
+        document.getElementById('mold-notes').value = '';
+        document.getElementById('mold-assembly-name').value = '';
+        document.getElementById('mold-assembly-speed').value = '';
+        document.getElementById('mold-hw-name').value = '';
+        document.getElementById('mold-hw-price').value = '';
+        document.getElementById('mold-hw-delivery-total').value = '0';
+        document.getElementById('mold-hw-speed').value = '';
+        Molds._hwSource = 'custom';
+    `, context);
+    await vm.runInContext(`Molds.saveMold()`, context);
+    assert.deepEqual(context.__savedCompositeMold.mold_components, [
+        { mold_id: 101, qty: 1 },
+        { mold_id: 102, qty: 1 },
+    ]);
+    assert.equal(context.__savedCompositeMold.pph_actual, 25.71);
+    assert.equal(context.__savedCompositeMold.weight_grams, 13);
+    assert.equal(context.__savedCompositeMold.mold_count, 2);
+    assert.equal(context.__savedCompositeMold.cost_rub, 30000);
 
     vm.runInContext(`
         Molds._hwSource = 'custom';
