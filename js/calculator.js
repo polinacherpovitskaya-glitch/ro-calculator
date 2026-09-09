@@ -265,11 +265,101 @@ function serializeColorAttachments(source) {
     return JSON.stringify(attachments.length === 1 ? attachments[0] : attachments);
 }
 
+function normalizeMoldComponents(source) {
+    let components = source?.mold_components ?? source;
+    if (typeof components === 'string') {
+        try { components = JSON.parse(components); } catch (_) { components = []; }
+    }
+    if (!Array.isArray(components)) return [];
+
+    const merged = new Map();
+    components.forEach(component => {
+        const moldId = Number(component?.mold_id ?? component?.blank_id ?? component?.id);
+        if (!Number.isFinite(moldId) || moldId <= 0) return;
+        const qty = Math.max(1, Math.round(Number(component?.qty) || 1));
+        merged.set(moldId, (merged.get(moldId) || 0) + qty);
+    });
+    return [...merged.entries()].map(([mold_id, qty]) => ({ mold_id, qty }));
+}
+
+function getMoldOwnPiecesPerHour(source) {
+    if (!source || typeof source !== 'object') return 0;
+    const pMin = Number(source.pph_min || source.pieces_per_hour_min || 0);
+    const pMax = Number(source.pph_max || source.pieces_per_hour_max || 0);
+    const pAvg = (pMin > 0 && pMax > 0) ? (pMin + pMax) / 2 : (pMin || pMax || 0);
+    return Number(
+        source.pph_actual
+        || source.pieces_per_hour_actual
+        || source.pieces_per_hour_avg
+        || pAvg
+        || source.pieces_per_hour
+        || 0
+    ) || 0;
+}
+
+function getMoldOwnTotalCost(source) {
+    if (!source || typeof source !== 'object') return 0;
+    const singleMoldCost = (Number(source.cost_cny ?? 800) * Number(source.cny_rate ?? 12.5)) + Number(source.delivery_cost ?? 3000);
+    const moldCount = Math.max(1, Number(source.mold_count || 1) || 1);
+    return round2(singleMoldCost * moldCount);
+}
+
+/**
+ * Resolve a finished blank made from separately cast mold components.
+ * Production time is sequential: one finished item needs qty/pph hours
+ * on every component, so effective pph = 1 / sum(qty/pph).
+ */
+function getCompositeMoldSummary(source, allMolds = []) {
+    const links = normalizeMoldComponents(source);
+    if (links.length < 2) return null;
+
+    const sourceId = Number(source?.id || 0);
+    const resolved = links.map(link => {
+        const mold = (allMolds || []).find(candidate => Number(candidate?.id) === link.mold_id);
+        if (!mold || Number(mold.id) === sourceId || normalizeMoldComponents(mold).length >= 2) return null;
+        const piecesPerHour = getMoldOwnPiecesPerHour(mold);
+        if (!(piecesPerHour > 0)) return null;
+        return {
+            moldId: Number(mold.id),
+            name: String(mold.name || `Молд #${mold.id}`),
+            qty: link.qty,
+            piecesPerHour,
+            weightGrams: round2((Number(mold.weight_grams) || 0) * link.qty),
+            moldCount: Math.max(1, Number(mold.mold_count || 1) || 1) * link.qty,
+            moldCostRub: round2(getMoldOwnTotalCost(mold) * link.qty),
+        };
+    });
+    if (resolved.some(component => !component)) return null;
+
+    const hoursPerFinishedItem = resolved.reduce((sum, component) => sum + component.qty / component.piecesPerHour, 0);
+    if (!(hoursPerFinishedItem > 0)) return null;
+    return {
+        isComposite: true,
+        components: resolved,
+        piecesPerHour: round2(1 / hoursPerFinishedItem),
+        weightGrams: round2(resolved.reduce((sum, component) => sum + component.weightGrams, 0)),
+        moldCount: resolved.reduce((sum, component) => sum + component.moldCount, 0),
+        totalMoldCost: round2(resolved.reduce((sum, component) => sum + component.moldCostRub, 0)),
+    };
+}
+
+function getEffectiveMoldMetrics(source, allMolds = []) {
+    const composite = getCompositeMoldSummary(source, allMolds);
+    if (composite) return composite;
+    return {
+        isComposite: false,
+        components: [],
+        piecesPerHour: getMoldOwnPiecesPerHour(source),
+        weightGrams: Number(source?.weight_grams || 0) || 0,
+        moldCount: Math.max(1, Number(source?.mold_count || 1) || 1),
+        totalMoldCost: getMoldOwnTotalCost(source),
+    };
+}
+
 function getBlankTemplateTotalMoldCost(source) {
     if (!source || typeof source !== 'object') return 0;
-    const singleMoldCost = (Number(source?.cost_cny ?? 800) * Number(source?.cny_rate ?? 12.5)) + Number(source?.delivery_cost ?? 3000);
-    const moldCount = Math.max(1, Number(source?.mold_count || 1) || 1);
-    return round2(singleMoldCost * moldCount);
+    const compositeTotal = Number(source.composite_mold_total_cost || source.effective_mold_total_cost || 0);
+    return compositeTotal > 0 ? round2(compositeTotal) : getMoldOwnTotalCost(source);
 }
 
 /**

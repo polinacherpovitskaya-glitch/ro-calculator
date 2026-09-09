@@ -1730,6 +1730,7 @@ async function main() {
     {
         const context = createContext();
         runScript(context, 'js/supabase.js');
+        runScript(context, 'js/calculator.js');
         const template = vm.runInContext(`_moldToTemplate({
             id: 772,
             name: 'Отельный брелок',
@@ -1744,6 +1745,19 @@ async function main() {
         assert.equal(template.pieces_per_hour, 25, 'calculator template should inherit live pph_actual from molds');
         assert.equal(template.pieces_per_hour_avg, 25, 'template average should fall back to live pph_actual');
         assert.equal(template.pieces_per_hour_display, '25', 'template picker should show live pph_actual instead of dash');
+
+        const compositeTemplate = vm.runInContext(`_moldToTemplate({
+            id: 775,
+            name: 'Кликер',
+            mold_components: [{ mold_id: 773, qty: 1 }, { mold_id: 774, qty: 1 }]
+        }, [
+            { id: 773, name: 'Основа', pph_actual: 60, weight_grams: 7, cost_cny: 800, cny_rate: 15, delivery_cost: 3000 },
+            { id: 774, name: 'Звёздочка', pph_actual: 45, weight_grams: 2, cost_cny: 800, cny_rate: 15, delivery_cost: 3000 }
+        ])`, context);
+        assert.equal(compositeTemplate.pieces_per_hour, 25.71, 'calculator template should receive effective composite speed');
+        assert.equal(compositeTemplate.weight_grams, 9, 'calculator template should receive summed component weight');
+        assert.equal(compositeTemplate.mold_count, 2, 'calculator template should receive all component molds');
+        assert.equal(compositeTemplate.composite_mold_total_cost, 30000, 'calculator template should receive summed component mold cost');
     }
 
     {
