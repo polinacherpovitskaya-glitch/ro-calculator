@@ -85,6 +85,7 @@ jobs:
           node tests/timebot-state-utils-smoke.js
           node tests/timebot-duplicate-guard-smoke.js
           node tests/timebot-day-limit-smoke.js
+          node tests/timetrack-date-repair-smoke.mjs
           node tests/timebot-health-monitor-smoke.js
           node tests/yandex-taskbot-cutover-smoke.js
           node scripts/audit-codebase-health.mjs

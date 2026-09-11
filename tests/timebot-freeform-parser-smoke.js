@@ -105,4 +105,29 @@ assert.equal(
     'lines without hours still make the batch unparseable'
 );
 
+// A heading may carry a note of its own. Женя's June report marked
+// "12.06: праздничный день" — a holiday, which is paid at a different rate —
+// and that day's 8h were swallowed by the previous heading.
+const labelledHeading = parseFreeformBatchReport([
+    '11.06:',
+    'Петрович кроссовки / Сборка — 3ч',
+    '12.06: праздничный день',
+    'картхолдеры P&G / Выливание пластика — 8ч',
+].join('\n'), {
+    now: new Date('2026-06-16T12:00:00Z'),
+});
+
+assert.equal(labelledHeading.errors.length, 0, 'a heading with a note should not break the batch');
+assert.deepEqual(labelledHeading.entries.map(item => item.date), ['2026-06-11', '2026-06-12']);
+assert.deepEqual(labelledHeading.entries.map(item => item.hours), [3, 8]);
+
+// A dated line that reports hours stays an entry, never a heading.
+const inlineDated = parseFreeformBatchReport(
+    '16.07 — Обвесы Купер 500 шт фрукты / Сборка — 0.5ч',
+    { now: new Date('2026-07-21T12:00:00Z') }
+);
+assert.equal(inlineDated.errors.length, 0, 'an inline dated entry should still parse');
+assert.deepEqual(inlineDated.entries.map(item => item.date), ['2026-07-16']);
+assert.deepEqual(inlineDated.entries.map(item => item.hours), [0.5]);
+
 console.log('timebot freeform parser smoke checks passed');
