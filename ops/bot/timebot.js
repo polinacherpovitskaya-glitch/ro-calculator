@@ -22,6 +22,7 @@ const {
     isSameTimeEntry,
     splitDuplicateEntries,
 } = require('./timebot-duplicate-guard');
+const { evaluateDayTotal } = require('./timebot-day-limit');
 const { getStateTtlMs, getTimebotRuntimePaths, requiresCommentToSave } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -1451,6 +1452,19 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         return;
     }
 
+    // An impossible day total means something went wrong upstream — a repeated
+    // report, a mistyped number — and those hours reach the payroll, so refuse
+    // rather than store them.
+    const dayLimit = evaluateDayTotal(
+        liveEmployee,
+        state.existing_hours + toInsert.reduce((sum, entry) => sum + (parseFloat(entry.hours) || 0), 0)
+    );
+    if (dayLimit.level === 'block') {
+        send(chatId, `${liveEmployee.name}, ${dayLimit.message}`, MAIN_KEYBOARD);
+        clearState(telegramId);
+        return;
+    }
+
     const payloads = toInsert.map((entry, index) => ({
         id: Date.now() + index + Math.floor(Math.random() * 1000),
         employee_id: liveEmployee.id,
@@ -1481,11 +1495,12 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         const skippedNote = duplicates.length
             ? `\n\nПропустил как повтор (уже записано): ${duplicates.length}`
             : '';
+        const limitNote = dayLimit.level === 'warn' ? `\n\n${dayLimit.message}` : '';
 
         const emoji = dayTotal >= 8 ? '💪' : dayTotal >= 4 ? '👍' : '✅';
         send(chatId,
             `${emoji} Супер, ${liveEmployee.name}! Записано!\n\n` +
-            `${summary}${skippedNote}\n\n` +
+            `${summary}${skippedNote}${limitNote}\n\n` +
             `Отчёт за *${reportDate}*: *${dayTotal}ч*\n\n` +
             `Отличная работа! До завтра 🙌`,
             { parse_mode: 'Markdown', ...MAIN_KEYBOARD }

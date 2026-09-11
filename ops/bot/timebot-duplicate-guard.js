@@ -54,30 +54,27 @@ function isSameTimeEntry(existing, candidate) {
 }
 
 /**
- * Splits candidates into the ones worth storing and the ones already covered —
- * either by a row already in the table or by an earlier candidate in the same
- * batch, so that repeating a report never multiplies the hours.
+ * Splits candidates into the ones worth storing and the ones the day already
+ * has, so that re-sending a report does not multiply the hours.
+ *
+ * Only stored rows are compared against. Repeats *within one submission* are
+ * kept on purpose: the interactive flow stamps every entry of a session with
+ * the same report date, so a multi-day report reaches this point as several
+ * identical-looking entries. Женя's 2026-07-21 report carried 9h of Т-банк
+ * casting for the 17th, the 20th and the 21st that way. Dropping them would
+ * destroy two days of work that can otherwise be repaired by date.
  */
 function splitDuplicateEntries(existingRows, candidates) {
-    const seen = (Array.isArray(existingRows) ? existingRows : []).slice();
+    const stored = Array.isArray(existingRows) ? existingRows : [];
     const toInsert = [];
     const duplicates = [];
 
     (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
-        if (seen.some(row => isSameTimeEntry(row, candidate))) {
+        if (stored.some(row => isSameTimeEntry(row, candidate))) {
             duplicates.push(candidate);
             return;
         }
         toInsert.push(candidate);
-        seen.push({
-            date: candidate.date,
-            hours: candidate.hours,
-            order_id: candidate.order_id || null,
-            task_description: `[meta]${JSON.stringify({
-                stage_label: candidate.stage_label || '',
-                project: candidate.project_name || '',
-            })}[/meta]`,
-        });
     });
 
     return { toInsert, duplicates };

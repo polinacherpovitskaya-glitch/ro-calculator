@@ -69,4 +69,40 @@ assert.equal(incompleteGrouped.entries.length, 0);
 assert.equal(incompleteGrouped.errors.length, 1);
 assert.equal(looksLikeFreeformBatchReport('24.07:\nОбычный комментарий без часов'), false);
 
+// A date heading written without a trailing colon must still switch the day.
+// Женя's 2026-09-09 report opened with a bare "8.09", the batch was rejected,
+// and all six entries — four of them the 8th's work — were stored as the 9th.
+const bareHeading = parseFreeformBatchReport([
+    '8.09',
+    'Буквы Яндекс / Выливание пластика — 2ч',
+    'Бусины / Срезание литника — 0.5ч',
+    '',
+    '9.09:',
+    'Бусины / Срезание литника — 0.5ч',
+    'RO сток / Выливание пластика — 8.5ч',
+].join('\n'), {
+    now: new Date('2026-09-09T12:00:00Z'),
+});
+
+assert.equal(bareHeading.errors.length, 0, 'a heading without a colon should not break the batch');
+assert.deepEqual(bareHeading.entries.map(item => item.date), [
+    '2026-09-08',
+    '2026-09-08',
+    '2026-09-09',
+    '2026-09-09',
+]);
+assert.deepEqual(bareHeading.entries.map(item => item.hours), [2, 0.5, 0.5, 8.5]);
+assert.equal(
+    looksLikeFreeformBatchReport('8.09\nБусины / Срезание литника — 0.5ч'),
+    true,
+    'a bare date heading should still be recognised as a batch report'
+);
+
+// A bare number pair is only a heading — never an entry that lost its hours.
+assert.equal(
+    looksLikeFreeformBatchReport('8.09\nОбычный комментарий без часов'),
+    false,
+    'lines without hours still make the batch unparseable'
+);
+
 console.log('timebot freeform parser smoke checks passed');

@@ -8,7 +8,10 @@ const DEFAULT_STAGE_LABELS = {
 
 const HOURS_SUFFIX_RE = /\s*[—–-]\s*([\d]+(?:[.,]\d+)?)\s*(?:ч|ч\.|час(?:а|ов)?)\s*$/i;
 const DATE_PREFIX_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*[—–-]\s*/;
-const DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:\s*$/;
+// The trailing colon is optional: people write both "9.09:" and a bare
+// "8.09" above the day's lines, and a heading the parser did not
+// recognise used to reject the whole report.
+const DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:?\s*$/;
 
 function normalizeText(value) {
     return String(value || '')

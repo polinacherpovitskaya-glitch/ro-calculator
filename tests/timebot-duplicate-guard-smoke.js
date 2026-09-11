@@ -65,9 +65,9 @@ assert.equal(
     'the same work on another day is a separate entry'
 );
 
-// --- splitDuplicateEntries: the production incident ------------------------
-// 2026-09-11: Тая sent the same 10h casting report five times and the bot
-// stored all five, reporting 833% of a 6h day.
+// --- splitDuplicateEntries: only ever compares against stored rows ---------
+// 2026-09-11: Тая sent the same 10h casting report several times and the bot
+// stored every one of them, reporting 833% of a 6h day.
 
 const repeated = Array.from({ length: 5 }, () => ({
     date: '2026-09-11',
@@ -77,18 +77,24 @@ const repeated = Array.from({ length: 5 }, () => ({
     project_name: 'Сток для RO',
 }));
 
-const fresh = splitDuplicateEntries([], repeated);
-assert.equal(fresh.toInsert.length, 1, 'a repeated report should be stored once');
-assert.equal(fresh.duplicates.length, 4, 'the four repeats should be reported as duplicates');
-
 const alreadySaved = splitDuplicateEntries(
     [{ date: '2026-09-11', hours: 10, order_id: null, task_description: meta('Выливание пластика', 'Сток для RO') }],
     repeated
 );
-assert.equal(alreadySaved.toInsert.length, 0, 'nothing should be stored when the day already has that entry');
-assert.equal(alreadySaved.duplicates.length, 5, 'every repeat should be reported as a duplicate');
+assert.equal(alreadySaved.toInsert.length, 0, 'a report the day already has must not be stored again');
+assert.equal(alreadySaved.duplicates.length, 5, 'every repeat of a stored entry should be reported back');
 
-// Distinct work in one session must survive deduplication.
+// Repeats inside ONE submission are NOT dropped. The interactive flow stamps
+// every entry of a session with the same date, so a multi-day report arrives
+// as several identical-looking entries — Женя's 2026-07-21 report held 9h of
+// Т-банк casting for the 17th, the 20th and the 21st. Collapsing those would
+// silently destroy two days of work; they are stored and repaired by date
+// instead.
+const sameSubmission = splitDuplicateEntries([], repeated);
+assert.equal(sameSubmission.toInsert.length, 5, 'entries from one submission must all be stored');
+assert.equal(sameSubmission.duplicates.length, 0, 'entries from one submission are never duplicates');
+
+// Distinct work must survive regardless.
 const mixed = splitDuplicateEntries([], [
     { date: '2026-09-11', hours: 4, order_id: 42, stage_label: 'Выливание пластика', project_name: 'Сток для RO' },
     { date: '2026-09-11', hours: 4, order_id: 42, stage_label: 'Сборка', project_name: 'Сток для RO' },
