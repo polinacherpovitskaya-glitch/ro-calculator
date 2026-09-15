@@ -28,36 +28,38 @@ test('elapsedWorkingShare', () => {
   assert.equal(share, workingDays('2026-07-01', '2026-09-09', none) / workingDays('2026-07-01', '2026-09-30', none));
 });
 
-test('achievement: больше лучше, линейно между уровнями', () => {
+test('achievement: больше лучше, линейно между уровнями, выше aspiration рост до потолка', () => {
   const thr = { min: 1330, target: 1512, max: 1693 };
-  assert.equal(achievement(1000, thr, 'higher', DEFAULT_LADDER), 0);
+  assert.equal(achievement(1000, thr, 'higher', DEFAULT_LADDER), 0.25);
   assert.equal(achievement(1330, thr, 'higher', DEFAULT_LADDER), 0.5);
   assert.equal(achievement(1512, thr, 'higher', DEFAULT_LADDER), 1);
   assert.ok(Math.abs(achievement(1550, thr, 'higher', DEFAULT_LADDER) - 1.105) < 0.001);
   assert.equal(achievement(1693, thr, 'higher', DEFAULT_LADDER), 1.5);
-  assert.equal(achievement(5000, thr, 'higher', DEFAULT_LADDER), 1.5);
+  assert.ok(Math.abs(achievement(1874, thr, 'higher', DEFAULT_LADDER) - 2) < 0.001); // +181 ч = ещё один шаг
+  assert.equal(achievement(5000, thr, 'higher', DEFAULT_LADDER), 2);
+  assert.equal(achievement(5000, thr, 'higher', { below_min: 0, min: 0.5, target: 1, max: 1.5 }), 1.5); // старая шкала без cap
   assert.equal(achievement(null, thr, 'higher', DEFAULT_LADDER), null);
 });
 
 test('achievement: меньше лучше', () => {
   const thr = { min: 0.08, target: 0.05, max: 0.02 };
-  assert.equal(achievement(0.10, thr, 'lower', DEFAULT_LADDER), 0);
+  assert.equal(achievement(0.10, thr, 'lower', DEFAULT_LADDER), 0.25);
   assert.equal(achievement(0.08, thr, 'lower', DEFAULT_LADDER), 0.5);
   assert.equal(achievement(0.05, thr, 'lower', DEFAULT_LADDER), 1);
   assert.ok(Math.abs(achievement(0.04, thr, 'lower', DEFAULT_LADDER) - 1.1667) < 0.001);
-  assert.equal(achievement(0.01, thr, 'lower', DEFAULT_LADDER), 1.5);
+  assert.ok(Math.abs(achievement(0.01, thr, 'lower', DEFAULT_LADDER) - 1.6667) < 0.001);
 });
 
 test('achievement: совпадающие пороги не делят на ноль', () => {
   assert.equal(achievement(10, { min: 10, target: 10, max: 10 }, 'higher', DEFAULT_LADDER), 1.5);
-  assert.equal(achievement(9, { min: 10, target: 10, max: 10 }, 'higher', DEFAULT_LADDER), 0);
+  assert.equal(achievement(9, { min: 10, target: 10, max: 10 }, 'higher', DEFAULT_LADDER), 0.25);
 });
 
 const scheme = {
   id: 7, employee_id: 5,
   rates_json: { rate: 75 },
   quality_json: { weights: { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 } },
-  ladder_json: { below_min: 0, min: 0.5, target: 1, max: 1.5 },
+  ladder_json: { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 },
 };
 const targets = {
   output_hours: { min: 1330, target: 1512, max: 1693 },
@@ -209,19 +211,29 @@ test('computeProductionPeriod: пустой табель → A_prod 0.5 и пр�
   assert.equal(prod.achievement, 0.5);
   assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
   assert.ok(result.warnings.some((w) => w.code === 'no_period_hours'));
-  // A_out = 1, rate 75, quality = 0.5*0.5 + 0.3*1.5 + 0.2*1 = 0.9
-  assert.equal(result.amountComputed, Math.round(1512 * 75 * 0.9));
+  // A_out = 1, rate 75; в срок 100% выше max → 1.75; quality = 0.5*0.5 + 0.3*1.75 + 0.2*1 = 0.975
+  assert.equal(result.amountComputed, Math.round(1512 * 75 * 0.975));
 });
 
-test('computeProductionPeriod: ниже base → 0', () => {
+test('computeProductionPeriod: ниже base платится четверть ставки', () => {
   const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
   const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders,
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: {} }, targets, orders,
     timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }], settings: {}, stockApprovals: new Set(),
   });
-  assert.equal(result.output.achievement, 0);
-  assert.equal(result.output.rateApplied, 0);
-  assert.equal(result.amountComputed, 0);
+  assert.equal(result.output.achievement, 0.25);
+  assert.equal(result.output.rateApplied, 18.75);
+  assert.equal(result.amountComputed, Math.round(1000 * 18.75 * 1)); // производительность 1,0
+});
+
+test('computeProductionPeriod: выше aspiration ставка продолжает расти', () => {
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1874, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: {} }, targets, orders,
+    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1874, order_id: 1 }], settings: {}, stockApprovals: new Set(),
+  });
+  assert.ok(Math.abs(result.output.achievement - 2) < 0.001);
+  assert.equal(result.output.rateApplied, 150);
 });
 
 test('computeProductionPeriod: прогноз по доле рабочих дней', () => {
