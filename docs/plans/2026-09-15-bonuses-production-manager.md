@@ -3,51 +3,46 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 Связанный дизайн: `docs/specs/2026-09-09-bonuses-production-manager.md`.
-Ветка: `codex/bonuses-production-manager` (спека уже в ней). Один PR.
+Ветка: `codex/bonuses-production-manager`. Один PR.
 
-**Goal:** Страница «Бонусы» в calc, видимая только владельцу, где по кварталам считается бонус начальника производства из живых данных (нормо-часы завершённых заказов, табель, дедлайны, переделки) с журналом закрытых периодов.
+**Goal:** Страница «Бонусы» в calc, видимая только владельцу, где по кварталам считается бонус начальника производства: выпуск в нормо-часах против трёх уровней плана, ставка за нормо-час по линейной шкале, множитель качества, журнал закрытых периодов.
 
-**Architecture:** Расчёт и хранение в `ops/api` (Express, ESM): чистые функции в `ops/api/src/bonuses/calc.js`, доступ к своим таблицам в `store.js`, чтение legacy-строк из `compat_rows` в `legacy.js`, маршруты `/api/bonuses/*` под ролью admin. Страница в calc: `js/bonuses.js` дергает API через `fetch` с cookie-сессией и рисует карточки. API в пути записи заказа начинает проставлять `completed_at`.
+**Architecture:** Расчёт и хранение в `ops/api` (Express, ESM): чистые функции в `ops/api/src/bonuses/calc.js`, свои таблицы через `store.js`, legacy-строки из `compat_rows` через `legacy.js`, маршруты `/api/bonuses/*` под ролью admin. Страница в calc: `js/bonuses.js` дергает API через `fetch` с cookie-сессией. API в пути записи заказа начинает проставлять `completed_at`.
 
-**Tech Stack:** Node 20, Express, Postgres 16 (`node --test` с живой БД), vanilla JS calc без бандлера, `node:test` для чистых функций calc, smoke-тесты в `tests/`.
+**Tech Stack:** Node 20, Express, Postgres 16 (`node --test` с живой БД), vanilla JS calc без бандлера, `node:test` для чистых функций, smoke-тесты в `tests/`.
 
 ## Global Constraints
 
-- Все маршруты `/api/bonuses/*`: `router.use(requireAuth, requireRole('admin'))`. Пользователь с ролью `user` получает 403.
+- Все маршруты `/api/bonuses/*`: `router.use(requireAuth, requireRole('admin'))`; роль `user` получает 403.
 - Страница `bonuses` НЕ добавляется в `App.ALL_PAGES` и `App.DEFAULT_PAGES`; доступ только через `App.isOwner()` = `currentUser.role === 'admin' && currentUser.employee_id == null`.
-- Legacy-данные читаются только из `compat_rows` (таблицы `orders`, `time_entries`, `employees`, `settings`). Нормализованные таблицы ops (`orders`, `time_entries` без префикса) для расчёта не используются.
-- Шкала достижения: ниже `min` = 0; `min` = 0,5; `target` = 1,0; `max` = 1,5; между порогами линейно; выше `max` = 1,5. Коэффициенты из `ladder_json`.
-- Веса по умолчанию: `output_hours` 0.50, `productivity` 0.25, `on_time_share` 0.15, `rework_share` 0.10.
-- Коммерческий заказ = `production_purpose` не `rework` и не `stock_sample` (как в `js/production_load.js`), статус не `cancelled`/`deleted`, нет `deleted_at`.
-- Пустой табель по завершённым заказам: `productivity` не считается, доля = 0, предупреждение `no_timesheet`. Ничего не приписываем догадкой.
-- Версия calc: четыре якоря (`js/version.json`, `js/app.js`, два места в `index.html`) + `?v=` у изменённых скриптов. Перед бампом читать `origin/main`.
-- Даты legacy-строк: `deadline`, `date` табеля — строки `YYYY-MM-DD`; `completed_at`, `updated_at` — ISO. Сравниваем по первым 10 символам.
-- Суммы в рублях округляются до рубля (`Math.round`).
-- Коммит после каждой задачи, сообщения в повелительном наклонении, без `--no-verify`.
+- Legacy-данные только из `compat_rows` (`orders`, `time_entries`, `employees`, `settings`).
+- Шкала (одна для всего): ниже `min` 0; `min` 0,5; `target` 1,0; `max` 1,5; линейно между; выше `max` 1,5. Для выпуска `min/target/max` = base / medium / aspiration.
+- Сумма квартала = `output_hours × rate × A_level × quality`, где `A_level = 0,7 × A_output + 0,3 × A_cash` (без плана/факта денег `A_level = A_output`), `quality = 0,5 × A_prod + 0,3 × A_ontime + 0,2 × A_rework`. Округление до рубля.
+- Факт денег квартала = «Поступления» по направлению Recycle Object в Финтабло, вводится владельцем (`bonus_team_facts`, `source = manual`).
+- Пустой табель по завершённым заказам: `A_prod = 0,5` и предупреждение `no_timesheet`. Нет заказов с дедлайном: `A_ontime = 1`, предупреждение `no_deadline_orders`. Нет часов периода: `A_rework = 1`, предупреждение `no_period_hours`.
+- Коммерческий заказ = `production_purpose` не `rework` и не `stock_sample`, статус не `cancelled`/`deleted`, нет `deleted_at`.
+- Даты legacy: `deadline`, `date` табеля строки `YYYY-MM-DD`; `completed_at`, `updated_at` ISO; сравниваем первые 10 символов.
+- Версия calc: четыре якоря + `?v=` у изменённых скриптов; перед бампом читать `origin/main`.
+- Коммит после каждой задачи, без `--no-verify`.
 
 ## Структура файлов
 
 Создать:
 
-- `ops/db/migrations/019_bonuses.sql` — четыре таблицы бонусов.
-- `ops/api/src/compat-rows.js` — `readCompatRows(client, table, lock)`; общий читатель `compat_rows`.
-- `ops/api/src/bonuses/calc.js` — чистые функции: периоды, рабочие дни, шкала, расчёт квартала, год, подсказка целей.
-- `ops/api/src/bonuses/legacy.js` — загрузка и нормализация legacy-строк для расчёта.
-- `ops/api/src/bonuses/store.js` — SQL к таблицам `bonus_*`.
-- `ops/api/src/routes/bonuses.js` — маршруты.
-- `ops/api/test/bonuses-calc.test.js` — чистые функции.
-- `ops/api/test/bonuses-routes.test.js` — маршруты с живой БД.
-- `js/bonuses.js` — страница (модуль `Bonuses` + чистые render-функции с `module.exports`).
-- `test/bonuses_render.test.js` — чистые render-функции.
-- `tests/bonuses-smoke.js` — проводка страницы в `index.html`/`app.js`.
+- `ops/db/migrations/019_bonuses.sql`
+- `ops/api/src/compat-rows.js` — `readCompatRows(client, table, lock)`.
+- `ops/api/src/bonuses/calc.js` — периоды, рабочие дни, шкала, расчёт квартала, год, подсказка.
+- `ops/api/src/bonuses/legacy.js` — загрузка legacy-строк.
+- `ops/api/src/bonuses/store.js` — SQL к `bonus_*`.
+- `ops/api/src/routes/bonuses.js`
+- `ops/api/test/bonuses-calc.test.js`, `ops/api/test/bonuses-routes.test.js`
+- `js/bonuses.js`, `test/bonuses_render.test.js`, `tests/bonuses-smoke.js`
 
 Изменить:
 
-- `ops/api/src/routes/compat.js` — импорт `readCompatRows`, проставление `completed_at`, экспорт `stampCompletedAt`.
+- `ops/api/src/routes/compat.js` — импорт `readCompatRows`, `stampCompletedAt`.
 - `ops/api/src/server.js` — монтирование `/api/bonuses`.
-- `index.html` — пункт меню, контейнер страницы, тег скрипта, якоря версии.
-- `js/app.js` — `isOwner()`, ветка в `canAccess`, `case 'bonuses'` в `onPageEnter`, якорь версии.
-- `js/version.json` — якорь версии.
+- `index.html`, `js/app.js`, `js/version.json`.
 
 ---
 
@@ -55,7 +50,7 @@
 
 **Files:** нет изменений кода.
 
-- [ ] **Step 1: Проверить роли в API**
+- [ ] **Step 1: Роли в API**
 
 На VM (`ssh ops@ops-staging.recycleobject.ru` или прод-хост из `ops/README.md`):
 
@@ -63,33 +58,32 @@
 cd /srv/ops/infra && docker compose exec postgres psql -U ops -d ops -c "SELECT id, email, role, employee_id FROM auth_users WHERE role = 'admin';"
 ```
 
-Ожидание: одна строка, e-mail владельца, `employee_id` пустой. Если строк больше, у лишних `UPDATE auth_users SET role = 'user' WHERE id = <id>;` после подтверждения владельца.
+Ожидание: одна строка, e-mail владельца, `employee_id` пустой. Лишним `UPDATE auth_users SET role = 'user' WHERE id = <id>;` после подтверждения владельца.
 
-- [ ] **Step 2: Проверить владельца в calc**
+- [ ] **Step 2: Владелец в calc**
 
-Войти в calc под владельцем, в консоли браузера:
+В консоли браузера под владельцем:
 
 ```js
 [App.currentUser.role, App.currentUser.employee_id]
 ```
 
-Ожидание: `['admin', null]` (или `undefined`). Если `employee_id` заполнен, в Настройки → Учётные записи отвязать сотрудника от учётной записи владельца. Без этого `isOwner()` вернёт `false`, и дальше двигаться нельзя.
+Ожидание: `['admin', null]` или `['admin', undefined]`. Иначе в Настройки → Учётные записи отвязать сотрудника от учётной записи владельца. Без этого `isOwner()` вернёт `false`.
 
 ---
 
 ### Task 1: Миграция и общий читатель compat_rows
 
 **Files:**
-- Create: `ops/db/migrations/019_bonuses.sql`
-- Create: `ops/api/src/compat-rows.js`
-- Modify: `ops/api/src/routes/compat.js:165-174` (локальный `readRows`)
-- Test: `ops/api/test/bonuses-routes.test.js` (первый тест)
+- Create: `ops/db/migrations/019_bonuses.sql`, `ops/api/src/compat-rows.js`
+- Modify: `ops/api/src/routes/compat.js:165-174`
+- Test: `ops/api/test/bonuses-routes.test.js`
 
 **Interfaces:**
-- Produces: `readCompatRows(client, table, lock = false): Promise<object[]>` — массив `data` строк таблицы `table` из `compat_rows`, отсортированный по `source_id`.
-- Produces: таблицы `bonus_schemes`, `bonus_period_targets`, `bonus_stock_approvals`, `bonus_period_results`.
+- Produces: `readCompatRows(client, table, lock = false): Promise<object[]>`.
+- Produces: таблицы `bonus_schemes`, `bonus_period_targets`, `bonus_stock_approvals`, `bonus_period_results`, `bonus_team_targets`, `bonus_team_facts`.
 
-- [ ] **Step 1: Написать миграцию**
+- [ ] **Step 1: Миграция**
 
 ```sql
 -- 019_bonuses.sql
@@ -101,8 +95,8 @@ CREATE TABLE IF NOT EXISTS bonus_schemes (
   employee_id     BIGINT NOT NULL,
   kind            TEXT NOT NULL CHECK (kind IN ('production', 'commercial')),
   period_type     TEXT NOT NULL DEFAULT 'quarter' CHECK (period_type = 'quarter'),
-  target_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,
-  metrics_json    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  rates_json      JSONB NOT NULL DEFAULT '{"rate":0}'::jsonb,
+  quality_json    JSONB NOT NULL DEFAULT '{"weights":{"productivity":0.5,"on_time_share":0.3,"rework_share":0.2}}'::jsonb,
   ladder_json     JSONB NOT NULL DEFAULT '{"below_min":0,"min":0.5,"target":1,"max":1.5}'::jsonb,
   is_active       BOOLEAN NOT NULL DEFAULT TRUE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -147,19 +141,45 @@ CREATE TABLE IF NOT EXISTS bonus_period_results (
   UNIQUE (scheme_id, period)
 );
 
+CREATE TABLE IF NOT EXISTS bonus_team_targets (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  team            TEXT NOT NULL,
+  period          TEXT NOT NULL,
+  metric_key      TEXT NOT NULL,
+  min_value       NUMERIC NOT NULL,
+  target_value    NUMERIC NOT NULL,
+  max_value       NUMERIC NOT NULL,
+  note            TEXT NOT NULL DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (team, period, metric_key)
+);
+
+CREATE TABLE IF NOT EXISTS bonus_team_facts (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  team            TEXT NOT NULL,
+  period          TEXT NOT NULL,
+  metric_key      TEXT NOT NULL,
+  value           NUMERIC NOT NULL,
+  source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'fintablo')),
+  note            TEXT NOT NULL DEFAULT '',
+  updated_by      TEXT NOT NULL DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (team, period, metric_key)
+);
+
 INSERT INTO app_meta (id, version) VALUES (1, '019-bonuses')
 ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, applied_at = NOW();
 ```
 
-- [ ] **Step 2: Применить миграцию локально**
+- [ ] **Step 2: Применить локально**
 
 ```bash
 DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" ops/db/migrate.sh
 ```
 
-Ожидание: строка `Running 019_bonuses.sql`, без ошибок.
+Ожидание: `Running 019_bonuses.sql` без ошибок.
 
-- [ ] **Step 3: Вынести читатель compat_rows**
+- [ ] **Step 3: Читатель compat_rows**
 
 `ops/api/src/compat-rows.js`:
 
@@ -178,13 +198,13 @@ export async function readCompatRows(client, table, lock = false) {
 }
 ```
 
-В `ops/api/src/routes/compat.js` удалить локальную `async function readRows(...)` (строки 165–174) и добавить рядом с импортами:
+В `ops/api/src/routes/compat.js` удалить локальную `async function readRows(...)` (строки 165–174), добавить к импортам:
 
 ```js
 import { readCompatRows as readRows } from '../compat-rows.js';
 ```
 
-- [ ] **Step 4: Первый тест маршрутов (каркас + читатель)**
+- [ ] **Step 4: Каркас тестов маршрутов**
 
 `ops/api/test/bonuses-routes.test.js`:
 
@@ -241,7 +261,7 @@ export async function requestJson(port, method, path, body, cookie) {
   return fetch(`http://127.0.0.1:${port}${path}`, options);
 }
 
-// Кладёт legacy-строку в compat_rows. source_id = String(row.id) или row.key для settings.
+// Кладёт legacy-строку в compat_rows. source_id = String(row.id), для settings row.key.
 export async function putCompatRow(table, row) {
   const sourceId = table === 'settings' ? String(row.key) : String(row.id);
   await getPool().query(
@@ -260,13 +280,13 @@ test('readCompatRows возвращает data строк таблицы', async
 });
 ```
 
-- [ ] **Step 5: Запустить тест**
+- [ ] **Step 5: Запустить**
 
 ```bash
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js test/compat-routes.test.js
 ```
 
-Ожидание: оба файла зелёные (compat-routes подтверждает, что вынос `readRows` ничего не сломал).
+Ожидание: оба зелёные.
 
 - [ ] **Step 6: Commit**
 
@@ -286,14 +306,12 @@ git commit -m "Add bonus tables and shared compat rows reader"
 **Interfaces:**
 - Produces: `export function stampCompletedAt(row, previous, nowIso)` — мутирует `row`: если `row.status === 'completed'` и `row.completed_at` пуст, ставит `previous?.completed_at || nowIso`.
 
-- [ ] **Step 1: Тест на `stampCompletedAt` и путь order-save**
-
-Добавить в `ops/api/test/bonuses-routes.test.js`:
+- [ ] **Step 1: Тесты**
 
 ```js
 import { stampCompletedAt } from '../src/routes/compat.js';
 
-test('stampCompletedAt ставит дату при первом переходе в completed и не перезаписывает', () => {
+test('stampCompletedAt ставит дату при первом переходе и не перезаписывает', () => {
   const row = { id: 1, status: 'completed' };
   stampCompletedAt(row, { status: 'in_production' }, '2026-09-15T10:00:00.000Z');
   assert.equal(row.completed_at, '2026-09-15T10:00:00.000Z');
@@ -328,11 +346,9 @@ test('POST /api/compat/order-save проставляет completed_at', async (t
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js
 ```
 
-Ожидание: FAIL, `stampCompletedAt` не экспортирован.
+- [ ] **Step 3: Реализация**
 
-- [ ] **Step 3: Реализовать**
-
-В `ops/api/src/routes/compat.js` рядом с `syncOrderStatusSnapshot`:
+Рядом с `syncOrderStatusSnapshot` в `compat.js`:
 
 ```js
 export function stampCompletedAt(row, previous, nowIso) {
@@ -343,13 +359,13 @@ export function stampCompletedAt(row, previous, nowIso) {
 }
 ```
 
-В `executeAtomicOrderSave` после строки `savedOrder.updated_at = incomingOrder.updated_at || nowIso;`:
+В `executeAtomicOrderSave` после `savedOrder.updated_at = incomingOrder.updated_at || nowIso;`:
 
 ```js
   stampCompletedAt(savedOrder, existingOrder, nowIso);
 ```
 
-В `executeMutation`, ветка `update`, внутри цикла перед `writeRow`:
+В `executeMutation`: ветка `update`, в цикле перед `writeRow`:
 
 ```js
       if (table === 'orders') stampCompletedAt(next, current, new Date().toISOString());
@@ -367,13 +383,11 @@ export function stampCompletedAt(row, previous, nowIso) {
       if (table === 'orders') stampCompletedAt(incoming, null, new Date().toISOString());
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [ ] **Step 4: Запустить**
 
 ```bash
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js test/compat-routes.test.js
 ```
-
-Ожидание: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -391,16 +405,12 @@ git commit -m "Stamp completed_at on first transition to completed"
 - Test: `ops/api/test/bonuses-calc.test.js`
 
 **Interfaces:**
-- Produces: `periodBounds(period)` → `{ year, q, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }`; бросает `Error('INVALID_PERIOD')` на плохом формате.
-- Produces: `holidaySet(settings)` → `Set<string>` из `settings.production_holidays` (разделители пробел/запятая/точка с запятой).
-- Produces: `workingDays(from, to, holidays)` → число рабочих дней включительно.
-- Produces: `elapsedWorkingShare(period, todayYmd, holidays)` → число 0..1.
+- Produces: `periodBounds(period)` → `{ year, q, from, to }`; бросает `Error('INVALID_PERIOD')`.
+- Produces: `holidaySet(settings)`, `workingDays(from, to, holidays)`, `elapsedWorkingShare(period, todayYmd, holidays)`.
 - Produces: `achievement(fact, thresholds, direction, ladder)` → число или `null`.
-- Produces: `DEFAULT_LADDER`, `DEFAULT_METRICS`.
+- Produces: `DEFAULT_LADDER`, `DEFAULT_QUALITY_WEIGHTS`, `DEFAULT_QUALITY_THRESHOLDS`, `METRIC_LABELS`.
 
 - [ ] **Step 1: Тесты**
-
-`ops/api/test/bonuses-calc.test.js`:
 
 ```js
 import { test } from 'node:test';
@@ -416,38 +426,33 @@ test('periodBounds: 2026-Q3 → 01.07–30.09', () => {
   assert.throws(() => periodBounds('Q3'), /INVALID_PERIOD/);
 });
 
-test('holidaySet и workingDays учитывают выходные и праздники', () => {
+test('holidaySet и workingDays', () => {
   const holidays = holidaySet({ production_holidays: '2026-09-07, 2026-09-08;2026-13-99' });
   assert.equal(holidays.size, 2);
-  // 7–11 сентября 2026: пн–пт, два праздника → 3 рабочих дня
   assert.equal(workingDays('2026-09-07', '2026-09-11', holidays), 3);
-  // 12–13 сентября: сб, вс → 0
   assert.equal(workingDays('2026-09-12', '2026-09-13', holidays), 0);
 });
 
-test('elapsedWorkingShare: до начала 0, после конца 1, середина по рабочим дням', () => {
+test('elapsedWorkingShare', () => {
   const none = new Set();
   assert.equal(elapsedWorkingShare('2026-Q3', '2026-06-30', none), 0);
   assert.equal(elapsedWorkingShare('2026-Q3', '2026-10-05', none), 1);
   const share = elapsedWorkingShare('2026-Q3', '2026-09-09', none);
-  const total = workingDays('2026-07-01', '2026-09-30', none);
-  const done = workingDays('2026-07-01', '2026-09-09', none);
-  assert.equal(share, done / total);
+  assert.equal(share, workingDays('2026-07-01', '2026-09-09', none) / workingDays('2026-07-01', '2026-09-30', none));
 });
 
-test('achievement: шкала больше-лучше', () => {
-  const thr = { min: 1360, target: 1600, max: 1840 };
+test('achievement: больше лучше, линейно между уровнями', () => {
+  const thr = { min: 1330, target: 1512, max: 1693 };
   assert.equal(achievement(1000, thr, 'higher', DEFAULT_LADDER), 0);
-  assert.equal(achievement(1360, thr, 'higher', DEFAULT_LADDER), 0.5);
-  assert.equal(achievement(1480, thr, 'higher', DEFAULT_LADDER), 0.75);
-  assert.equal(achievement(1600, thr, 'higher', DEFAULT_LADDER), 1);
-  assert.ok(Math.abs(achievement(1700, thr, 'higher', DEFAULT_LADDER) - 1.2083) < 0.001);
-  assert.equal(achievement(1840, thr, 'higher', DEFAULT_LADDER), 1.5);
+  assert.equal(achievement(1330, thr, 'higher', DEFAULT_LADDER), 0.5);
+  assert.equal(achievement(1512, thr, 'higher', DEFAULT_LADDER), 1);
+  assert.ok(Math.abs(achievement(1550, thr, 'higher', DEFAULT_LADDER) - 1.105) < 0.001);
+  assert.equal(achievement(1693, thr, 'higher', DEFAULT_LADDER), 1.5);
   assert.equal(achievement(5000, thr, 'higher', DEFAULT_LADDER), 1.5);
   assert.equal(achievement(null, thr, 'higher', DEFAULT_LADDER), null);
 });
 
-test('achievement: шкала меньше-лучше (переделки)', () => {
+test('achievement: меньше лучше', () => {
   const thr = { min: 0.08, target: 0.05, max: 0.02 };
   assert.equal(achievement(0.10, thr, 'lower', DEFAULT_LADDER), 0);
   assert.equal(achievement(0.08, thr, 'lower', DEFAULT_LADDER), 0.5);
@@ -468,23 +473,24 @@ test('achievement: совпадающие пороги не делят на но
 cd ops/api && node --test test/bonuses-calc.test.js
 ```
 
-Ожидание: FAIL, модуль не найден.
-
 - [ ] **Step 3: Реализация**
 
-`ops/api/src/bonuses/calc.js` (начало файла; функции расчёта периода добавятся в Task 4):
+`ops/api/src/bonuses/calc.js`:
 
 ```js
 // Чистые функции расчёта бонусов. Без БД и без Express.
 
 export const DEFAULT_LADDER = { below_min: 0, min: 0.5, target: 1, max: 1.5 };
 
-export const DEFAULT_METRICS = [
-  { key: 'output_hours', weight: 0.5, direction: 'higher' },
-  { key: 'productivity', weight: 0.25, direction: 'higher' },
-  { key: 'on_time_share', weight: 0.15, direction: 'higher' },
-  { key: 'rework_share', weight: 0.1, direction: 'lower' },
-];
+export const DEFAULT_QUALITY_WEIGHTS = { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 };
+
+export const DEFAULT_QUALITY_THRESHOLDS = {
+  productivity: { min: 0.9, target: 1.0, max: 1.15 },
+  on_time_share: { min: 0.7, target: 0.85, max: 0.95 },
+  rework_share: { min: 0.08, target: 0.05, max: 0.02 },
+};
+
+export const QUALITY_DIRECTIONS = { productivity: 'higher', on_time_share: 'higher', rework_share: 'lower' };
 
 export const METRIC_LABELS = {
   output_hours: 'Выпуск, нормо-часы',
@@ -558,13 +564,11 @@ export function achievement(fact, thresholds, direction = 'higher', ladder = DEF
 }
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [ ] **Step 4: Запустить**
 
 ```bash
 cd ops/api && node --test test/bonuses-calc.test.js
 ```
-
-Ожидание: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -582,156 +586,146 @@ git commit -m "Add bonus period, working days and ladder helpers"
 - Test: `ops/api/test/bonuses-calc.test.js`
 
 **Interfaces:**
-- Consumes: `periodBounds`, `holidaySet`, `elapsedWorkingShare`, `achievement`, `DEFAULT_METRICS`, `METRIC_LABELS`.
-- Produces: `orderCompletionDate(order, entriesForOrder)` → `{ date: 'YYYY-MM-DD' | null, estimated: boolean }`.
-- Produces: `isCommercialOrder(order)`, `orderPurpose(order)`.
-- Produces: `computeProductionPeriod(input)` где `input = { period, today, status, scheme, targets, orders, timeEntries, settings, stockApprovals }` → `ProductionResult`:
+- Produces: `orderCompletionDate(order, entriesForOrder)` → `{ date, estimated }`.
+- Produces: `orderPurpose(order)`, `isCommercialOrder(order)`.
+- Produces: `computeProductionPeriod(input)`, `input = { period, today, status, scheme, targets, orders, timeEntries, settings, stockApprovals }` → `ProductionResult`:
 
 ```js
 {
-  period, schemeId, employeeId, status, targetAmount, weightsTotal,
-  metrics: [{ key, label, direction, weight, thresholds, fact, forecast, achievement, payout, available }],
+  period, schemeId, employeeId, status, rate,
+  output: { fact, thresholds, achievement, rateApplied, forecast, forecastAchievement, forecastAmount },
+  quality: { multiplier, metrics: [{ key, label, direction, weight, thresholds, fact, achievement, available }] },
   amountComputed,
   warnings: [{ code, count, hours, orderIds }],
   orders: [{ id, name, purpose, hoursPlan, hoursFact, deadline, completedAt, estimated, onTime, approved, included }],
 }
 ```
-- Produces: `suggestProductionTargets({ period, settings })` → `{ targets: { output_hours, productivity, on_time_share, rework_share }, source: 'plan' | 'formula' }`.
+- Produces: `suggestProductionTargets({ period, settings })` → `{ source: 'plan' | 'formula', targets: { output_hours, productivity, on_time_share, rework_share } }`.
 
-- [ ] **Step 1: Тесты с фикстурой**
-
-Добавить в `ops/api/test/bonuses-calc.test.js`:
+- [ ] **Step 1: Тесты**
 
 ```js
 import { computeProductionPeriod, suggestProductionTargets, orderCompletionDate } from '../src/bonuses/calc.js';
 
 const scheme = {
-  id: 7, employee_id: 5, target_amount: 100000,
-  metrics_json: [
-    { key: 'output_hours', weight: 0.5, direction: 'higher' },
-    { key: 'productivity', weight: 0.25, direction: 'higher' },
-    { key: 'on_time_share', weight: 0.15, direction: 'higher' },
-    { key: 'rework_share', weight: 0.1, direction: 'lower' },
-  ],
+  id: 7, employee_id: 5,
+  rates_json: { rate: 75 },
+  quality_json: { weights: { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 } },
   ladder_json: { below_min: 0, min: 0.5, target: 1, max: 1.5 },
 };
 const targets = {
-  output_hours: { min: 1360, target: 1600, max: 1840 },
+  output_hours: { min: 1330, target: 1512, max: 1693 },
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
   on_time_share: { min: 0.7, target: 0.85, max: 0.95 },
   rework_share: { min: 0.08, target: 0.05, max: 0.02 },
 };
 
-function fixture() {
-  const orders = [
-    // 9 коммерческих завершённых в Q3, 8 в срок, 1 с опозданием; 1700 нормо-часов суммарно
-    ...Array.from({ length: 9 }, (_, i) => ({
-      id: 100 + i, order_name: `Заказ ${i}`, status: 'completed', production_purpose: 'commercial',
-      total_hours_plan: i === 0 ? 300 : 175, deadline: '2026-09-20',
-      completed_at: i === 8 ? '2026-09-25T10:00:00.000Z' : '2026-09-10T10:00:00.000Z',
-    })),
-    // складской заказ, утверждён → входит (в 1700 не входит, проверяем отдельно)
-    { id: 200, order_name: 'Образцы', status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 40, completed_at: '2026-08-01T10:00:00.000Z' },
-    // складской, не утверждён → не входит
-    { id: 201, order_name: 'Сток', status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 50, completed_at: '2026-08-02T10:00:00.000Z' },
-    // завершён до периода → не входит
-    { id: 300, order_name: 'Старый', status: 'completed', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-06-01', completed_at: '2026-06-20T10:00:00.000Z' },
-    // без нормо-часов → предупреждение
-    { id: 301, order_name: 'Без часов', status: 'completed', production_purpose: 'commercial', total_hours_plan: 0, deadline: '2026-09-01', completed_at: '2026-09-02T10:00:00.000Z' },
-    // без дедлайна → предупреждение, в выпуск входит
-    { id: 302, order_name: 'Без дедлайна', status: 'completed', production_purpose: 'commercial', total_hours_plan: 10, completed_at: '2026-09-03T10:00:00.000Z' },
-    // переделка, часы табеля периода идут в rework_share
-    { id: 400, order_name: 'Переделка', status: 'in_production', production_purpose: 'rework', total_hours_plan: 30 },
-  ];
-  const timeEntries = [
-    // табель по коммерческим завершённым: 1710/1.05 ≈ 1628.57 ч, распределим: 1628.57 на заказ 100
-    { id: 1, employee_id: 5, date: '2026-08-05', hours: 1628.57, order_id: 100 },
-    { id: 2, employee_id: 5, date: '2026-08-06', hours: 20, order_id: 200 },
-    // переделки в периоде: 4% от (rework + commercial period hours) → 1628.57 коммерческих в периоде: rework = 0.04/0.96*1628.57 ≈ 67.86
-    { id: 3, employee_id: 5, date: '2026-08-07', hours: 67.86, order_id: 400 },
-    // без заказа → предупреждение 3 ч
-    { id: 4, employee_id: 6, date: '2026-08-08', hours: 3, order_id: null },
-    // вне периода, не влияет на переделки
-    { id: 5, employee_id: 5, date: '2026-06-01', hours: 100, order_id: 400 },
-  ];
-  return { orders, timeEntries };
-}
-
-test('computeProductionPeriod: проверочный пример спеки', () => {
-  const { orders, timeEntries } = fixture();
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
-    settings: { production_holidays: '' }, stockApprovals: new Set(['200']),
-  });
-  const by = Object.fromEntries(result.metrics.map((m) => [m.key, m]));
-  assert.equal(by.output_hours.fact, 1750); // 1700 коммерческих + 40 склад + 10 без дедлайна
-  assert.ok(Math.abs(by.productivity.fact - 1750 / 1648.57) < 0.001);
-  assert.ok(Math.abs(by.on_time_share.fact - 8 / 9) < 0.001);
-  assert.ok(Math.abs(by.rework_share.fact - 0.04) < 0.001);
-  assert.equal(result.warnings.find((w) => w.code === 'unmarked_hours').hours, 3);
-  assert.deepEqual(result.warnings.find((w) => w.code === 'no_hours').orderIds, [301]);
-  assert.deepEqual(result.warnings.find((w) => w.code === 'no_deadline').orderIds, [302]);
-  assert.equal(result.orders.find((o) => o.id === 201).included, false);
-  assert.equal(result.orders.find((o) => o.id === 300), undefined);
-  assert.equal(result.metrics.every((m) => m.available), true);
-  assert.ok(result.amountComputed > 100000 && result.amountComputed < 130000);
-});
-
-test('computeProductionPeriod: ровно 120 000 ₽ на числах спеки', () => {
-  // Фикстура подогнана под факты 1700 / 1.05 / 0.9 / 0.04
+// Факты примера спеки: выпуск 1550, производительность 1.05, в срок 0.9, переделки 0.04
+function specFixture() {
   const orders = [
     ...Array.from({ length: 10 }, (_, i) => ({
       id: i + 1, order_name: `З${i}`, status: 'completed', production_purpose: 'commercial',
-      total_hours_plan: 170, deadline: '2026-09-20',
+      total_hours_plan: 155, deadline: '2026-09-20',
       completed_at: i === 9 ? '2026-09-25T00:00:00.000Z' : '2026-09-10T00:00:00.000Z',
     })),
-    { id: 99, status: 'in_production', production_purpose: 'rework', total_hours_plan: 1 },
+    { id: 99, order_name: 'Переделка', status: 'in_production', production_purpose: 'rework', total_hours_plan: 1 },
   ];
-  const commercialHours = 1700 / 1.05;
+  const commercialHours = 1550 / 1.05;
   const reworkHours = (0.04 / 0.96) * commercialHours;
   const timeEntries = [
     { id: 1, employee_id: 5, date: '2026-08-01', hours: commercialHours, order_id: 1 },
     { id: 2, employee_id: 5, date: '2026-08-02', hours: reworkHours, order_id: 99 },
   ];
+  return { orders, timeEntries };
+}
+
+test('computeProductionPeriod: проверочный пример спеки даёт 153 073 ₽', () => {
+  const { orders, timeEntries } = specFixture();
   const result = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
     settings: {}, stockApprovals: new Set(),
   });
-  assert.equal(result.amountComputed, 120000);
+  assert.equal(result.output.fact, 1550);
+  assert.ok(Math.abs(result.output.achievement - 1.105) < 0.001);
+  assert.ok(Math.abs(result.output.rateApplied - 82.87) < 0.01);
+  assert.ok(Math.abs(result.quality.multiplier - 1.1917) < 0.001);
+  assert.ok(Math.abs(result.amountComputed - 153073) <= 2);
 });
 
-test('computeProductionPeriod: пустой табель обнуляет производительность', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+test('computeProductionPeriod: склад, предупреждения, границы периода', () => {
+  const orders = [
+    { id: 1, order_name: 'А', status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T10:00:00.000Z' },
+    { id: 2, order_name: 'Образцы', status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 40, completed_at: '2026-08-01T10:00:00.000Z' },
+    { id: 3, order_name: 'Сток', status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 50, completed_at: '2026-08-02T10:00:00.000Z' },
+    { id: 4, order_name: 'Старый', status: 'completed', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-06-01', completed_at: '2026-06-20T10:00:00.000Z' },
+    { id: 5, order_name: 'Без часов', status: 'completed', production_purpose: 'commercial', total_hours_plan: 0, deadline: '2026-09-01', completed_at: '2026-09-02T10:00:00.000Z' },
+    { id: 6, order_name: 'Без дедлайна', status: 'completed', production_purpose: 'commercial', total_hours_plan: 10, completed_at: '2026-09-03T10:00:00.000Z' },
+    { id: 7, order_name: 'Отменён', status: 'cancelled', production_purpose: 'commercial', total_hours_plan: 100, completed_at: '2026-09-03T10:00:00.000Z' },
+  ];
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-08-05', hours: 900, order_id: 1 },
+    { id: 2, employee_id: 6, date: '2026-08-08', hours: 3, order_id: null },
+  ];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(['2']),
+  });
+  assert.equal(result.output.fact, 1050); // 1000 + 40 утверждённый склад + 10 без дедлайна
+  assert.equal(result.orders.find((o) => o.id === 3).included, false);
+  assert.equal(result.orders.find((o) => o.id === 4), undefined);
+  assert.equal(result.orders.find((o) => o.id === 7), undefined);
+  assert.equal(result.warnings.find((w) => w.code === 'unmarked_hours').hours, 3);
+  assert.deepEqual(result.warnings.find((w) => w.code === 'no_hours').orderIds, [5]);
+  assert.deepEqual(result.warnings.find((w) => w.code === 'no_deadline').orderIds, [6]);
+  const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
+  assert.equal(onTime.fact, 1);
+});
+
+test('computeProductionPeriod: пустой табель → A_prod 0.5 и предупреждение', () => {
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1512, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
   const result = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries: [], settings: {}, stockApprovals: new Set(),
   });
-  const productivity = result.metrics.find((m) => m.key === 'productivity');
-  assert.equal(productivity.available, false);
-  assert.equal(productivity.payout, 0);
+  const prod = result.quality.metrics.find((m) => m.key === 'productivity');
+  assert.equal(prod.available, false);
+  assert.equal(prod.achievement, 0.5);
   assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
+  assert.ok(result.warnings.some((w) => w.code === 'no_period_hours'));
+  // A_out = 1, rate 75, quality = 0.5*0.5 + 0.3*1.5 + 0.2*1 = 0.9
+  assert.equal(result.amountComputed, Math.round(1512 * 75 * 0.9));
 });
 
-test('computeProductionPeriod: прогноз выпуска по доле рабочих дней', () => {
+test('computeProductionPeriod: ниже base → 0', () => {
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }], settings: {}, stockApprovals: new Set(),
+  });
+  assert.equal(result.output.achievement, 0);
+  assert.equal(result.output.rateApplied, 0);
+  assert.equal(result.amountComputed, 0);
+});
+
+test('computeProductionPeriod: прогноз по доле рабочих дней', () => {
   const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 800, deadline: '2026-09-20', completed_at: '2026-08-10T00:00:00.000Z' }];
   const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-08-14', status: 'open', scheme, targets, orders, timeEntries: [], settings: {}, stockApprovals: new Set(),
+    period: '2026-Q3', today: '2026-08-14', status: 'open', scheme, targets, orders, timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 800, order_id: 1 }], settings: {}, stockApprovals: new Set(),
   });
-  const output = result.metrics.find((m) => m.key === 'output_hours');
-  const share = 32 / 66; // рабочие дни 01.07–14.08 / 01.07–30.09 без праздников
-  assert.ok(Math.abs(output.forecast - 800 / share) < 1);
+  const share = 32 / 66;
+  assert.ok(Math.abs(result.output.forecast - 800 / share) < 1);
+  assert.ok(result.output.forecastAmount > 0);
 });
 
-test('orderCompletionDate: completed_at, иначе последняя дата табеля, иначе updated_at', () => {
+test('orderCompletionDate', () => {
   assert.deepEqual(orderCompletionDate({ completed_at: '2026-09-10T10:00:00.000Z' }, []), { date: '2026-09-10', estimated: false });
   assert.deepEqual(orderCompletionDate({ updated_at: '2026-09-30T10:00:00.000Z' }, [{ date: '2026-09-01' }, { date: '2026-09-12' }]), { date: '2026-09-12', estimated: true });
   assert.deepEqual(orderCompletionDate({ updated_at: '2026-09-30T10:00:00.000Z' }, []), { date: '2026-09-30', estimated: true });
   assert.deepEqual(orderCompletionDate({}, []), { date: null, estimated: true });
 });
 
-test('suggestProductionTargets: из сезонного плана, иначе формула', () => {
-  const fromPlan = suggestProductionTargets({ period: '2026-Q3', settings: { seasonal_load_plan_json: JSON.stringify({ Q1: 768, Q2: 1152, Q3: 1632, Q4: 1824 }) } });
+test('suggestProductionTargets: три уровня из сезонного плана, иначе формула', () => {
+  const fromPlan = suggestProductionTargets({ period: '2026-Q3', settings: { seasonal_load_plan_json: JSON.stringify({ Q1: 864, Q2: 1296, Q3: 1512, Q4: 1728 }) } });
   assert.equal(fromPlan.source, 'plan');
-  assert.deepEqual(fromPlan.targets.output_hours, { min: 1387, target: 1632, max: 1877 });
+  assert.deepEqual(fromPlan.targets.output_hours, { min: 1331, target: 1512, max: 1693 });
   assert.deepEqual(fromPlan.targets.rework_share, { min: 0.08, target: 0.05, max: 0.02 });
   const fromFormula = suggestProductionTargets({ period: '2026-Q3', settings: { workers_count: 4, hours_per_worker: 180, work_load_ratio: 0.7 } });
   assert.equal(fromFormula.source, 'formula');
@@ -745,11 +739,9 @@ test('suggestProductionTargets: из сезонного плана, иначе �
 cd ops/api && node --test test/bonuses-calc.test.js
 ```
 
-Ожидание: FAIL, функции не экспортированы.
-
 - [ ] **Step 3: Реализация**
 
-Дописать в `ops/api/src/bonuses/calc.js`:
+Дописать в `calc.js`:
 
 ```js
 const NON_COMMERCIAL = new Set(['rework', 'stock_sample']);
@@ -782,6 +774,11 @@ function day(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
+function roundTo(value, digits) {
+  const k = 10 ** digits;
+  return Math.round(value * k) / k;
+}
+
 export function orderCompletionDate(order, entriesForOrder = []) {
   const explicit = day(order?.completed_at);
   if (explicit) return { date: explicit, estimated: false };
@@ -805,18 +802,13 @@ function sumHours(entries) {
   return entries.reduce((acc, e) => acc + num(e?.hours), 0);
 }
 
-function roundTo(value, digits) {
-  const k = 10 ** digits;
-  return Math.round(value * k) / k;
-}
-
 export function computeProductionPeriod(input) {
   const { period, today, status = 'open', scheme, targets, orders, timeEntries, settings, stockApprovals } = input;
   const { from, to } = periodBounds(period);
   const holidays = holidaySet(settings);
-  const metricsDef = Array.isArray(scheme.metrics_json) && scheme.metrics_json.length ? scheme.metrics_json : DEFAULT_METRICS;
   const ladder = scheme.ladder_json || DEFAULT_LADDER;
-  const targetAmount = num(scheme.target_amount);
+  const rate = num(scheme.rates_json?.rate);
+  const weights = { ...DEFAULT_QUALITY_WEIGHTS, ...(scheme.quality_json?.weights || {}) };
   const approvals = stockApprovals instanceof Set ? stockApprovals : new Set((stockApprovals || []).map(String));
   const entriesByOrder = groupEntriesByOrder(timeEntries);
   const inPeriod = (d) => d !== null && d >= from && d <= to;
@@ -845,11 +837,10 @@ export function computeProductionPeriod(input) {
     const isStock = purpose === 'stock_sample';
     const approved = isStock ? approvals.has(String(order.id)) : null;
     const onTime = deadline ? completion.date <= deadline : null;
-    let included = hoursPlan > 0 && (!isStock || approved);
+    const included = hoursPlan > 0 && (!isStock || approved);
 
     if (hoursPlan <= 0) noHours.push(order.id);
     if (completion.estimated) estimated.push(order.id);
-
     if (!isStock) {
       if (deadline) {
         deadlineCount += 1;
@@ -890,43 +881,69 @@ export function computeProductionPeriod(input) {
   if (noDeadline.length) warnings.push({ code: 'no_deadline', count: noDeadline.length, hours: 0, orderIds: noDeadline });
   if (estimated.length) warnings.push({ code: 'estimated_dates', count: estimated.length, hours: 0, orderIds: estimated });
   if (unmarkedHours > 0) warnings.push({ code: 'unmarked_hours', count: 0, hours: roundTo(unmarkedHours, 2), orderIds: [] });
-  if (outputHours > 0 && timesheetOnIncluded === 0) warnings.push({ code: 'no_timesheet', count: 0, hours: 0, orderIds: [] });
 
-  const facts = {
-    output_hours: { fact: roundTo(outputHours, 2), available: true },
-    productivity: timesheetOnIncluded > 0
-      ? { fact: roundTo(outputHours / timesheetOnIncluded, 4), available: true }
-      : { fact: null, available: false },
-    on_time_share: deadlineCount > 0
-      ? { fact: roundTo(onTimeCount / deadlineCount, 4), available: true }
-      : { fact: null, available: false },
-    rework_share: (reworkHours + commercialPeriodHours) > 0
-      ? { fact: roundTo(reworkHours / (reworkHours + commercialPeriodHours), 4), available: true }
-      : { fact: null, available: false },
-  };
+  // Выпуск и уровень
+  const outputThresholds = targets?.output_hours || null;
+  const outputFact = roundTo(outputHours, 2);
+  const outputAch = outputThresholds ? achievement(outputFact, outputThresholds, 'higher', ladder) : null;
+  const rateApplied = outputAch === null ? 0 : roundTo(rate * outputAch, 2);
 
-  const share = status === 'open' ? elapsedWorkingShare(period, today, holidays) : 1;
-  let amount = 0;
-  let weightsTotal = 0;
-  const metrics = metricsDef.map((def) => {
-    const thresholds = targets?.[def.key] || null;
-    const { fact, available } = facts[def.key] || { fact: null, available: false };
-    const ach = available && thresholds ? achievement(fact, thresholds, def.direction, ladder) : null;
-    const payout = ach === null ? 0 : Math.round(targetAmount * num(def.weight) * ach);
-    amount += payout;
-    weightsTotal += num(def.weight);
-    const forecast = def.key === 'output_hours' && status === 'open' && share > 0 && share < 1
-      ? roundTo(fact / share, 0)
-      : null;
-    return {
-      key: def.key, label: METRIC_LABELS[def.key] || def.key, direction: def.direction, weight: num(def.weight),
-      thresholds, fact, forecast, achievement: ach === null ? null : roundTo(ach, 4), payout, available: available && !!thresholds,
-    };
+  // Качество
+  const qualityFacts = {};
+  if (outputHours > 0 && timesheetOnIncluded === 0) {
+    qualityFacts.productivity = { fact: null, available: false, fallback: Number(ladder.min) };
+    warnings.push({ code: 'no_timesheet', count: 0, hours: 0, orderIds: [] });
+  } else if (timesheetOnIncluded > 0) {
+    qualityFacts.productivity = { fact: roundTo(outputHours / timesheetOnIncluded, 4), available: true };
+  } else {
+    qualityFacts.productivity = { fact: null, available: false, fallback: Number(ladder.min) };
+  }
+  if (deadlineCount > 0) {
+    qualityFacts.on_time_share = { fact: roundTo(onTimeCount / deadlineCount, 4), available: true };
+  } else {
+    qualityFacts.on_time_share = { fact: null, available: false, fallback: Number(ladder.target) };
+    warnings.push({ code: 'no_deadline_orders', count: 0, hours: 0, orderIds: [] });
+  }
+  if (reworkHours + commercialPeriodHours > 0) {
+    qualityFacts.rework_share = { fact: roundTo(reworkHours / (reworkHours + commercialPeriodHours), 4), available: true };
+  } else {
+    qualityFacts.rework_share = { fact: null, available: false, fallback: Number(ladder.target) };
+    warnings.push({ code: 'no_period_hours', count: 0, hours: 0, orderIds: [] });
+  }
+
+  let multiplier = 0;
+  const qualityMetrics = ['productivity', 'on_time_share', 'rework_share'].map((key) => {
+    const thresholds = targets?.[key] || DEFAULT_QUALITY_THRESHOLDS[key];
+    const { fact, available, fallback } = qualityFacts[key];
+    const ach = available ? achievement(fact, thresholds, QUALITY_DIRECTIONS[key], ladder) : fallback;
+    const weight = num(weights[key]);
+    multiplier += weight * ach;
+    return { key, label: METRIC_LABELS[key], direction: QUALITY_DIRECTIONS[key], weight, thresholds, fact, achievement: roundTo(ach, 4), available };
   });
+  multiplier = roundTo(multiplier, 4);
+
+  const amount = Math.round(outputFact * rateApplied * multiplier);
+
+  // Прогноз
+  const share = status === 'open' ? elapsedWorkingShare(period, today, holidays) : 1;
+  let forecast = null;
+  let forecastAchievement = null;
+  let forecastAmount = null;
+  if (status === 'open' && share > 0 && share < 1 && outputThresholds) {
+    forecast = roundTo(outputFact / share, 0);
+    forecastAchievement = roundTo(achievement(forecast, outputThresholds, 'higher', ladder), 4);
+    forecastAmount = Math.round(forecast * rate * forecastAchievement * multiplier);
+  }
 
   return {
-    period, schemeId: scheme.id, employeeId: scheme.employee_id, status, targetAmount,
-    weightsTotal: roundTo(weightsTotal, 4), metrics, amountComputed: amount, warnings, orders: detail,
+    period, schemeId: scheme.id, employeeId: scheme.employee_id, status, rate,
+    output: {
+      fact: outputFact, thresholds: outputThresholds,
+      achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
+      forecast, forecastAchievement, forecastAmount,
+    },
+    quality: { multiplier, metrics: qualityMetrics },
+    amountComputed: amount, warnings, orders: detail,
   };
 }
 
@@ -949,28 +966,26 @@ export function suggestProductionTargets({ period, settings }) {
   return {
     source,
     targets: {
-      output_hours: { min: Math.round(target * 0.85), target, max: Math.round(target * 1.15) },
-      productivity: { min: 0.9, target: 1.0, max: 1.15 },
-      on_time_share: { min: 0.7, target: 0.85, max: 0.95 },
-      rework_share: { min: 0.08, target: 0.05, max: 0.02 },
+      output_hours: { min: Math.round(target * 0.88), target, max: Math.round(target * 1.12) },
+      ...DEFAULT_QUALITY_THRESHOLDS,
     },
   };
 }
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [ ] **Step 4: Запустить**
 
 ```bash
 cd ops/api && node --test test/bonuses-calc.test.js
 ```
 
-Ожидание: PASS. Если тест «ровно 120 000» даёт 119 999 или 120 001 из-за плавающей точки, поправить фикстуру часов (не округление в коде).
+Ожидание: PASS. Если сумма примера отличается больше чем на 2 ₽, проверить порядок округлений: `rateApplied` до сотых, `multiplier` до четырёх знаков, итог до рубля.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add ops/api/src/bonuses/calc.js ops/api/test/bonuses-calc.test.js
-git commit -m "Compute production bonus period and suggest targets"
+git commit -m "Compute production bonus period with rate ladder and quality multiplier"
 ```
 
 ---
@@ -982,42 +997,42 @@ git commit -m "Compute production bonus period and suggest targets"
 - Test: `ops/api/test/bonuses-calc.test.js`
 
 **Interfaces:**
-- Produces: `computeYear({ year, scheme, quarters })`, где `quarters = [{ period, thresholds: {min,target,max} | null, fact: number | null, paidOutputPayout: number }]` → `{ year, factSum, thresholdsSum, achievement, yearComponent, paidSum, topUp, quartersCounted }`.
+- Produces: `computeYear({ year, scheme, quarters })`, `quarters = [{ period, thresholds | null, fact | null, achievement | null }]` → `{ year, factSum, thresholdsSum, achievement, quartersCounted, quarters: [{ period, fact, achievement, quarterBasis, yearBasis, topUp }], topUp }`.
 
-- [ ] **Step 1: Тест**
+- [ ] **Step 1: Тесты**
 
 ```js
 import { computeYear } from '../src/bonuses/calc.js';
 
-test('computeYear: добор по выпуску', () => {
+test('computeYear: слабый квартал доплачивается до годового уровня', () => {
   const result = computeYear({
     year: 2026, scheme,
     quarters: [
-      { period: '2026-Q1', thresholds: { min: 650, target: 768, max: 880 }, fact: 600, paidOutputPayout: 0 },
-      { period: '2026-Q2', thresholds: { min: 980, target: 1152, max: 1320 }, fact: 1152, paidOutputPayout: 50000 },
-      { period: '2026-Q3', thresholds: { min: 1387, target: 1632, max: 1877 }, fact: 1700, paidOutputPayout: 52083 },
-      { period: '2026-Q4', thresholds: { min: 1550, target: 1824, max: 2100 }, fact: 1924, paidOutputPayout: 59058 },
+      { period: '2026-Q1', thresholds: { min: 760, target: 864, max: 968 }, fact: 600, achievement: 0 },
+      { period: '2026-Q2', thresholds: { min: 1140, target: 1296, max: 1452 }, fact: 1300, achievement: 1.0128 },
+      { period: '2026-Q3', thresholds: { min: 1330, target: 1512, max: 1693 }, fact: 1550, achievement: 1.105 },
+      { period: '2026-Q4', thresholds: { min: 1520, target: 1728, max: 1935 }, fact: 1800, achievement: 1.1739 },
     ],
   });
-  assert.equal(result.factSum, 5376);
-  assert.equal(result.thresholdsSum.target, 5376);
-  assert.equal(result.achievement, 1);
-  assert.equal(result.yearComponent, 200000); // 4 × 100000 × 0.5 × 1.0
-  assert.equal(result.paidSum, 161141);
-  assert.equal(result.topUp, 38859);
+  assert.equal(result.factSum, 5250);
+  assert.deepEqual(result.thresholdsSum, { min: 4750, target: 5400, max: 6048 });
+  assert.ok(Math.abs(result.achievement - 0.8846) < 0.001);
   assert.equal(result.quartersCounted, 4);
+  assert.equal(result.quarters[0].topUp, 39808);
+  assert.equal(result.quarters[1].topUp, 0);
+  assert.equal(result.topUp, 39808);
 });
 
-test('computeYear: кварталы без целей не считаются, добор не отрицательный', () => {
+test('computeYear: кварталы без целей не считаются', () => {
   const result = computeYear({
     year: 2026, scheme,
     quarters: [
-      { period: '2026-Q3', thresholds: { min: 1387, target: 1632, max: 1877 }, fact: 1877, paidOutputPayout: 75000 },
-      { period: '2026-Q4', thresholds: null, fact: null, paidOutputPayout: 0 },
+      { period: '2026-Q3', thresholds: { min: 1330, target: 1512, max: 1693 }, fact: 1693, achievement: 1.5 },
+      { period: '2026-Q4', thresholds: null, fact: null, achievement: null },
     ],
   });
   assert.equal(result.quartersCounted, 1);
-  assert.equal(result.yearComponent, 75000);
+  assert.equal(result.achievement, 1.5);
   assert.equal(result.topUp, 0);
 });
 ```
@@ -1032,36 +1047,158 @@ cd ops/api && node --test test/bonuses-calc.test.js
 
 ```js
 export function computeYear({ year, scheme, quarters }) {
-  const metricsDef = Array.isArray(scheme.metrics_json) && scheme.metrics_json.length ? scheme.metrics_json : DEFAULT_METRICS;
-  const outputDef = metricsDef.find((m) => m.key === 'output_hours') || DEFAULT_METRICS[0];
   const ladder = scheme.ladder_json || DEFAULT_LADDER;
+  const rate = num(scheme.rates_json?.rate);
   const counted = quarters.filter((q) => q.thresholds && q.fact !== null && q.fact !== undefined);
   const sum = (key) => counted.reduce((acc, q) => acc + num(q.thresholds[key]), 0);
   const thresholdsSum = { min: sum('min'), target: sum('target'), max: sum('max') };
   const factSum = roundTo(counted.reduce((acc, q) => acc + num(q.fact), 0), 2);
-  const ach = counted.length ? achievement(factSum, thresholdsSum, outputDef.direction, ladder) : null;
-  const yearComponent = ach === null ? 0 : Math.round(counted.length * num(scheme.target_amount) * num(outputDef.weight) * ach);
-  const paidSum = quarters.reduce((acc, q) => acc + num(q.paidOutputPayout), 0);
+  const yearAch = counted.length ? achievement(factSum, thresholdsSum, 'higher', ladder) : null;
+  const rows = quarters.map((q) => {
+    const isCounted = counted.includes(q);
+    const quarterBasis = isCounted ? Math.round(num(q.fact) * rate * num(q.achievement)) : 0;
+    const yearBasis = isCounted && yearAch !== null ? Math.round(num(q.fact) * rate * yearAch) : 0;
+    return { period: q.period, fact: isCounted ? num(q.fact) : null, achievement: isCounted ? num(q.achievement) : null, quarterBasis, yearBasis, topUp: Math.max(0, yearBasis - quarterBasis) };
+  });
   return {
-    year, factSum, thresholdsSum, achievement: ach === null ? null : roundTo(ach, 4),
-    yearComponent, paidSum, topUp: Math.max(0, yearComponent - paidSum), quartersCounted: counted.length,
+    year, factSum, thresholdsSum, achievement: yearAch === null ? null : roundTo(yearAch, 4),
+    quartersCounted: counted.length, quarters: rows, topUp: rows.reduce((acc, r) => acc + r.topUp, 0),
   };
 }
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [ ] **Step 4: Запустить**
 
 ```bash
 cd ops/api && node --test test/bonuses-calc.test.js
 ```
 
-Ожидание: PASS.
+- [ ] **Step 5: Commit**
+
+```bash
+git add ops/api/src/bonuses/calc.js ops/api/test/bonuses-calc.test.js
+git commit -m "Add annual top-up to the year level"
+```
+
+---
+
+### Task 5b: Деньги квартала в уровне производства
+
+**Files:**
+- Modify: `ops/api/src/bonuses/calc.js` (`computeProductionPeriod`)
+- Test: `ops/api/test/bonuses-calc.test.js`
+
+**Interfaces:**
+- Consumes: `achievement`, `computeProductionPeriod` из Task 4.
+- Produces: `DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 }`; вход `computeProductionPeriod` принимает `teamMoney: { fact, thresholds } | null`; результат получает `money: { fact, thresholds, achievement }`, `level` (число или `null`), `output.forecastLevel`; `output.rateApplied = rate × level`.
+
+- [ ] **Step 1: Тесты**
+
+```js
+import { DEFAULT_LEVEL_WEIGHTS } from '../src/bonuses/calc.js';
+
+test('уровень квартала = 0.7 × часы + 0.3 × деньги; пример спеки даёт 133 474 ₽', () => {
+  const { orders, timeEntries } = specFixture();
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(),
+    teamMoney: { fact: 14400000, thresholds: { min: 14000000, target: 15500000, max: 17000000 } },
+  });
+  assert.deepEqual(DEFAULT_LEVEL_WEIGHTS, { output: 0.7, money: 0.3 });
+  assert.ok(Math.abs(result.money.achievement - 0.6333) < 0.001);
+  assert.ok(Math.abs(result.level - 0.9635) < 0.001);
+  assert.ok(Math.abs(result.output.rateApplied - 72.26) < 0.01);
+  assert.ok(Math.abs(result.amountComputed - 133474) <= 2);
+  assert.ok(!result.warnings.some((w) => w.code === 'no_money_plan'));
+});
+
+test('без плана по деньгам уровень = A_output и предупреждение', () => {
+  const { orders, timeEntries } = specFixture();
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(), teamMoney: null,
+  });
+  assert.equal(result.money.fact, null);
+  assert.ok(Math.abs(result.level - 1.105) < 0.001);
+  assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться, что падает**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js
+```
+
+- [ ] **Step 3: Реализация**
+
+В `calc.js` добавить константу:
+
+```js
+export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
+```
+
+В `computeProductionPeriod` деструктурировать `teamMoney = null` из `input` и заменить блок
+
+```js
+  const outputAch = outputThresholds ? achievement(outputFact, outputThresholds, 'higher', ladder) : null;
+  const rateApplied = outputAch === null ? 0 : roundTo(rate * outputAch, 2);
+```
+
+на
+
+```js
+  const outputAch = outputThresholds ? achievement(outputFact, outputThresholds, 'higher', ladder) : null;
+  const moneyThresholds = teamMoney?.thresholds || null;
+  const moneyFact = teamMoney?.fact === null || teamMoney?.fact === undefined ? null : num(teamMoney.fact);
+  const moneyAch = moneyThresholds && moneyFact !== null ? achievement(moneyFact, moneyThresholds, 'higher', ladder) : null;
+  const levelWeights = { ...DEFAULT_LEVEL_WEIGHTS, ...(scheme.quality_json?.level_weights || {}) };
+  let level = outputAch;
+  if (outputAch !== null && moneyAch !== null) {
+    level = roundTo(num(levelWeights.output) * outputAch + num(levelWeights.money) * moneyAch, 4);
+  } else if (outputAch !== null) {
+    warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
+  }
+  const rateApplied = level === null ? 0 : roundTo(rate * level, 2);
+```
+
+Блок прогноза заменить на:
+
+```js
+  let forecast = null;
+  let forecastAchievement = null;
+  let forecastLevel = null;
+  let forecastAmount = null;
+  if (status === 'open' && share > 0 && share < 1 && outputThresholds) {
+    forecast = roundTo(outputFact / share, 0);
+    forecastAchievement = roundTo(achievement(forecast, outputThresholds, 'higher', ladder), 4);
+    forecastLevel = moneyAch === null
+      ? forecastAchievement
+      : roundTo(num(levelWeights.output) * forecastAchievement + num(levelWeights.money) * moneyAch, 4);
+    forecastAmount = Math.round(forecast * rate * forecastLevel * multiplier);
+  }
+```
+
+В возвращаемом объекте добавить `level` и `money`, а в `output` поле `forecastLevel`:
+
+```js
+    level: level === null ? null : roundTo(level, 4),
+    money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4) },
+```
+
+- [ ] **Step 4: Запустить**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js
+```
+
+Ожидание: PASS, включая старые тесты (без `teamMoney` уровень равен `A_output`, суммы прежние).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add ops/api/src/bonuses/calc.js ops/api/test/bonuses-calc.test.js
-git commit -m "Add annual output top-up calculation"
+git commit -m "Blend team money plan into production bonus level"
 ```
 
 ---
@@ -1069,21 +1206,16 @@ git commit -m "Add annual output top-up calculation"
 ### Task 6: Хранилище, загрузка legacy-данных, маршруты схем и целей
 
 **Files:**
-- Create: `ops/api/src/bonuses/store.js`
-- Create: `ops/api/src/bonuses/legacy.js`
-- Create: `ops/api/src/routes/bonuses.js`
+- Create: `ops/api/src/bonuses/store.js`, `ops/api/src/bonuses/legacy.js`, `ops/api/src/routes/bonuses.js`
 - Modify: `ops/api/src/server.js:29-70`
 - Test: `ops/api/test/bonuses-routes.test.js`
 
 **Interfaces:**
-- Consumes: `readCompatRows`, `getPool`, `withTransaction`, `requireAuth`, `requireRole`, `suggestProductionTargets`.
-- Produces (`store.js`): `listSchemes()`, `getSchemeById(id)`, `upsertScheme(employeeId, payload)`, `getTargets(schemeId, period)` → `{ [metric_key]: {min,target,max} }`, `upsertTargets(schemeId, period, targets)`, `listStockApprovals(period)` → `Set<string>`, `setStockApproval(period, orderId, approved, by)`, `getResult(schemeId, period)`, `saveResult(row)`.
-- Produces (`legacy.js`): `loadLegacyBonusData(client)` → `{ orders, timeEntries, employees, settings }` где `settings` = объект `{ key: value }` из строк `settings`.
-- Produces: маршруты `GET /api/bonuses/schemes`, `PUT /api/bonuses/schemes/:employeeId`, `GET /api/bonuses/periods/:period/suggest/:schemeId`, `PUT /api/bonuses/periods/:period/targets/:schemeId`, `GET /api/bonuses/employees` (активные legacy-сотрудники: `{ id, name, role }`).
+- Produces (`store.js`): `listSchemes()`, `getSchemeById(id)`, `upsertScheme(employeeId, payload)`, `getTargets(schemeId, period)` → `{ [metric_key]: {min,target,max} } | null`, `upsertTargets(schemeId, period, targets)`, `listStockApprovals(period)` → `Set<string>`, `setStockApproval(period, orderId, approved, by)`, `getResult(schemeId, period)`, `listResults(schemeId)`, `saveResult(row)`.
+- Produces (`legacy.js`): `loadLegacyBonusData(client)` → `{ orders, timeEntries, employees, settings }`; `activeEmployees(employees)`.
+- Produces: `GET /api/bonuses/employees`, `GET /api/bonuses/schemes`, `PUT /api/bonuses/schemes/:employeeId` (body `{ kind, rate }`), `GET /api/bonuses/periods/:period/suggest/:schemeId`, `PUT /api/bonuses/periods/:period/targets/:schemeId`.
 
-- [ ] **Step 1: Тесты маршрутов**
-
-Добавить в `ops/api/test/bonuses-routes.test.js`:
+- [ ] **Step 1: Тесты**
 
 ```js
 test('роль user получает 403 на /api/bonuses', async (t) => {
@@ -1102,13 +1234,13 @@ test('PUT схема, GET схемы, подсказка и сохранение
   const { port, cookie } = await setup(t);
   const employeeId = Date.now();
   await putCompatRow('employees', { id: employeeId, name: 'Лёша', role: 'production', is_active: true });
-  await putCompatRow('settings', { key: 'seasonal_load_plan_json', value: JSON.stringify({ Q1: 768, Q2: 1152, Q3: 1632, Q4: 1824 }) });
+  await putCompatRow('settings', { key: 'seasonal_load_plan_json', value: JSON.stringify({ Q1: 864, Q2: 1296, Q3: 1512, Q4: 1728 }) });
 
-  const put = await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', target_amount: 100000 }, cookie);
+  const put = await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', rate: 75 }, cookie);
   assert.equal(put.status, 200);
   const scheme = (await put.json()).data;
   assert.equal(scheme.kind, 'production');
-  assert.equal(scheme.metrics_json.length, 4);
+  assert.equal(scheme.rates_json.rate, 75);
 
   const list = await requestJson(port, 'GET', '/api/bonuses/schemes', undefined, cookie);
   const schemes = (await list.json()).data;
@@ -1117,12 +1249,11 @@ test('PUT схема, GET схемы, подсказка и сохранение
   const suggest = await requestJson(port, 'GET', `/api/bonuses/periods/2026-Q3/suggest/${scheme.id}`, undefined, cookie);
   const suggestion = (await suggest.json()).data;
   assert.equal(suggestion.source, 'plan');
-  assert.equal(suggestion.targets.output_hours.target, 1632);
+  assert.deepEqual(suggestion.targets.output_hours, { min: 1331, target: 1512, max: 1693 });
 
   const save = await requestJson(port, 'PUT', `/api/bonuses/periods/2026-Q3/targets/${scheme.id}`, { targets: suggestion.targets }, cookie);
   assert.equal(save.status, 200);
-  const saved = (await save.json()).data;
-  assert.equal(saved.output_hours.target, 1632);
+  assert.equal((await save.json()).data.output_hours.target, 1512);
 
   const bad = await requestJson(port, 'PUT', `/api/bonuses/periods/2026-Q9/targets/${scheme.id}`, { targets: suggestion.targets }, cookie);
   assert.equal(bad.status, 400);
@@ -1134,8 +1265,6 @@ test('PUT схема, GET схемы, подсказка и сохранение
 ```bash
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js
 ```
-
-Ожидание: 404 вместо ожидаемых кодов.
 
 - [ ] **Step 3: legacy.js**
 
@@ -1167,12 +1296,12 @@ export function activeEmployees(employees) {
 
 ```js
 import { getPool } from '../db.js';
-import { DEFAULT_METRICS, DEFAULT_LADDER } from './calc.js';
+import { DEFAULT_LADDER, DEFAULT_QUALITY_WEIGHTS } from './calc.js';
 
-const SCHEME_COLUMNS = 'id, employee_id, kind, period_type, target_amount, metrics_json, ladder_json, is_active, created_at, updated_at';
+const SCHEME_COLUMNS = 'id, employee_id, kind, period_type, rates_json, quality_json, ladder_json, is_active, created_at, updated_at';
 
 function normalizeScheme(row) {
-  return row ? { ...row, target_amount: Number(row.target_amount), employee_id: Number(row.employee_id) } : null;
+  return row ? { ...row, employee_id: Number(row.employee_id) } : null;
 }
 
 export async function listSchemes(client = getPool()) {
@@ -1187,22 +1316,22 @@ export async function getSchemeById(id, client = getPool()) {
 
 export async function upsertScheme(employeeId, payload, client = getPool()) {
   const kind = payload.kind === 'commercial' ? 'commercial' : 'production';
-  const metrics = Array.isArray(payload.metrics_json) && payload.metrics_json.length ? payload.metrics_json : DEFAULT_METRICS;
+  const rates = { rate: Number(payload.rate) || 0 };
+  const quality = { weights: { ...DEFAULT_QUALITY_WEIGHTS, ...(payload.quality_weights || {}) } };
   const ladder = payload.ladder_json && typeof payload.ladder_json === 'object' ? payload.ladder_json : DEFAULT_LADDER;
-  const amount = Number(payload.target_amount) || 0;
   const existing = await client.query(`SELECT id FROM bonus_schemes WHERE employee_id = $1 AND is_active`, [employeeId]);
   if (existing.rows[0]) {
     const { rows } = await client.query(
-      `UPDATE bonus_schemes SET kind = $2, target_amount = $3, metrics_json = $4::jsonb, ladder_json = $5::jsonb, updated_at = now()
+      `UPDATE bonus_schemes SET kind = $2, rates_json = $3::jsonb, quality_json = $4::jsonb, ladder_json = $5::jsonb, updated_at = now()
         WHERE id = $1 RETURNING ${SCHEME_COLUMNS}`,
-      [existing.rows[0].id, kind, amount, JSON.stringify(metrics), JSON.stringify(ladder)],
+      [existing.rows[0].id, kind, JSON.stringify(rates), JSON.stringify(quality), JSON.stringify(ladder)],
     );
     return normalizeScheme(rows[0]);
   }
   const { rows } = await client.query(
-    `INSERT INTO bonus_schemes (employee_id, kind, target_amount, metrics_json, ladder_json)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb) RETURNING ${SCHEME_COLUMNS}`,
-    [employeeId, kind, amount, JSON.stringify(metrics), JSON.stringify(ladder)],
+    `INSERT INTO bonus_schemes (employee_id, kind, rates_json, quality_json, ladder_json)
+     VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb) RETURNING ${SCHEME_COLUMNS}`,
+    [employeeId, kind, JSON.stringify(rates), JSON.stringify(quality), JSON.stringify(ladder)],
   );
   return normalizeScheme(rows[0]);
 }
@@ -1300,7 +1429,8 @@ function asyncHandler(fn) {
 
 function parsePeriod(res, raw) {
   try {
-    return periodBounds(raw) && String(raw);
+    periodBounds(raw);
+    return String(raw);
   } catch {
     error(res, 400, 'INVALID_PERIOD', 'Период задаётся как 2026-Q3');
     return null;
@@ -1330,7 +1460,9 @@ router.get('/schemes', asyncHandler(async (req, res) => {
 router.put('/schemes/:employeeId', asyncHandler(async (req, res) => {
   const employeeId = Number(req.params.employeeId);
   if (!Number.isInteger(employeeId)) return error(res, 400, 'INVALID_EMPLOYEE', 'Нужен id сотрудника');
-  const scheme = await store.upsertScheme(employeeId, req.body || {});
+  const rate = Number(req.body?.rate);
+  if (!Number.isFinite(rate) || rate < 0) return error(res, 400, 'INVALID_RATE', 'Ставка должна быть числом не меньше нуля');
+  const scheme = await store.upsertScheme(employeeId, { ...req.body, rate });
   res.json({ data: scheme });
 }));
 
@@ -1349,7 +1481,7 @@ router.put('/periods/:period/targets/:schemeId', asyncHandler(async (req, res) =
   const scheme = await schemeOr404(res, req.params.schemeId);
   if (!scheme) return;
   const targets = req.body?.targets;
-  if (!targets || typeof targets !== 'object') return error(res, 400, 'INVALID_TARGETS', 'Нужен объект targets');
+  if (!targets || typeof targets !== 'object' || !targets.output_hours) return error(res, 400, 'INVALID_TARGETS', 'Нужен объект targets с output_hours');
   for (const [key, value] of Object.entries(targets)) {
     const values = [value?.min, value?.target, value?.max].map(Number);
     if (values.some((v) => !Number.isFinite(v))) return error(res, 400, 'INVALID_TARGETS', `Пороги ${key} должны быть числами`);
@@ -1360,7 +1492,7 @@ router.put('/periods/:period/targets/:schemeId', asyncHandler(async (req, res) =
 export default router;
 ```
 
-В `ops/api/src/server.js` добавить импорт и монтирование рядом с `settingsRoute`:
+В `server.js` рядом с `settingsRoute`:
 
 ```js
 import bonusesRoute from './routes/bonuses.js';
@@ -1368,13 +1500,11 @@ import bonusesRoute from './routes/bonuses.js';
   app.use('/api/bonuses', bonusesRoute);
 ```
 
-- [ ] **Step 6: Запустить тесты**
+- [ ] **Step 6: Запустить**
 
 ```bash
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js
 ```
-
-Ожидание: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -1392,29 +1522,23 @@ git commit -m "Add bonus schemes and period targets API"
 - Test: `ops/api/test/bonuses-routes.test.js`
 
 **Interfaces:**
-- Consumes: `computeProductionPeriod`, `computeYear`, `store.*`, `loadLegacyBonusData`.
-- Produces:
-  - `GET /api/bonuses/periods/:period` → `{ data: { period, entries: [ProductionResult & { employeeName, kind, resultStatus, amountFinal, adjustments, targetsDrift }], history: [...] } }`.
-  - `POST /api/bonuses/periods/:period/stock-approvals` body `{ order_id, approved }`.
-  - `POST /api/bonuses/periods/:period/close/:schemeId`, `.../adjust/:schemeId` body `{ amount, comment }`, `.../paid/:schemeId`.
-  - `GET /api/bonuses/years/:year` → `{ data: [{ schemeId, employeeName, quarters, year: computeYear() }] }`.
-  - `POST /api/bonuses/years/:year/close/:schemeId` → результат с периодом `YYYY-Y`.
+- Produces: `GET /api/bonuses/periods/:period` → `{ data: { period, entries: [ProductionResult & { employeeName, kind, resultStatus, amountFinal, adjustments, targetsDrift, hasTargets }], history } }`; `POST .../stock-approvals`; `POST .../close/:schemeId`; `POST .../adjust/:schemeId`; `POST .../paid/:schemeId`; `GET /api/bonuses/years/:year` → `{ data: [{ schemeId, employeeName, year: computeYear() }] }`; `POST /api/bonuses/years/:year/close/:schemeId`.
 
 - [ ] **Step 1: Тесты**
 
 ```js
-test('расчёт периода, утверждение склада, закрытие, корректировка, выплата, год', async (t) => {
+test('расчёт периода, склад, закрытие, корректировка, выплата, год', async (t) => {
   const { port, cookie } = await setup(t);
   const employeeId = Date.now();
   const base = employeeId * 10;
   await putCompatRow('employees', { id: employeeId, name: 'Лёша', role: 'production', is_active: true });
-  await putCompatRow('orders', { id: base + 1, order_name: 'А', status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T10:00:00.000Z' });
+  await putCompatRow('orders', { id: base + 1, order_name: 'А', status: 'completed', production_purpose: 'commercial', total_hours_plan: 1500, deadline: '2026-09-20', completed_at: '2026-09-10T10:00:00.000Z' });
   await putCompatRow('orders', { id: base + 2, order_name: 'Склад', status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 100, completed_at: '2026-09-11T10:00:00.000Z' });
-  await putCompatRow('time_entries', { id: base + 1, employee_id: employeeId, date: '2026-09-01', hours: 900, order_id: base + 1 });
+  await putCompatRow('time_entries', { id: base + 1, employee_id: employeeId, date: '2026-09-01', hours: 1500, order_id: base + 1 });
 
-  const scheme = (await (await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', target_amount: 100000 }, cookie)).json()).data;
+  const scheme = (await (await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', rate: 75 }, cookie)).json()).data;
   await requestJson(port, 'PUT', `/api/bonuses/periods/2026-Q3/targets/${scheme.id}`, { targets: {
-    output_hours: { min: 850, target: 1000, max: 1150 }, productivity: { min: 0.9, target: 1, max: 1.15 },
+    output_hours: { min: 1330, target: 1512, max: 1693 }, productivity: { min: 0.9, target: 1, max: 1.15 },
     on_time_share: { min: 0.7, target: 0.85, max: 0.95 }, rework_share: { min: 0.08, target: 0.05, max: 0.02 },
   } }, cookie);
 
@@ -1422,25 +1546,24 @@ test('расчёт периода, утверждение склада, закр
   assert.equal(res.status, 200);
   let entry = (await res.json()).data.entries.find((e) => e.schemeId === scheme.id);
   assert.equal(entry.employeeName, 'Лёша');
-  assert.equal(entry.metrics.find((m) => m.key === 'output_hours').fact, 1000);
+  assert.equal(entry.output.fact, 1500);
   assert.equal(entry.orders.find((o) => o.id === base + 2).included, false);
 
   await requestJson(port, 'POST', '/api/bonuses/periods/2026-Q3/stock-approvals', { order_id: base + 2, approved: true }, cookie);
   res = await requestJson(port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
   entry = (await res.json()).data.entries.find((e) => e.schemeId === scheme.id);
-  assert.equal(entry.metrics.find((m) => m.key === 'output_hours').fact, 1100);
+  assert.equal(entry.output.fact, 1600);
 
   res = await requestJson(port, 'POST', `/api/bonuses/periods/2026-Q3/close/${scheme.id}`, {}, cookie);
   assert.equal(res.status, 200);
   const closed = (await res.json()).data;
   assert.equal(closed.status, 'closed');
-  assert.ok(closed.amount_computed > 0);
+  assert.ok(Number(closed.amount_computed) > 0);
 
-  // после закрытия факт не пересчитывается
   await putCompatRow('orders', { id: base + 3, order_name: 'Поздний', status: 'completed', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-09-20', completed_at: '2026-09-12T10:00:00.000Z' });
   res = await requestJson(port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
   entry = (await res.json()).data.entries.find((e) => e.schemeId === scheme.id);
-  assert.equal(entry.metrics.find((m) => m.key === 'output_hours').fact, 1100);
+  assert.equal(entry.output.fact, 1600);
   assert.equal(entry.resultStatus, 'closed');
 
   res = await requestJson(port, 'POST', `/api/bonuses/periods/2026-Q3/adjust/${scheme.id}`, { amount: 90000 }, cookie);
@@ -1448,7 +1571,6 @@ test('расчёт периода, утверждение склада, закр
   res = await requestJson(port, 'POST', `/api/bonuses/periods/2026-Q3/adjust/${scheme.id}`, { amount: 90000, comment: 'Согласовано лично' }, cookie);
   const adjusted = (await res.json()).data;
   assert.equal(Number(adjusted.amount_final), 90000);
-  assert.equal(adjusted.adjustments_json.length, 1);
   assert.equal(adjusted.adjustments_json[0].comment, 'Согласовано лично');
 
   res = await requestJson(port, 'POST', `/api/bonuses/periods/2026-Q3/paid/${scheme.id}`, {}, cookie);
@@ -1457,7 +1579,7 @@ test('расчёт периода, утверждение склада, закр
   res = await requestJson(port, 'GET', '/api/bonuses/years/2026', undefined, cookie);
   const yearEntry = (await res.json()).data.find((e) => e.schemeId === scheme.id);
   assert.equal(yearEntry.year.quartersCounted, 1);
-  assert.equal(yearEntry.quarters.find((q) => q.period === '2026-Q3').fact, 1100);
+  assert.equal(yearEntry.year.quarters.find((q) => q.period === '2026-Q3').fact, 1600);
 
   res = await requestJson(port, 'POST', `/api/bonuses/years/2026/close/${scheme.id}`, {}, cookie);
   assert.equal((await res.json()).data.period, '2026-Y');
@@ -1467,7 +1589,7 @@ test('закрытие без целей периода → 400', async (t) => {
   const { port, cookie } = await setup(t);
   const employeeId = Date.now();
   await putCompatRow('employees', { id: employeeId, name: 'Тест', role: 'production', is_active: true });
-  const scheme = (await (await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', target_amount: 1 }, cookie)).json()).data;
+  const scheme = (await (await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', rate: 1 }, cookie)).json()).data;
   const res = await requestJson(port, 'POST', `/api/bonuses/periods/2027-Q1/close/${scheme.id}`, {}, cookie);
   assert.equal(res.status, 400);
 });
@@ -1481,13 +1603,13 @@ cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/
 
 - [ ] **Step 3: Реализация**
 
-Добавить импорты в `routes/bonuses.js`:
+Импорт:
 
 ```js
 import { computeProductionPeriod, computeYear } from '../bonuses/calc.js';
 ```
 
-И маршруты перед `export default router;`:
+Маршруты перед `export default router;`:
 
 ```js
 function todayYmd() {
@@ -1499,7 +1621,7 @@ async function computeEntry(scheme, period, legacy, approvals) {
   const names = new Map(legacy.employees.map((e) => [String(e.id), String(e.name || '')]));
   const existing = await store.getResult(scheme.id, period);
   const suggestion = suggestProductionTargets({ period, settings: legacy.settings });
-  const targetsDrift = !!(targets && targets.output_hours && Number(targets.output_hours.target) !== Number(suggestion.targets.output_hours.target));
+  const targetsDrift = !!(targets?.output_hours && Number(targets.output_hours.target) !== Number(suggestion.targets.output_hours.target));
   const common = {
     employeeName: names.get(String(scheme.employee_id)) || '',
     kind: scheme.kind,
@@ -1529,8 +1651,7 @@ router.get('/periods/:period', asyncHandler(async (req, res) => {
   const history = [];
   for (const scheme of schemes.filter((s) => s.kind === 'production')) {
     entries.push(await computeEntry(scheme, period, legacy, approvals));
-    const results = await store.listResults(scheme.id);
-    for (const row of results.filter((r) => r.status !== 'open')) {
+    for (const row of (await store.listResults(scheme.id)).filter((r) => r.status !== 'open')) {
       history.push({
         schemeId: scheme.id, period: row.period, status: row.status, amountComputed: Number(row.amount_computed),
         amountFinal: Number(row.amount_final), adjustments: row.adjustments_json, closedAt: row.closed_at, paidAt: row.paid_at,
@@ -1585,8 +1706,7 @@ router.post('/periods/:period/adjust/:schemeId', asyncHandler(async (req, res) =
   const adjustments = [...(existing.adjustments_json || []), {
     at: new Date().toISOString(), by: req.user.email, from: Number(existing.amount_final), to: amount, comment,
   }];
-  const row = await store.saveResult({ ...existing, amount_final: amount, adjustments_json: adjustments });
-  res.json({ data: row });
+  res.json({ data: await store.saveResult({ ...existing, amount_final: amount, adjustments_json: adjustments }) });
 }));
 
 router.post('/periods/:period/paid/:schemeId', asyncHandler(async (req, res) => {
@@ -1596,8 +1716,7 @@ router.post('/periods/:period/paid/:schemeId', asyncHandler(async (req, res) => 
   if (!scheme) return;
   const existing = await store.getResult(scheme.id, period);
   if (!existing || existing.status === 'open') return error(res, 400, 'NOT_CLOSED', 'Сначала закройте период');
-  const row = await store.saveResult({ ...existing, status: 'paid', paid_at: new Date().toISOString() });
-  res.json({ data: row });
+  res.json({ data: await store.saveResult({ ...existing, status: 'paid', paid_at: new Date().toISOString() }) });
 }));
 
 async function yearEntries(year) {
@@ -1611,14 +1730,15 @@ async function yearEntries(year) {
       const targets = await store.getTargets(scheme.id, period);
       const approvals = await store.listStockApprovals(period);
       const entry = await computeEntry(scheme, period, legacy, approvals);
-      const output = (entry.metrics || []).find((m) => m.key === 'output_hours');
-      const paid = entry.resultStatus !== 'open' && output ? output.payout : 0;
       quarters.push({
-        period, thresholds: targets?.output_hours || null, fact: targets && output ? output.fact : null,
-        paidOutputPayout: paid, resultStatus: entry.resultStatus,
+        period,
+        thresholds: targets?.output_hours || null,
+        fact: targets ? entry.output.fact : null,
+        achievement: targets ? entry.output.achievement : null,
+        resultStatus: entry.resultStatus,
       });
     }
-    out.push({ schemeId: scheme.id, employeeName: names.get(String(scheme.employee_id)) || '', quarters, year: computeYear({ year, scheme, quarters }) });
+    out.push({ schemeId: scheme.id, employeeName: names.get(String(scheme.employee_id)) || '', year: computeYear({ year, scheme, quarters }) });
   }
   return out;
 }
@@ -1646,19 +1766,204 @@ router.post('/years/:year/close/:schemeId', asyncHandler(async (req, res) => {
 }));
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [ ] **Step 4: Полный прогон API**
 
 ```bash
 cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" npm test
 ```
-
-Ожидание: весь набор зелёный (в том числе compat и auth).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add ops/api/src/routes/bonuses.js ops/api/test/bonuses-routes.test.js
 git commit -m "Add bonus period computation, close, adjust and year API"
+```
+
+---
+
+### Task 7b: План и факт по деньгам отдела в API
+
+**Files:**
+- Modify: `ops/api/src/bonuses/store.js`, `ops/api/src/routes/bonuses.js`
+- Test: `ops/api/test/bonuses-routes.test.js`
+
+**Interfaces:**
+- Produces (`store.js`): `getTeamTargets(team, period)` → `{ [metric_key]: {min,target,max} } | null`; `upsertTeamTargets(team, period, targets)`; `getTeamFacts(team, period)` → `{ [metric_key]: { value, source, note, updated_by, updated_at } }`; `setTeamFact(team, period, metricKey, { value, source, note }, by)`.
+- Produces: `GET /api/bonuses/periods/:period/team/commercial` → `{ data: { targets, facts } }`; `PUT` с телом `{ targets?: { cash_in: {min,target,max} }, facts?: { cash_in: { value, note } } }`.
+- `GET /api/bonuses/periods/:period` дополнительно отдаёт `team: { commercial: { targets, facts, cashAchievement } }`, а каждый production-entry считается с `teamMoney`.
+
+- [ ] **Step 1: Тесты**
+
+```js
+test('план и факт по деньгам отдела влияют на уровень производства', async (t) => {
+  const { port, cookie } = await setup(t);
+  const employeeId = Date.now();
+  const base = employeeId * 10;
+  await putCompatRow('employees', { id: employeeId, name: 'Лёша', role: 'production', is_active: true });
+  await putCompatRow('orders', { id: base + 1, order_name: 'А', status: 'completed', production_purpose: 'commercial', total_hours_plan: 1550, deadline: '2026-09-20', completed_at: '2026-09-10T10:00:00.000Z' });
+  await putCompatRow('time_entries', { id: base + 1, employee_id: employeeId, date: '2026-09-01', hours: 1550, order_id: base + 1 });
+  const scheme = (await (await requestJson(port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', rate: 75 }, cookie)).json()).data;
+  await requestJson(port, 'PUT', `/api/bonuses/periods/2026-Q3/targets/${scheme.id}`, { targets: {
+    output_hours: { min: 1330, target: 1512, max: 1693 }, productivity: { min: 0.9, target: 1, max: 1.15 },
+    on_time_share: { min: 0.7, target: 0.85, max: 0.95 }, rework_share: { min: 0.08, target: 0.05, max: 0.02 },
+  } }, cookie);
+
+  let res = await requestJson(port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
+  let entry = (await res.json()).data.entries.find((e) => e.schemeId === scheme.id);
+  assert.ok(entry.warnings.some((w) => w.code === 'no_money_plan'));
+
+  res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', {
+    targets: { cash_in: { min: 14000000, target: 15500000, max: 17000000 } },
+    facts: { cash_in: { value: 14400000, note: 'Финтабло, Recycle Object, 15.09' } },
+  }, cookie);
+  assert.equal(res.status, 200);
+  const team = (await res.json()).data;
+  assert.equal(team.facts.cash_in.value, 14400000);
+  assert.equal(team.facts.cash_in.source, 'manual');
+
+  res = await requestJson(port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
+  const body = (await res.json()).data;
+  entry = body.entries.find((e) => e.schemeId === scheme.id);
+  assert.ok(Math.abs(entry.money.achievement - 0.6333) < 0.001);
+  assert.ok(Math.abs(entry.level - 0.9635) < 0.001);
+  assert.ok(Math.abs(body.team.commercial.cashAchievement - 0.6333) < 0.001);
+
+  res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', { facts: { cash_in: { value: -5 } } }, cookie);
+  assert.equal(res.status, 400);
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться, что падает**
+
+```bash
+cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" node --test test/bonuses-routes.test.js
+```
+
+- [ ] **Step 3: store.js**
+
+```js
+export async function getTeamTargets(team, period, client = getPool()) {
+  const { rows } = await client.query(
+    `SELECT metric_key, min_value, target_value, max_value FROM bonus_team_targets WHERE team = $1 AND period = $2`,
+    [team, period],
+  );
+  const targets = {};
+  for (const row of rows) {
+    targets[row.metric_key] = { min: Number(row.min_value), target: Number(row.target_value), max: Number(row.max_value) };
+  }
+  return Object.keys(targets).length ? targets : null;
+}
+
+export async function upsertTeamTargets(team, period, targets, client = getPool()) {
+  for (const [key, value] of Object.entries(targets)) {
+    await client.query(
+      `INSERT INTO bonus_team_targets (team, period, metric_key, min_value, target_value, max_value)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (team, period, metric_key)
+       DO UPDATE SET min_value = EXCLUDED.min_value, target_value = EXCLUDED.target_value, max_value = EXCLUDED.max_value, updated_at = now()`,
+      [team, period, key, Number(value.min), Number(value.target), Number(value.max)],
+    );
+  }
+  return getTeamTargets(team, period, client);
+}
+
+export async function getTeamFacts(team, period, client = getPool()) {
+  const { rows } = await client.query(
+    `SELECT metric_key, value, source, note, updated_by, updated_at FROM bonus_team_facts WHERE team = $1 AND period = $2`,
+    [team, period],
+  );
+  const facts = {};
+  for (const row of rows) {
+    facts[row.metric_key] = { value: Number(row.value), source: row.source, note: row.note, updated_by: row.updated_by, updated_at: row.updated_at };
+  }
+  return facts;
+}
+
+export async function setTeamFact(team, period, metricKey, { value, source = 'manual', note = '' }, by, client = getPool()) {
+  await client.query(
+    `INSERT INTO bonus_team_facts (team, period, metric_key, value, source, note, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (team, period, metric_key)
+     DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, note = EXCLUDED.note, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [team, period, metricKey, Number(value), source, String(note || ''), by],
+  );
+  return getTeamFacts(team, period, client);
+}
+```
+
+- [ ] **Step 4: routes/bonuses.js**
+
+Добавить перед `computeEntry`:
+
+```js
+async function loadTeamMoney(period) {
+  const [targets, facts] = await Promise.all([store.getTeamTargets('commercial', period), store.getTeamFacts('commercial', period)]);
+  const thresholds = targets?.cash_in || null;
+  const fact = facts.cash_in ? facts.cash_in.value : null;
+  return { targets, facts, teamMoney: thresholds && fact !== null ? { fact, thresholds } : null };
+}
+```
+
+`computeEntry(scheme, period, legacy, approvals, teamMoney)` получает пятый аргумент и передаёт `teamMoney` в `computeProductionPeriod`. В `GET /periods/:period` перед циклом:
+
+```js
+  const team = await loadTeamMoney(period);
+```
+
+в цикле `computeEntry(scheme, period, legacy, approvals, team.teamMoney)`, а в ответ добавить:
+
+```js
+  const cashAchievement = team.teamMoney ? achievement(team.teamMoney.fact, team.teamMoney.thresholds, 'higher', DEFAULT_LADDER) : null;
+  res.json({ data: { period, entries, history, team: { commercial: { targets: team.targets, facts: team.facts, cashAchievement } } } });
+```
+
+(импортировать `achievement`, `DEFAULT_LADDER` из `../bonuses/calc.js`). В `close` и в `yearEntries` тоже передавать `teamMoney` того периода через `loadTeamMoney(period)`.
+
+Маршруты:
+
+```js
+router.get('/periods/:period/team/commercial', asyncHandler(async (req, res) => {
+  const period = parsePeriod(res, req.params.period);
+  if (!period) return;
+  const { targets, facts } = await loadTeamMoney(period);
+  res.json({ data: { targets, facts } });
+}));
+
+router.put('/periods/:period/team/commercial', asyncHandler(async (req, res) => {
+  const period = parsePeriod(res, req.params.period);
+  if (!period) return;
+  const targets = req.body?.targets;
+  if (targets && typeof targets === 'object') {
+    for (const [key, value] of Object.entries(targets)) {
+      const values = [value?.min, value?.target, value?.max].map(Number);
+      if (values.some((v) => !Number.isFinite(v))) return error(res, 400, 'INVALID_TARGETS', `Пороги ${key} должны быть числами`);
+    }
+    await store.upsertTeamTargets('commercial', period, targets);
+  }
+  const facts = req.body?.facts;
+  if (facts && typeof facts === 'object') {
+    for (const [key, fact] of Object.entries(facts)) {
+      const value = Number(fact?.value);
+      if (!Number.isFinite(value) || value < 0) return error(res, 400, 'INVALID_FACT', `Факт ${key} должен быть числом не меньше нуля`);
+      await store.setTeamFact('commercial', period, key, { value, source: 'manual', note: fact?.note }, req.user.email);
+    }
+  }
+  const { targets: savedTargets, facts: savedFacts } = await loadTeamMoney(period);
+  res.json({ data: { targets: savedTargets, facts: savedFacts } });
+}));
+```
+
+- [ ] **Step 5: Запустить**
+
+```bash
+cd ops/api && TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" npm test
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add ops/api/src/bonuses/store.js ops/api/src/routes/bonuses.js ops/api/test/bonuses-routes.test.js
+git commit -m "Add team money plan and fact API"
 ```
 
 ---
@@ -1672,10 +1977,10 @@ git commit -m "Add bonus period computation, close, adjust and year API"
 - Test: `test/bonuses_render.test.js`, `tests/bonuses-smoke.js`
 
 **Interfaces:**
-- Consumes: `GET/PUT/POST /api/bonuses/*` (Task 6–7), `PLATFORM_API_URL` из `js/supabase.js`.
-- Produces: глобальный объект `Bonuses` с `load()`; чистые функции `bonusesCurrentPeriod(date)`, `bonusesPeriodOptions(date)`, `formatRub(n)`, `formatMetricValue(metric)`, `renderMetricRow(metric)`, `renderBonusCard(entry, options)`, `renderWarnings(warnings)`, `renderHistory(history, entries)` — все возвращают строку HTML.
+- Consumes: `/api/bonuses/*` (Task 6–7), `PLATFORM_API_URL` из `js/supabase.js`.
+- Produces: глобальный `Bonuses` с `load()`; чистые функции `bonusesCurrentPeriod(date)`, `bonusesPeriodOptions(date)`, `formatRub(n)`, `formatHours(n)`, `formatMetricValue(key, value)`, `renderLevelBar(thresholds, fact, direction, labels)`, `renderOutputRow(output, rate)`, `renderQualityRow(metric)`, `renderBonusCard(entry, options)`, `renderWarnings(warnings)`, `renderHistory(history, entries)`, `renderYear(yearData, year)`.
 
-- [ ] **Step 1: Тесты чистых render-функций**
+- [ ] **Step 1: Тесты render-функций**
 
 `test/bonuses_render.test.js`:
 
@@ -1683,15 +1988,12 @@ git commit -m "Add bonus period computation, close, adjust and year API"
 const assert = require('node:assert');
 const { test } = require('node:test');
 const {
-    bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatMetricValue, renderMetricRow, renderBonusCard, renderWarnings,
+    bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatMetricValue, renderOutputRow, renderQualityRow, renderBonusCard, renderWarnings,
 } = require('../js/bonuses.js');
 
-test('bonusesCurrentPeriod: сентябрь → Q3', () => {
+test('bonusesCurrentPeriod и bonusesPeriodOptions', () => {
     assert.equal(bonusesCurrentPeriod(new Date(2026, 8, 15)), '2026-Q3');
     assert.equal(bonusesCurrentPeriod(new Date(2026, 0, 2)), '2026-Q1');
-});
-
-test('bonusesPeriodOptions: восемь кварталов, текущий последний', () => {
     const options = bonusesPeriodOptions(new Date(2026, 8, 15));
     assert.equal(options.length, 8);
     assert.equal(options[0], '2024-Q4');
@@ -1699,47 +2001,57 @@ test('bonusesPeriodOptions: восемь кварталов, текущий по
 });
 
 test('formatRub и formatMetricValue', () => {
-    assert.equal(formatRub(120000), '120 000 ₽');
-    assert.equal(formatMetricValue({ key: 'output_hours', fact: 1750 }), '1 750 ч');
-    assert.equal(formatMetricValue({ key: 'productivity', fact: 1.0523 }), '1,05');
-    assert.equal(formatMetricValue({ key: 'on_time_share', fact: 0.8889 }), '89%');
-    assert.equal(formatMetricValue({ key: 'rework_share', fact: null }), '—');
+    assert.equal(formatRub(153073), '153 073 ₽');
+    assert.equal(formatMetricValue('output_hours', 1550), '1 550 ч');
+    assert.equal(formatMetricValue('productivity', 1.0523), '1,05');
+    assert.equal(formatMetricValue('on_time_share', 0.9), '90%');
+    assert.equal(formatMetricValue('rework_share', null), '—');
 });
 
-test('renderMetricRow: риски и достижение', () => {
-    const html = renderMetricRow({
-        key: 'output_hours', label: 'Выпуск, нормо-часы', direction: 'higher', weight: 0.5,
-        thresholds: { min: 1360, target: 1600, max: 1840 }, fact: 1700, forecast: 1810, achievement: 1.2083, payout: 60417, available: true,
-    });
-    assert.match(html, /bn-metric/);
-    assert.match(html, /1 700 ч/);
-    assert.match(html, /прогноз 1 810 ч/);
-    assert.match(html, /121%/);
-    assert.match(html, /60 417 ₽/);
-    assert.match(html, /1 360/);
-    assert.match(html, /1 840/);
+test('renderOutputRow: уровни, факт, ставка, прогноз', () => {
+    const html = renderOutputRow({
+        fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 82.87,
+        forecast: 1610, forecastAchievement: 1.27, forecastAmount: 170000,
+    }, 75);
+    assert.match(html, /bn-output/);
+    assert.match(html, /1 550 ч/);
+    assert.match(html, /1 330/);
+    assert.match(html, /1 693/);
+    assert.match(html, /уровень 1,11/);
+    assert.match(html, /82,87 ₽\/ч/);
+    assert.match(html, /прогноз 1 610 ч/);
 });
 
-test('renderMetricRow: недоступный показатель', () => {
-    const html = renderMetricRow({ key: 'productivity', label: 'Производительность', direction: 'higher', weight: 0.25, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: null, forecast: null, achievement: null, payout: 0, available: false });
-    assert.match(html, /нет данных/);
+test('renderQualityRow: доступный и недоступный показатель', () => {
+    const ok = renderQualityRow({ key: 'on_time_share', label: 'В срок', direction: 'higher', weight: 0.3, thresholds: { min: 0.7, target: 0.85, max: 0.95 }, fact: 0.9, achievement: 1.25, available: true });
+    assert.match(ok, /90%/);
+    assert.match(ok, /125%/);
+    assert.match(ok, /вес 30%/);
+    const none = renderQualityRow({ key: 'productivity', label: 'Производительность', direction: 'higher', weight: 0.5, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: null, achievement: 0.5, available: false });
+    assert.match(none, /нет данных/);
+    assert.match(none, /50%/);
 });
 
-test('renderBonusCard: итог, статус, детали под карточкой', () => {
+test('renderBonusCard: формула, итог, детали под карточкой', () => {
     const html = renderBonusCard({
-        schemeId: 7, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', targetAmount: 100000, amountComputed: 120000, amountFinal: null,
-        metrics: [], warnings: [], orders: [{ id: 1, name: 'Заказ', purpose: 'commercial', hoursPlan: 10, hoursFact: 9, deadline: '2026-09-20', completedAt: '2026-09-10', estimated: false, onTime: true, approved: null, included: true }],
+        schemeId: 7, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75,
+        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 82.87, forecast: null, forecastAchievement: null, forecastAmount: null },
+        quality: { multiplier: 1.1917, metrics: [] },
+        amountComputed: 153073, amountFinal: null, warnings: [],
+        orders: [{ id: 1, name: 'Заказ', purpose: 'commercial', hoursPlan: 10, hoursFact: 9, deadline: '2026-09-20', completedAt: '2026-09-10', estimated: false, onTime: true, approved: null, included: true }],
         adjustments: [], targetsDrift: false, hasTargets: true,
     }, { expanded: true });
     assert.match(html, /Лёша/);
-    assert.match(html, /120 000 ₽/);
+    assert.match(html, /153 073 ₽/);
+    assert.match(html, /1 550 ч × 82,87 ₽ × 1,19/);
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
 });
 
-test('renderWarnings: часы без заказа', () => {
-    const html = renderWarnings([{ code: 'unmarked_hours', count: 0, hours: 3, orderIds: [] }]);
+test('renderWarnings', () => {
+    const html = renderWarnings([{ code: 'unmarked_hours', count: 0, hours: 3, orderIds: [] }, { code: 'no_timesheet', count: 0, hours: 0, orderIds: [] }]);
     assert.match(html, /без заказа: 3 ч/);
+    assert.match(html, /Табель по завершённым заказам пустой/);
 });
 ```
 
@@ -1778,7 +2090,7 @@ console.log('bonuses-smoke: OK');
 
 - [ ] **Step 4: index.html**
 
-Меню, сразу перед ссылкой `data-page="settings"`:
+Меню, перед ссылкой `data-page="settings"`:
 
 ```html
             <a href="#bonuses" data-page="bonuses">
@@ -1787,7 +2099,7 @@ console.log('bonuses-smoke: OK');
             </a>
 ```
 
-Контейнер страницы, перед `<div class="page" id="page-settings">` (тот же тег/класс, что у соседних страниц):
+Контейнер, перед `<div class="page" id="page-settings">` (тот же тег и класс, что у соседей):
 
 ```html
         <div class="page" id="page-bonuses">
@@ -1839,7 +2151,7 @@ console.log('bonuses-smoke: OK');
 
 ```js
 // Страница «Бонусы»: только владелец. Данные и расчёт приходят из
-// /api/bonuses/*; здесь только выбор периода, отрисовка и действия.
+// /api/bonuses/*; здесь выбор периода, отрисовка и действия.
 
 const BONUSES_API_URL = (typeof PLATFORM_API_URL !== 'undefined') ? PLATFORM_API_URL : 'https://api.recycleobject.ru';
 
@@ -1855,20 +2167,21 @@ const BONUSES_CSS = `
 .bn-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:12px}
 .bn-name{font-size:22px;font-weight:600}
 .bn-status{font-size:14px;color:#57606a}
-.bn-total{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
-.bn-total small{font-size:14px;font-weight:400;color:#57606a;margin-left:8px}
-.bn-metric{display:grid;grid-template-columns:220px 1fr 130px 90px 120px;gap:14px;align-items:center;padding:10px 0;border-top:1px solid #eaeef2}
-.bn-metric-label{font-weight:600}
-.bn-metric-weight{display:block;font-size:13px;color:#57606a;font-weight:400}
+.bn-total{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.bn-total small{display:block;font-size:14px;font-weight:400;color:#57606a}
+.bn-row{display:grid;grid-template-columns:200px 1fr 150px 90px;gap:14px;align-items:center;padding:12px 0 18px;border-top:1px solid #eaeef2}
+.bn-output{padding-top:16px}
+.bn-label{font-weight:600}
+.bn-label span{display:block;font-size:13px;color:#57606a;font-weight:400}
 .bn-track{position:relative;height:14px;background:#eef1f4;border-radius:7px}
 .bn-fill{position:absolute;left:0;top:0;bottom:0;background:#2da44e;border-radius:7px}
 .bn-fill.below{background:#cf222e}.bn-fill.mid{background:#bf8700}
 .bn-tick{position:absolute;top:-6px;width:2px;height:26px;background:#24292f}
 .bn-tick-label{position:absolute;top:22px;transform:translateX(-50%);font-size:12px;color:#57606a;white-space:nowrap}
 .bn-fact{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
-.bn-forecast{display:block;font-size:13px;color:#57606a;font-weight:400}
+.bn-fact span{display:block;font-size:13px;color:#57606a;font-weight:400}
 .bn-ach{font-size:18px;font-variant-numeric:tabular-nums}
-.bn-payout{font-size:18px;text-align:right;font-variant-numeric:tabular-nums}
+.bn-formula{margin-top:8px;padding:10px 14px;background:#f6f8fa;border-radius:8px;font-size:17px;font-variant-numeric:tabular-nums}
 .bn-muted{color:#57606a}
 .bn-warnings{margin-top:12px;padding:10px 14px;background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;font-size:15px}
 .bn-warnings li{margin:2px 0}
@@ -1882,16 +2195,15 @@ const BONUSES_CSS = `
 .bn-year,.bn-history{margin-top:24px}
 .bn-h2{font-size:20px;margin:0 0 10px}
 .bn-dialog{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000}
-.bn-dialog-box{background:#fff;border-radius:12px;padding:20px 22px;min-width:420px;max-width:92vw;font-size:16px}
+.bn-dialog-box{background:#fff;border-radius:12px;padding:20px 22px;min-width:460px;max-width:92vw;font-size:16px}
 .bn-dialog-box label{display:block;margin:8px 0 4px}
-.bn-dialog-box input,.bn-dialog-box textarea{width:100%;font-size:16px;padding:6px 8px;border:1px solid #d0d7de;border-radius:6px}
+.bn-dialog-box input,.bn-dialog-box select{width:100%;font-size:16px;padding:6px 8px;border:1px solid #d0d7de;border-radius:6px}
 .bn-targets-grid{display:grid;grid-template-columns:200px repeat(3,1fr);gap:8px;align-items:center}
-@media (max-width:800px){.bn-metric{grid-template-columns:1fr 1fr;} .bn-track{grid-column:1/-1}}
+@media (max-width:800px){.bn-row{grid-template-columns:1fr 1fr} .bn-track{grid-column:1/-1;margin-bottom:18px}}
 `;
 
 function bonusesCurrentPeriod(date = new Date()) {
-    const q = Math.floor(date.getMonth() / 3) + 1;
-    return `${date.getFullYear()}-Q${q}`;
+    return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3) + 1}`;
 }
 
 function bonusesPeriodOptions(date = new Date()) {
@@ -1910,67 +2222,71 @@ function bonusesEscape(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+function bonusesNum(value, digits = 0) {
+    return Number(value || 0).toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(/ /g, ' ');
+}
+
 function formatRub(value) {
-    const n = Math.round(Number(value) || 0);
-    return `${n.toLocaleString('ru-RU').replace(/ /g, ' ')} ₽`;
+    return `${bonusesNum(Math.round(Number(value) || 0))} ₽`;
 }
 
 function formatHours(value) {
-    return `${Math.round(Number(value) || 0).toLocaleString('ru-RU').replace(/ /g, ' ')} ч`;
+    return `${bonusesNum(Math.round(Number(value) || 0))} ч`;
 }
 
-function formatMetricValue(metric) {
-    const fact = metric?.fact;
-    if (fact === null || fact === undefined || !Number.isFinite(Number(fact))) return '—';
-    switch (metric.key) {
-        case 'output_hours': return formatHours(fact);
-        case 'productivity': return Number(fact).toFixed(2).replace('.', ',');
+function formatMetricValue(key, value) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+    switch (key) {
+        case 'output_hours': return formatHours(value);
+        case 'productivity': return bonusesNum(value, 2);
         case 'on_time_share':
-        case 'rework_share': return `${Math.round(Number(fact) * 100)}%`;
-        default: return String(fact);
+        case 'rework_share': return `${Math.round(Number(value) * 100)}%`;
+        default: return String(value);
     }
 }
 
-function bonusesTrackPercent(value, metric) {
-    const { min, target, max } = metric.thresholds || {};
-    const lower = metric.direction === 'lower';
-    const lo = lower ? Number(max) : Number(min);
-    const hi = lower ? Number(min) : Number(max);
+function bonusesTrackPercent(value, thresholds, direction) {
+    const lower = direction === 'lower';
+    const lo = lower ? Number(thresholds.max) : Number(thresholds.min);
+    const hi = lower ? Number(thresholds.min) : Number(thresholds.max);
     const span = hi - lo || 1;
     const v = lower ? (hi - Number(value)) + lo : Number(value);
-    const pct = ((v - lo) / span) * 0.8 + 0.1;
-    return Math.max(0, Math.min(1, pct)) * 100;
+    return Math.max(0, Math.min(1, ((v - lo) / span) * 0.8 + 0.1)) * 100;
 }
 
-function renderMetricRow(metric) {
-    const thr = metric.thresholds;
-    const weightPct = Math.round((Number(metric.weight) || 0) * 100);
-    if (!metric.available || !thr) {
-        return `<div class="bn-metric" data-metric="${bonusesEscape(metric.key)}">
-            <div class="bn-metric-label">${bonusesEscape(metric.label)}<span class="bn-metric-weight">вес ${weightPct}%</span></div>
-            <div class="bn-track"></div>
-            <div class="bn-fact bn-muted">нет данных</div>
-            <div class="bn-ach bn-muted">—</div>
-            <div class="bn-payout">${formatRub(0)}</div>
-        </div>`;
-    }
-    const factPct = bonusesTrackPercent(metric.fact, metric);
-    const ach = Number(metric.achievement) || 0;
+function renderLevelBar(thresholds, fact, direction, key, achievement) {
+    if (!thresholds) return '<div class="bn-track"></div>';
+    const ach = Number(achievement) || 0;
     const fillClass = ach === 0 ? 'below' : (ach < 1 ? 'mid' : '');
-    const ticks = ['min', 'target', 'max'].map((key) => {
-        const pct = bonusesTrackPercent(thr[key], metric);
-        const label = formatMetricValue({ key: metric.key, fact: thr[key] });
-        return `<div class="bn-tick" style="left:${pct.toFixed(1)}%"></div><div class="bn-tick-label" style="left:${pct.toFixed(1)}%">${bonusesEscape(label)}</div>`;
+    const fill = fact === null || fact === undefined ? '' : `<div class="bn-fill ${fillClass}" style="width:${bonusesTrackPercent(fact, thresholds, direction).toFixed(1)}%"></div>`;
+    const ticks = ['min', 'target', 'max'].map((k) => {
+        const pct = bonusesTrackPercent(thresholds[k], thresholds, direction).toFixed(1);
+        return `<div class="bn-tick" style="left:${pct}%"></div><div class="bn-tick-label" style="left:${pct}%">${bonusesEscape(formatMetricValue(key, thresholds[k]))}</div>`;
     }).join('');
-    const forecast = metric.forecast !== null && metric.forecast !== undefined
-        ? `<span class="bn-forecast">прогноз ${bonusesEscape(formatMetricValue({ key: metric.key, fact: metric.forecast }))}, если темп сохранится</span>`
+    return `<div class="bn-track">${fill}${ticks}</div>`;
+}
+
+function renderOutputRow(output, rate) {
+    const forecast = output.forecast !== null && output.forecast !== undefined
+        ? `<span>прогноз ${bonusesEscape(formatHours(output.forecast))}, если темп сохранится</span>`
         : '';
-    return `<div class="bn-metric" data-metric="${bonusesEscape(metric.key)}">
-        <div class="bn-metric-label">${bonusesEscape(metric.label)}<span class="bn-metric-weight">вес ${weightPct}%</span></div>
-        <div class="bn-track"><div class="bn-fill ${fillClass}" style="width:${factPct.toFixed(1)}%"></div>${ticks}</div>
-        <div class="bn-fact">${bonusesEscape(formatMetricValue(metric))}${forecast}</div>
-        <div class="bn-ach">${Math.round(ach * 100)}%</div>
-        <div class="bn-payout">${formatRub(metric.payout)}</div>
+    const level = output.achievement === null || output.achievement === undefined ? '—' : `уровень ${bonusesNum(output.achievement, 2)}`;
+    return `<div class="bn-row bn-output">
+        <div class="bn-label">Выпуск, нормо-часы<span>base / medium / aspiration</span></div>
+        ${renderLevelBar(output.thresholds, output.fact, 'higher', 'output_hours', output.achievement)}
+        <div class="bn-fact">${bonusesEscape(formatHours(output.fact))}${forecast}</div>
+        <div class="bn-ach">${level}<span class="bn-muted" style="display:block;font-size:13px">${bonusesNum(output.rateApplied, 2)} ₽/ч из ${bonusesNum(rate)}</span></div>
+    </div>`;
+}
+
+function renderQualityRow(metric) {
+    const weightPct = Math.round((Number(metric.weight) || 0) * 100);
+    const fact = metric.available ? bonusesEscape(formatMetricValue(metric.key, metric.fact)) : '<span class="bn-muted">нет данных</span>';
+    return `<div class="bn-row" data-metric="${bonusesEscape(metric.key)}">
+        <div class="bn-label">${bonusesEscape(metric.label)}<span>вес ${weightPct}%${metric.direction === 'lower' ? ' · меньше лучше' : ''}</span></div>
+        ${renderLevelBar(metric.thresholds, metric.available ? metric.fact : null, metric.direction, metric.key, metric.achievement)}
+        <div class="bn-fact">${fact}</div>
+        <div class="bn-ach">${Math.round((Number(metric.achievement) || 0) * 100)}%</div>
     </div>`;
 }
 
@@ -1978,8 +2294,10 @@ const BONUSES_WARNING_TEXT = {
     no_hours: (w) => `Заказы без нормо-часов, в выпуск не вошли: ${w.count}`,
     no_deadline: (w) => `Заказы без дедлайна, не учтены в «В срок»: ${w.count}`,
     estimated_dates: (w) => `Дата завершения оценочная (по табелю или последнему изменению): ${w.count}`,
-    unmarked_hours: (w) => `Часы табеля без заказа: ${bonusesEscape(String(w.hours).replace('.', ','))} ч`,
-    no_timesheet: () => 'Табель по завершённым заказам пустой: производительность не считается',
+    unmarked_hours: (w) => `Часы табеля без заказа: ${bonusesEscape(bonusesNum(w.hours, 1))} ч`,
+    no_timesheet: () => 'Табель по завершённым заказам пустой: производительность взята по минимуму (0,5)',
+    no_deadline_orders: () => 'Нет завершённых заказов с дедлайном: «В срок» взято нейтрально (1,0)',
+    no_period_hours: () => 'Нет часов табеля за период: «Переделки» взяты нейтрально (1,0)',
 };
 
 function renderWarnings(warnings) {
@@ -1991,7 +2309,7 @@ function renderWarnings(warnings) {
             : '';
         return `<li>${text}${ids}</li>`;
     }).join('');
-    return `<div class="bn-warnings"><ul>${items}</ul></div>`;
+    return `<div class="bn-warnings"><ul style="margin:0;padding-left:18px">${items}</ul></div>`;
 }
 
 function bonusesStatusLabel(status) {
@@ -2023,11 +2341,16 @@ function renderOrdersTable(entry) {
 function renderBonusCard(entry, options = {}) {
     const expanded = options.expanded === true;
     const open = entry.resultStatus === 'open';
+    const output = entry.output || {};
+    const quality = entry.quality || { multiplier: 0, metrics: [] };
     const total = entry.amountFinal !== null && entry.amountFinal !== undefined && Number(entry.amountFinal) !== Number(entry.amountComputed)
         ? `${formatRub(entry.amountFinal)}<small>расчёт ${formatRub(entry.amountComputed)}</small>`
-        : formatRub(entry.amountComputed);
+        : `${formatRub(entry.amountComputed)}${output.forecastAmount ? `<small>прогноз ${formatRub(output.forecastAmount)}</small>` : ''}`;
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';
+    const formula = entry.hasTargets
+        ? `<div class="bn-formula">${bonusesEscape(formatHours(output.fact))} × ${bonusesNum(output.rateApplied, 2)} ₽ × ${bonusesNum(quality.multiplier, 2)} = <b>${formatRub(entry.amountComputed)}</b></div>`
+        : '';
     const actions = `<div class="bn-actions">
         <button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали'}</button>
         <button class="bn-btn" data-action="targets" data-scheme="${entry.schemeId}" ${open ? '' : 'disabled'}>Цели квартала</button>
@@ -2042,11 +2365,14 @@ function renderBonusCard(entry, options = {}) {
     return `<div class="bn-card" data-scheme="${entry.schemeId}">
         <div class="bn-card-head">
             <div><div class="bn-name">${bonusesEscape(entry.employeeName || `Схема #${entry.schemeId}`)}</div>
-            <div class="bn-status">производство · бонус на цели ${formatRub(entry.targetAmount)} · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
+            <div class="bn-status">производство · ставка ${bonusesNum(entry.rate)} ₽ за нормо-час на уровне medium · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
             <div class="bn-total">${total}</div>
         </div>
         ${noTargets}${drift}
-        ${(entry.metrics || []).map(renderMetricRow).join('')}
+        ${renderOutputRow(output, entry.rate)}
+        ${(quality.metrics || []).map(renderQualityRow).join('')}
+        <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
+        ${formula}
         ${renderWarnings(entry.warnings)}
         ${actions}
         ${details}
@@ -2070,15 +2396,15 @@ function renderHistory(history, entries) {
 function renderYear(yearData, year) {
     if (!Array.isArray(yearData) || !yearData.length) return '';
     const rows = yearData.map((e) => {
-        const q = e.quarters.map((x) => `<td class="num">${x.fact === null ? '—' : formatHours(x.fact)}</td>`).join('');
+        const q = e.year.quarters.map((x) => `<td class="num">${x.fact === null ? '—' : formatHours(x.fact)}</td>`).join('');
         return `<tr><td>${bonusesEscape(e.employeeName)}</td>${q}
             <td class="num">${formatHours(e.year.factSum)} / ${formatHours(e.year.thresholdsSum.target)}</td>
-            <td class="num">${e.year.achievement === null ? '—' : `${Math.round(e.year.achievement * 100)}%`}</td>
+            <td class="num">${e.year.achievement === null ? '—' : bonusesNum(e.year.achievement, 2)}</td>
             <td class="num">${formatRub(e.year.topUp)}</td>
             <td><button class="bn-btn" data-action="close-year" data-scheme="${e.schemeId}" ${e.year.quartersCounted === 4 ? '' : 'disabled'}>Закрыть год</button></td></tr>`;
     }).join('');
     return `<h2 class="bn-h2">Год ${year}: выпуск</h2><table class="bn-table"><thead><tr>
-        <th>Сотрудник</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Факт / цель</th><th>Достижение</th><th>Добор</th><th></th>
+        <th>Сотрудник</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Факт / medium</th><th>Уровень года</th><th>Добор</th><th></th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -2132,10 +2458,10 @@ const Bonuses = {
     render() {
         const cards = document.getElementById('bonuses-cards');
         const entries = this.data?.entries || [];
-        cards.innerHTML = entries.length
+        cards.innerHTML = (entries.length
             ? entries.map((e) => renderBonusCard(e, { expanded: this.expanded.has(e.schemeId) })).join('')
-            : '<div class="bn-muted">Схем пока нет. Создайте схему кнопкой ниже.</div>' +
-              '<div class="bn-actions"><button class="bn-btn primary" data-action="new-scheme">Новая схема</button></div>';
+            : '<div class="bn-muted">Схем пока нет.</div>')
+            + '<div class="bn-actions"><button class="bn-btn" data-action="new-scheme">Новая схема</button></div>';
         document.getElementById('bonuses-year').innerHTML = renderYear(this.yearData, Number(this.period.slice(0, 4)));
         document.getElementById('bonuses-history').innerHTML = renderHistory(this.data?.history, entries);
     },
@@ -2143,13 +2469,14 @@ const Bonuses = {
     bind() {
         if (this._bound) return;
         this._bound = true;
-        document.getElementById('page-bonuses').addEventListener('click', (event) => {
+        const page = document.getElementById('page-bonuses');
+        page.addEventListener('click', (event) => {
             const periodBtn = event.target.closest('[data-period]');
             if (periodBtn) { this.period = periodBtn.dataset.period; this.load(); return; }
             const btn = event.target.closest('[data-action]');
             if (btn) this.handleAction(btn.dataset.action, Number(btn.dataset.scheme));
         });
-        document.getElementById('page-bonuses').addEventListener('change', (event) => {
+        page.addEventListener('change', (event) => {
             const cb = event.target.closest('.bn-approve');
             if (!cb) return;
             this.api('POST', `/periods/${this.period}/stock-approvals`, { order_id: Number(cb.dataset.order), approved: cb.checked })
@@ -2196,14 +2523,15 @@ const Bonuses = {
     async openSchemeDialog() {
         const employees = await this.api('GET', '/employees');
         const options = employees.map((e) => `<option value="${e.id}">${bonusesEscape(e.name)}</option>`).join('');
-        const box = this.dialog(`<h2 class="bn-h2">Новая схема</h2>
+        const box = this.dialog(`<h2 class="bn-h2">Схема производства</h2>
             <label>Сотрудник</label><select id="bn-scheme-employee">${options}</select>
-            <label>Бонус на цели, ₽ за квартал</label><input id="bn-scheme-amount" type="number" value="100000">
+            <label>Ставка за нормо-час на уровне medium, ₽</label><input id="bn-scheme-rate" type="number" value="75">
+            <div class="bn-muted" style="margin-top:6px">base = ставка × 0,5; aspiration = ставка × 1,5; ниже base 0</div>
             <div class="bn-actions"><button class="bn-btn primary" id="bn-scheme-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
         box.querySelector('#bn-scheme-save').addEventListener('click', async () => {
             const employeeId = Number(box.querySelector('#bn-scheme-employee').value);
-            const amount = Number(box.querySelector('#bn-scheme-amount').value);
-            await this.api('PUT', `/schemes/${employeeId}`, { kind: 'production', target_amount: amount });
+            const rate = Number(box.querySelector('#bn-scheme-rate').value);
+            await this.api('PUT', `/schemes/${employeeId}`, { kind: 'production', rate });
             box.remove();
             await this.load();
         });
@@ -2213,13 +2541,14 @@ const Bonuses = {
         const entry = (this.data?.entries || []).find((e) => e.schemeId === schemeId);
         const suggestion = await this.api('GET', `/periods/${this.period}/suggest/${schemeId}`);
         const current = {};
-        for (const m of entry?.metrics || []) if (m.thresholds) current[m.key] = m.thresholds;
+        if (entry?.output?.thresholds) current.output_hours = entry.output.thresholds;
+        for (const m of entry?.quality?.metrics || []) if (m.thresholds) current[m.key] = m.thresholds;
         const keys = ['output_hours', 'productivity', 'on_time_share', 'rework_share'];
-        const labels = { output_hours: 'Выпуск, ч', productivity: 'Производительность', on_time_share: 'В срок (0–1)', rework_share: 'Переделки (0–1)' };
+        const labels = { output_hours: 'Выпуск, ч (base / medium / aspiration)', productivity: 'Производительность', on_time_share: 'В срок (0–1)', rework_share: 'Переделки (0–1)' };
         const row = (key, values) => `<div>${labels[key]}</div>` + ['min', 'target', 'max'].map((k) => `<input type="number" step="any" data-key="${key}" data-k="${k}" value="${values?.[k] ?? ''}">`).join('');
         const box = this.dialog(`<h2 class="bn-h2">Цели ${this.period}</h2>
             <div class="bn-muted">Источник подсказки: ${suggestion.source === 'plan' ? 'сезонный план' : 'формула из настроек'}</div>
-            <div class="bn-targets-grid"><div></div><div>мин</div><div>цель</div><div>макс</div>${keys.map((k) => row(k, current[k] || suggestion.targets[k])).join('')}</div>
+            <div class="bn-targets-grid"><div></div><div>мин / base</div><div>цель / medium</div><div>макс / aspiration</div>${keys.map((k) => row(k, current[k] || suggestion.targets[k])).join('')}</div>
             <div class="bn-actions"><button class="bn-btn" id="bn-targets-suggest">Взять из сезонного плана</button><button class="bn-btn primary" id="bn-targets-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
         box.querySelector('#bn-targets-suggest').addEventListener('click', () => {
             box.querySelectorAll('input[data-key]').forEach((input) => { input.value = suggestion.targets[input.dataset.key][input.dataset.k]; });
@@ -2251,22 +2580,22 @@ const Bonuses = {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatHours, formatMetricValue,
-        renderMetricRow, renderBonusCard, renderWarnings, renderHistory, renderYear,
+        renderLevelBar, renderOutputRow, renderQualityRow, renderBonusCard, renderWarnings, renderHistory, renderYear,
     };
 }
 ```
 
-- [ ] **Step 7: Запустить тесты**
+- [ ] **Step 7: Запустить**
 
 ```bash
 node --test test/bonuses_render.test.js && node tests/bonuses-smoke.js
 ```
 
-Ожидание: PASS и `bonuses-smoke: OK`. Если `renderMetricRow` в тесте не находит `121%`, проверить округление `Math.round(1.2083 * 100)`.
+Ожидание: PASS и `bonuses-smoke: OK`. Проверка формулы в тесте карточки ждёт `1 550 ч × 82,87 ₽ × 1,19`: `bonusesNum(82.87, 2)` даёт `82,87`, `bonusesNum(1.1917, 2)` даёт `1,19`.
 
 - [ ] **Step 8: Проверить в браузере**
 
-Локально открыть calc (как в `docs/deploy-domain.md` / просто `index.html` через локальный сервер) под владельцем: пункт «Бонусы» виден, страница грузится, «Новая схема» создаёт схему Лёши, «Цели квартала» подтягивает сезонный план, карточка показывает 4 показателя и предупреждения. Под обычным сотрудником пункта нет, `#bonuses` уводит на заказы с тостом.
+Под владельцем: пункт «Бонусы» виден, «Новая схема» создаёт схему Лёши со ставкой 75, «Цели квартала» подтягивает три уровня из сезонного плана, карточка показывает выпуск, три показателя качества, множитель и формулу. Под сотрудником пункта нет, `#bonuses` уводит на заказы.
 
 - [ ] **Step 9: Commit**
 
@@ -2277,26 +2606,195 @@ git commit -m "Add owner-only bonuses page"
 
 ---
 
+### Task 8b: Блок «План квартала по деньгам» и уровень на карточке
+
+**Files:**
+- Modify: `js/bonuses.js`, `index.html` (контейнер `bonuses-team`)
+- Test: `test/bonuses_render.test.js`
+
+**Interfaces:**
+- Produces: `renderTeamBlock(team, period)` → HTML; `renderLevelRow(entry)` → HTML; `Bonuses.openTeamDialog()`.
+
+- [ ] **Step 1: Тесты**
+
+```js
+const { renderTeamBlock, renderLevelRow } = require('../js/bonuses.js');
+
+test('renderTeamBlock: уровни, факт из Финтабло, A_cash', () => {
+    const html = renderTeamBlock({ commercial: {
+        targets: { cash_in: { min: 14000000, target: 15500000, max: 17000000 } },
+        facts: { cash_in: { value: 14400000, source: 'manual', note: 'Финтабло 15.09', updated_at: '2026-09-15T10:00:00.000Z' } },
+        cashAchievement: 0.6333,
+    } }, '2026-Q3');
+    assert.match(html, /bn-team/);
+    assert.match(html, /14 400 000 ₽/);
+    assert.match(html, /14 000 000/);
+    assert.match(html, /17 000 000/);
+    assert.match(html, /уровень 0,63/);
+    assert.match(html, /Финтабло 15\.09/);
+    assert.match(html, /План и факт по деньгам/);
+});
+
+test('renderTeamBlock: без плана', () => {
+    const html = renderTeamBlock({ commercial: { targets: null, facts: {}, cashAchievement: null } }, '2026-Q3');
+    assert.match(html, /План по деньгам за квартал не задан/);
+});
+
+test('renderLevelRow: формула уровня', () => {
+    const html = renderLevelRow({ rate: 75, level: 0.9635, output: { achievement: 1.105, rateApplied: 72.26 }, money: { achievement: 0.6333 } });
+    assert.match(html, /0,7 × 1,10 \+ 0,3 × 0,63 = 0,96/);
+    assert.match(html, /72,26 ₽\/ч/);
+    const noMoney = renderLevelRow({ rate: 75, level: 1.105, output: { achievement: 1.105, rateApplied: 82.87 }, money: { achievement: null } });
+    assert.match(noMoney, /план по деньгам не задан/);
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться, что падает**
+
+```bash
+node --test test/bonuses_render.test.js
+```
+
+- [ ] **Step 3: index.html**
+
+В контейнере `page-bonuses` между `.bn-toolbar` и `bonuses-cards`:
+
+```html
+                <div id="bonuses-team" class="bn-team-wrap"></div>
+```
+
+- [ ] **Step 4: js/bonuses.js**
+
+Добавить в `BONUSES_CSS`:
+
+```
+.bn-team{border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;padding:16px 20px;margin-bottom:18px}
+.bn-team-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.bn-team-title{font-size:18px;font-weight:600}
+.bn-level{background:#eef6ff;border-radius:8px;padding:8px 14px;font-size:16px;margin:6px 0 4px;font-variant-numeric:tabular-nums}
+```
+
+Функции:
+
+```js
+function formatMoney(value) {
+    return `${bonusesNum(Math.round(Number(value) || 0))} ₽`;
+}
+
+function renderTeamBlock(team, period) {
+    const c = team?.commercial || {};
+    const thresholds = c.targets?.cash_in || null;
+    const fact = c.facts?.cash_in || null;
+    const button = `<button class="bn-btn" data-action="team-money">План и факт по деньгам</button>`;
+    if (!thresholds) {
+        return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)}</div>${button}</div>
+            <div class="bn-warnings">План по деньгам за квартал не задан. Уровень производства считается только по часам.</div></div>`;
+    }
+    const ticks = ['min', 'target', 'max'].map((k) => {
+        const pct = bonusesTrackPercent(thresholds[k], thresholds, 'higher').toFixed(1);
+        return `<div class="bn-tick" style="left:${pct}%"></div><div class="bn-tick-label" style="left:${pct}%">${bonusesNum(thresholds[k])}</div>`;
+    }).join('');
+    const ach = c.cashAchievement;
+    const fill = fact ? `<div class="bn-fill ${!ach ? 'below' : (ach < 1 ? 'mid' : '')}" style="width:${bonusesTrackPercent(fact.value, thresholds, 'higher').toFixed(1)}%"></div>` : '';
+    const factHtml = fact
+        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${bonusesEscape(fact.note || 'Финтабло, направление Recycle Object')} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
+        : '<div class="bn-fact bn-muted">факт не введён</div>';
+    return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · поступления Recycle Object по Финтабло</div>${button}</div>
+        <div class="bn-row" style="border-top:0">
+            <div class="bn-label">План отдела<span>base / medium / aspiration</span></div>
+            <div class="bn-track">${fill}${ticks}</div>
+            ${factHtml}
+            <div class="bn-ach">${ach === null || ach === undefined ? '—' : `уровень ${bonusesNum(ach, 2)}`}</div>
+        </div></div>`;
+}
+
+function renderLevelRow(entry) {
+    const outA = entry.output?.achievement;
+    const cashA = entry.money?.achievement;
+    if (outA === null || outA === undefined) return '';
+    const formula = cashA === null || cashA === undefined
+        ? `уровень квартала ${bonusesNum(entry.level, 2)} = уровень по часам (план по деньгам не задан)`
+        : `уровень квартала 0,7 × ${bonusesNum(outA, 2)} + 0,3 × ${bonusesNum(cashA, 2)} = ${bonusesNum(entry.level, 2)}`;
+    return `<div class="bn-level">${formula} → ставка ${bonusesNum(entry.output.rateApplied, 2)} ₽/ч из ${bonusesNum(entry.rate)}</div>`;
+}
+```
+
+В `renderOutputRow` убрать подпись со ставкой из `.bn-ach` (оставить `уровень по часам X`), а в `renderBonusCard` после `renderOutputRow(...)` вставить `${renderLevelRow(entry)}`. В `render()` перед карточками:
+
+```js
+        document.getElementById('bonuses-team').innerHTML = renderTeamBlock(this.data?.team, this.period);
+```
+
+В `handleAction` ветка:
+
+```js
+            } else if (action === 'team-money') {
+                await this.openTeamDialog();
+```
+
+и метод:
+
+```js
+    async openTeamDialog() {
+        const current = await this.api('GET', `/periods/${this.period}/team/commercial`);
+        const t = current.targets?.cash_in || {};
+        const f = current.facts?.cash_in || {};
+        const box = this.dialog(`<h2 class="bn-h2">Деньги квартала ${this.period}</h2>
+            <div class="bn-targets-grid"><div>План, ₽</div><div>base</div><div>medium</div><div>aspiration</div>
+            <div></div><input id="bn-team-min" type="number" value="${t.min ?? ''}"><input id="bn-team-target" type="number" value="${t.target ?? ''}"><input id="bn-team-max" type="number" value="${t.max ?? ''}"></div>
+            <label>Факт: поступления Recycle Object по Финтабло, ₽</label><input id="bn-team-fact" type="number" value="${f.value ?? ''}">
+            <label>Комментарий (откуда цифра, дата)</label><input id="bn-team-note" type="text" value="${bonusesEscape(f.note || '')}">
+            <div class="bn-actions"><button class="bn-btn primary" id="bn-team-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
+        box.querySelector('#bn-team-save').addEventListener('click', async () => {
+            const body = {};
+            const min = Number(box.querySelector('#bn-team-min').value);
+            const target = Number(box.querySelector('#bn-team-target').value);
+            const max = Number(box.querySelector('#bn-team-max').value);
+            if ([min, target, max].every((v) => Number.isFinite(v) && v > 0)) body.targets = { cash_in: { min, target, max } };
+            const factValue = box.querySelector('#bn-team-fact').value;
+            if (factValue !== '') body.facts = { cash_in: { value: Number(factValue), note: box.querySelector('#bn-team-note').value } };
+            await this.api('PUT', `/periods/${this.period}/team/commercial`, body);
+            box.remove();
+            await this.load();
+        });
+    },
+```
+
+Экспорт: добавить `renderTeamBlock, renderLevelRow, formatMoney` в `module.exports`. В тесте `renderOutputRow` заменить ожидание `82,87 ₽\/ч` на `уровень по часам 1,11`.
+
+- [ ] **Step 5: Запустить**
+
+```bash
+node --test test/bonuses_render.test.js && node tests/bonuses-smoke.js
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add js/bonuses.js index.html test/bonuses_render.test.js
+git commit -m "Show team money plan and quarter level on bonuses page"
+```
+
+---
+
 ### Task 9: Версия, полный прогон, PR
 
 **Files:**
-- Modify: `js/version.json`, `js/app.js:5`, `index.html:10`, `index.html:190`, теги `?v=` у `js/app.js` и `js/bonuses.js`.
+- Modify: `js/version.json`, `js/app.js:5`, `index.html:10`, `index.html:190`, `?v=` у `js/app.js` и `js/bonuses.js`.
 
-- [ ] **Step 1: Узнать версию main и поднять**
+- [ ] **Step 1: Версия main и бамп**
 
 ```bash
 git fetch origin main && git show origin/main:js/version.json
 ```
 
-Взять `vN`, поставить `v(N+1)` в четырёх якорях. Поднять `?v=` у `js/app.js` (на +1 к текущему) и оставить `js/bonuses.js?v=1`.
+Взять `vN`, поставить `v(N+1)` в четырёх якорях. Поднять `?v=` у `js/app.js` на +1, оставить `js/bonuses.js?v=1`.
 
-- [ ] **Step 2: Прогнать smokes**
+- [ ] **Step 2: Smokes**
 
 ```bash
 node tests/version-smoke.js && node tests/bonuses-smoke.js && node --test test/bonuses_render.test.js test/production_load.test.js && node tests/order-flow-smoke.js
 ```
-
-Ожидание: всё зелёное.
 
 - [ ] **Step 3: Полный прогон API**
 
@@ -2313,4 +2811,4 @@ git push -u origin codex/bonuses-production-manager
 gh pr create --title "Bonuses page and production manager scheme" --body-file docs/specs/2026-09-09-bonuses-production-manager.md
 ```
 
-После merge: следить за `Deploy GitHub Pages`, `Yandex static sync`, `Live site smoke`, `Yandex mirror smoke` и деплоем `ops/**` (миграция 019 применится автоматически). Затем выполнить Task 0 ещё раз на проде и создать схему Лёши через страницу.
+После merge: следить за `Deploy GitHub Pages`, `Yandex static sync`, `Live site smoke`, `Yandex mirror smoke` и деплоем `ops/**` (миграция 019 применится автоматически). Затем повторить Task 0 на проде и создать схему Лёши через страницу.
