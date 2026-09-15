@@ -2891,6 +2891,286 @@ git commit -m "Show team money plan and quarter level on bonuses page"
 
 ---
 
+### Task 8c: Блок «Люди»: по сотрудникам, состав, прогноз
+
+**Files:**
+- Modify: `ops/api/src/bonuses/calc.js`, `ops/api/src/routes/bonuses.js`, `js/bonuses.js`, `index.html` (контейнер `bonuses-people`)
+- Test: `ops/api/test/bonuses-calc.test.js`, `test/bonuses_render.test.js`
+
+**Interfaces:**
+- Produces: `computeTeamStats({ period, today, orders, timeEntries, employees, settings, shopProductivity })` →
+
+```js
+{
+  people: [{ id, name, workingDays, loggedDays, hours, orderHours, orderShare, unmarkedHours, reworkHours, productivity, flags: [] }],
+  headcount: { people, hoursPerDay, workingDays, capacity, loadMedium, loadAspiration, needMedium, needAspiration },
+  outlook: { remainingSoldHours, remainingWorkingDays, remainingCapacity, deltaPersonDays },
+}
+```
+  `shopProductivity` — факт производительности цеха за период (из `computeProductionPeriod`), при отсутствии 1. `loadMedium/needMedium` требуют `targets.output_hours`; передаются как `tiers = { medium, aspiration } | null`.
+- `GET /api/bonuses/periods/:period` отдаёт `people: computeTeamStats(...)` (по первой production-схеме; если схем нет, `tiers = null`).
+- Produces (`js/bonuses.js`): `renderPeopleBlock(people)`.
+
+- [ ] **Step 1: Тест расчёта**
+
+```js
+import { computeTeamStats } from '../src/bonuses/calc.js';
+
+test('computeTeamStats: люди, состав, прогноз', () => {
+  const employees = [
+    { id: 5, name: 'Женя', role: 'production', is_active: true },
+    { id: 6, name: 'Тая', role: 'production', is_active: true },
+    { id: 7, name: 'Аня', role: 'sales', is_active: true },
+  ];
+  const orders = [
+    // завершён: норма 100, табель 80 (Женя 60, Тая 20) → производительность заказа 1.25
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-08-01', completed_at: '2026-07-03T00:00:00.000Z' },
+    // в работе, дедлайн в квартале: норма 200, табель 50 → остаток 150
+    { id: 2, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 200, deadline: '2026-09-20' },
+    { id: 3, status: 'in_production', production_purpose: 'rework', total_hours_plan: 5 },
+  ];
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-07-01', hours: 9, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-07-02', hours: 9, order_id: 1 },
+    { id: 3, employee_id: 5, date: '2026-07-03', hours: 42, order_id: 1 },
+    { id: 4, employee_id: 6, date: '2026-07-01', hours: 20, order_id: 1 },
+    { id: 5, employee_id: 6, date: '2026-07-02', hours: 50, order_id: 2 },
+    { id: 6, employee_id: 6, date: '2026-07-03', hours: 4, order_id: null },
+    { id: 7, employee_id: 6, date: '2026-07-03', hours: 3, order_id: 3 },
+  ];
+  const stats = computeTeamStats({
+    period: '2026-Q3', today: '2026-07-03', orders, timeEntries, employees,
+    settings: { planning_hours_per_day: 9, production_holidays: '' }, shopProductivity: 1.25, tiers: { medium: 1512, aspiration: 1693 },
+  });
+  const zhenya = stats.people.find((p) => p.id === 5);
+  assert.equal(zhenya.workingDays, 3);
+  assert.equal(zhenya.loggedDays, 3);
+  assert.equal(zhenya.hours, 60);
+  assert.equal(zhenya.orderHours, 60);
+  assert.ok(Math.abs(zhenya.productivity - 1.25) < 0.001);
+  const taya = stats.people.find((p) => p.id === 6);
+  assert.equal(taya.unmarkedHours, 4);
+  assert.equal(taya.reworkHours, 3);
+  // Тая: 20 ч на заказе 1 (норма-доля 25) и 50 ч на заказе 2 (не завершён → не считается) → 25/20 = 1.25
+  assert.ok(Math.abs(taya.productivity - 1.25) < 0.001);
+  assert.ok(stats.people.every((p) => p.id !== 7));
+  assert.equal(stats.headcount.people, 2);
+  assert.equal(stats.headcount.workingDays, 66);
+  assert.equal(stats.headcount.capacity, 2 * 9 * 66);
+  assert.ok(Math.abs(stats.headcount.needMedium - 1512 / (9 * 66 * 1.25)) < 0.01);
+  assert.equal(stats.outlook.remainingSoldHours, 150);
+  assert.equal(stats.outlook.remainingWorkingDays, 63);
+  assert.equal(stats.outlook.remainingCapacity, Math.round(2 * 9 * 63 * 1.25));
+  assert.equal(stats.outlook.deltaPersonDays, Math.round((2 * 9 * 63 * 1.25 - 150) / 9));
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться, что падает**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js
+```
+
+- [ ] **Step 3: calc.js**
+
+```js
+export function computeTeamStats({ period, today, orders, timeEntries, employees, settings, shopProductivity = 1, tiers = null }) {
+  const { from, to } = periodBounds(period);
+  const holidays = holidaySet(settings);
+  const hoursPerDay = num(settings?.planning_hours_per_day) || 9;
+  const todayYmd = String(today).slice(0, 10);
+  const until = todayYmd < from ? null : (todayYmd > to ? to : todayYmd);
+  const prod = num(shopProductivity) || 1;
+  const orderById = new Map(orders.map((o) => [String(o.id), o]));
+  const entriesByOrder = groupEntriesByOrder(timeEntries);
+
+  // производительность завершённых заказов: норма / табель
+  const orderProductivity = new Map();
+  for (const order of orders) {
+    if (!isAlive(order) || !isCompleted(order) || orderPurpose(order) === 'rework') continue;
+    const hoursPlan = num(order.total_hours_plan);
+    const hoursFact = sumHours(entriesByOrder.get(String(order.id)) || []);
+    if (hoursPlan > 0 && hoursFact > 0) orderProductivity.set(String(order.id), hoursPlan / hoursFact);
+  }
+
+  const people = [];
+  for (const employee of employees) {
+    if (!employee || employee.is_active === false) continue;
+    if (String(employee.role || '').trim().toLowerCase() !== 'production') continue;
+    const mine = timeEntries.filter((e) => String(e?.employee_id) === String(employee.id) && day(e?.date) >= from && day(e?.date) <= to);
+    const days = new Set(mine.map((e) => day(e.date)).filter(Boolean));
+    let hours = 0;
+    let orderHours = 0;
+    let unmarkedHours = 0;
+    let reworkHours = 0;
+    let weightedNorm = 0;
+    let weightedHours = 0;
+    for (const entry of mine) {
+      const h = num(entry.hours);
+      hours += h;
+      if (entry.order_id === null || entry.order_id === undefined || entry.order_id === '') {
+        unmarkedHours += h;
+        continue;
+      }
+      orderHours += h;
+      const order = orderById.get(String(entry.order_id));
+      if (order && orderPurpose(order) === 'rework') reworkHours += h;
+      const p = orderProductivity.get(String(entry.order_id));
+      if (p !== undefined) {
+        weightedNorm += h * p;
+        weightedHours += h;
+      }
+    }
+    const workingDaysSoFar = until ? workingDays(from, until, holidays) : 0;
+    const productivity = weightedHours > 0 ? roundTo(weightedNorm / weightedHours, 4) : null;
+    const orderShare = hours > 0 ? roundTo(orderHours / hours, 4) : null;
+    const flags = [];
+    if (workingDaysSoFar > 0 && (workingDaysSoFar - days.size) / workingDaysSoFar > 0.1) flags.push('timesheet_gaps');
+    if (hours > 0 && unmarkedHours / hours > 0.1) flags.push('unmarked');
+    if (productivity !== null && productivity < 0.9) flags.push('slow');
+    if (productivity !== null && productivity > 1.15) flags.push('fast');
+    people.push({
+      id: employee.id, name: String(employee.name || ''), workingDays: workingDaysSoFar, loggedDays: days.size,
+      hours: roundTo(hours, 2), orderHours: roundTo(orderHours, 2), orderShare, unmarkedHours: roundTo(unmarkedHours, 2),
+      reworkHours: roundTo(reworkHours, 2), productivity, flags,
+    });
+  }
+
+  const totalWorkingDays = workingDays(from, to, holidays);
+  const capacity = people.length * hoursPerDay * totalWorkingDays;
+  const need = (plan) => (plan && totalWorkingDays > 0 ? roundTo(plan / (hoursPerDay * totalWorkingDays * prod), 1) : null);
+  const headcount = {
+    people: people.length, hoursPerDay, workingDays: totalWorkingDays, capacity,
+    loadMedium: tiers?.medium && capacity > 0 ? roundTo(tiers.medium / capacity, 4) : null,
+    loadAspiration: tiers?.aspiration && capacity > 0 ? roundTo(tiers.aspiration / capacity, 4) : null,
+    needMedium: need(tiers?.medium), needAspiration: need(tiers?.aspiration),
+  };
+
+  let remainingSoldHours = 0;
+  for (const order of orders) {
+    if (!isAlive(order) || isCompleted(order) || !isCommercialOrder(order)) continue;
+    const deadline = day(order.deadline);
+    if (!deadline || deadline < from || deadline > to) continue;
+    if (String(order.status || '') === 'draft' && (!order.payment_status || order.payment_status === 'not_sent')) continue;
+    remainingSoldHours += Math.max(0, num(order.total_hours_plan) - sumHours(entriesByOrder.get(String(order.id)) || []));
+  }
+  let remainingWorkingDays = 0;
+  if (until && until < to) {
+    const next = parseYmd(until);
+    next.setUTCDate(next.getUTCDate() + 1);
+    remainingWorkingDays = workingDays(ymd(next), to, holidays);
+  }
+  const remainingCapacity = Math.round(people.length * hoursPerDay * remainingWorkingDays * prod);
+  const outlook = {
+    remainingSoldHours: roundTo(remainingSoldHours, 2), remainingWorkingDays, remainingCapacity,
+    deltaPersonDays: hoursPerDay > 0 ? Math.round((remainingCapacity - remainingSoldHours) / hoursPerDay) : 0,
+  };
+  return { people, headcount, outlook };
+}
+```
+
+- [ ] **Step 4: routes/bonuses.js**
+
+В `GET /periods/:period` после цикла по схемам:
+
+```js
+  const first = entries[0] || null;
+  const tiers = first?.output?.thresholds ? { medium: first.output.thresholds.target, aspiration: first.output.thresholds.max } : null;
+  const shopProductivity = first?.quality?.metrics?.find((m) => m.key === 'productivity')?.fact || 1;
+  const people = computeTeamStats({
+    period, today: todayYmd(), orders: legacy.orders, timeEntries: legacy.timeEntries, employees: legacy.employees,
+    settings: legacy.settings, shopProductivity, tiers,
+  });
+```
+
+и добавить `people` в `res.json({ data: { ... } })`. Импортировать `computeTeamStats`.
+
+- [ ] **Step 5: Тест render и реализация в js/bonuses.js**
+
+Тест:
+
+```js
+const { renderPeopleBlock } = require('../js/bonuses.js');
+
+test('renderPeopleBlock: таблица людей, состав, прогноз', () => {
+    const html = renderPeopleBlock({
+        people: [
+            { id: 5, name: 'Женя', workingDays: 40, loggedDays: 40, hours: 360, orderHours: 350, orderShare: 0.972, unmarkedHours: 10, reworkHours: 0, productivity: 1.08, flags: [] },
+            { id: 6, name: 'Тая', workingDays: 40, loggedDays: 31, hours: 280, orderHours: 200, orderShare: 0.714, unmarkedHours: 80, reworkHours: 12, productivity: 0.86, flags: ['timesheet_gaps', 'unmarked', 'slow'] },
+        ],
+        headcount: { people: 4, hoursPerDay: 9, workingDays: 66, capacity: 2376, loadMedium: 0.6364, loadAspiration: 0.7125, needMedium: 2.7, needAspiration: 3.0 },
+        outlook: { remainingSoldHours: 640, remainingWorkingDays: 11, remainingCapacity: 416, deltaPersonDays: -25 },
+    });
+    assert.match(html, /bn-people/);
+    assert.match(html, /Женя/);
+    assert.match(html, /31 из 40/);
+    assert.match(html, /0,86/);
+    assert.match(html, /bn-flag-slow/);
+    assert.match(html, /нужно 2,7/);
+    assert.match(html, /не хватает 25 человеко-дней/);
+});
+```
+
+Реализация (добавить в `js/bonuses.js`, экспортировать):
+
+```js
+function renderPeopleBlock(people) {
+    if (!people) return '';
+    const rows = (people.people || []).map((p) => {
+        const flag = (code) => p.flags.includes(code) ? ` bn-flag-${code}` : '';
+        return `<tr>
+            <td>${bonusesEscape(p.name)}</td>
+            <td class="num${flag('timesheet_gaps')}">${p.loggedDays} из ${p.workingDays}</td>
+            <td class="num">${bonusesNum(p.hours, 1)}</td>
+            <td class="num${flag('unmarked')}">${p.orderShare === null ? '—' : `${Math.round(p.orderShare * 100)}%`}</td>
+            <td class="num">${bonusesNum(p.unmarkedHours, 1)}</td>
+            <td class="num">${bonusesNum(p.reworkHours, 1)}</td>
+            <td class="num${flag('slow')}${flag('fast')}">${p.productivity === null ? '—' : bonusesNum(p.productivity, 2)}</td>
+        </tr>`;
+    }).join('');
+    const h = people.headcount || {};
+    const o = people.outlook || {};
+    const delta = o.deltaPersonDays >= 0 ? `свободно ${o.deltaPersonDays} человеко-дней` : `не хватает ${Math.abs(o.deltaPersonDays)} человеко-дней`;
+    return `<div class="bn-people"><h2 class="bn-h2">Люди</h2>
+        <table class="bn-table"><thead><tr><th>Сотрудник</th><th>Дни с табелем</th><th>Часы</th><th>По заказам</th><th>Без заказа</th><th>Переделки</th><th>Производительность</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="bn-muted">Нет производственных сотрудников</td></tr>'}</tbody></table>
+        <div class="bn-formula">Состав: ${h.people} чел. × ${h.hoursPerDay} ч × ${h.workingDays} дн. = ${bonusesNum(h.capacity)} ч.
+            ${h.loadMedium !== null && h.loadMedium !== undefined ? `Загрузка на medium ${Math.round(h.loadMedium * 100)}%, на aspiration ${Math.round(h.loadAspiration * 100)}%. При текущей производительности нужно ${bonusesNum(h.needMedium, 1)} чел. на medium и ${bonusesNum(h.needAspiration, 1)} на aspiration.` : 'Уровни квартала не заданы.'}</div>
+        <div class="bn-formula">До конца квартала: продано и не сделано ${bonusesNum(o.remainingSoldHours)} ч, мощность ${bonusesNum(o.remainingCapacity)} ч за ${o.remainingWorkingDays} рабочих дней → <b>${delta}</b>.</div>
+    </div>`;
+}
+```
+
+CSS в `BONUSES_CSS`:
+
+```
+.bn-people{margin-top:24px}
+.bn-flag-timesheet_gaps,.bn-flag-unmarked{background:#fff8c5}
+.bn-flag-slow{background:#ffebe9;color:#a40e26;font-weight:600}
+.bn-flag-fast{background:#dafbe1}
+```
+
+Контейнер в `index.html` между `bonuses-cards` и `bonuses-year`: `<div id="bonuses-people"></div>`; в `render()`:
+
+```js
+        document.getElementById('bonuses-people').innerHTML = renderPeopleBlock(this.data?.people);
+```
+
+- [ ] **Step 6: Запустить**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js && cd ../.. && node --test test/bonuses_render.test.js && node tests/bonuses-smoke.js
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add ops/api/src/bonuses/calc.js ops/api/src/routes/bonuses.js js/bonuses.js index.html ops/api/test/bonuses-calc.test.js test/bonuses_render.test.js
+git commit -m "Add people block: per-employee stats, headcount and outlook"
+```
+
+---
+
 ### Task 9: Версия, полный прогон, PR
 
 **Files:**
