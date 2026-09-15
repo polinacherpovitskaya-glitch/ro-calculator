@@ -27,6 +27,7 @@ import vacationsRoute from './routes/vacations.js';
 import payrollRoute from './routes/payroll.js';
 import analyticsRoute from './routes/analytics.js';
 import settingsRoute from './routes/settings.js';
+import bonusesRoute from './routes/bonuses.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
 import compatRoute from './routes/compat.js';
 import { calculatorCors } from './middleware/cors.js';
@@ -66,6 +67,7 @@ export function createServer() {
   app.use('/api/payroll', payrollRoute);
   app.use('/api/analytics', analyticsRoute);
   app.use('/api/settings', settingsRoute);
+  app.use('/api/bonuses', bonusesRoute);
   app.use('/api/compat', compatRoute);
   app.use('/api/storage', storageRoute);
   return app;

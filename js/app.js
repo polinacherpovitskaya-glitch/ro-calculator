@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v452';
+const APP_VERSION = 'v453';
 
 const App = {
     currentPage: 'orders',
@@ -159,6 +159,7 @@ const App = {
         page = this.normalizePageAlias(page);
         if (page === 'bugs') return true;
         if (page === 'leads') return true;
+        if (page === 'bonuses') return this.isOwner();
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
@@ -175,6 +176,14 @@ const App = {
     // Backward-compat: isAdmin = canAccess('settings')
     isAdmin() {
         return this.canAccess('settings');
+    },
+
+    // Владелец: admin без привязки к сотруднику. Только он видит бонусы.
+    isOwner() {
+        if (!this.currentUser) return false;
+        const role = this.currentUser.role === 'admin' || this.currentUser.id === '__admin';
+        const empId = this.currentUser.employee_id;
+        return role && (empId === null || empId === undefined || empId === '');
     },
 
     // Get page permissions for an employee
@@ -1272,6 +1281,7 @@ const App = {
                 // Placeholder page: static HTML inside index.html.
                 // AmoCRM integration will replace this with real lead-listing logic.
                 break;
+            case 'bonuses': Bonuses.load(); break;
             case 'settings': Settings.load(); break;
         }
     },
