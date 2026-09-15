@@ -17,7 +17,7 @@
 - Страница `bonuses` НЕ добавляется в `App.ALL_PAGES` и `App.DEFAULT_PAGES`; доступ только через `App.isOwner()` = `currentUser.role === 'admin' && currentUser.employee_id == null`.
 - Legacy-данные только из `compat_rows` (`orders`, `time_entries`, `employees`, `settings`).
 - Шкала (одна для всего): ниже `min` 0; `min` 0,5; `target` 1,0; `max` 1,5; линейно между; выше `max` 1,5. Для выпуска `min/target/max` = base / medium / aspiration.
-- Сумма квартала = `output_hours × rate × A_level × quality`, где `A_level = 0,7 × A_output + 0,3 × A_cash` (без плана/факта денег `A_level = A_output`), `quality = 0,5 × A_prod + 0,3 × A_ontime + 0,2 × A_rework`. Округление до рубля.
+- Сумма квартала = `output_hours × rate × A_level × quality`, где `A_level = 0,7 × A_output + 0,3 × A_cash` (без плана/факта денег `A_level = A_output`), `quality = Σ вес × A` по `quality_json.weights`; веса по умолчанию `productivity: 1, on_time_share: 0, rework_share: 0` (срок и переделки считаются и показываются как информация). Округление до рубля.
 - Факт денег квартала = «Поступления» по направлению Recycle Object в Финтабло, вводится владельцем (`bonus_team_facts`, `source = manual`).
 - Пустой табель по завершённым заказам: `A_prod = 0,5` и предупреждение `no_timesheet`. Нет заказов с дедлайном: `A_ontime = 1`, предупреждение `no_deadline_orders`. Нет часов периода: `A_rework = 1`, предупреждение `no_period_hours`.
 - Коммерческий заказ = `production_purpose` не `rework` и не `stock_sample`, статус не `cancelled`/`deleted`, нет `deleted_at`.
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS bonus_schemes (
   kind            TEXT NOT NULL CHECK (kind IN ('production', 'commercial')),
   period_type     TEXT NOT NULL DEFAULT 'quarter' CHECK (period_type = 'quarter'),
   rates_json      JSONB NOT NULL DEFAULT '{"rate":0}'::jsonb,
-  quality_json    JSONB NOT NULL DEFAULT '{"weights":{"productivity":0.5,"on_time_share":0.3,"rework_share":0.2}}'::jsonb,
+  quality_json    JSONB NOT NULL DEFAULT '{"weights":{"productivity":1,"on_time_share":0,"rework_share":0}}'::jsonb,
   ladder_json     JSONB NOT NULL DEFAULT '{"below_min":0,"min":0.5,"target":1,"max":1.5}'::jsonb,
   is_active       BOOLEAN NOT NULL DEFAULT TRUE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -482,7 +482,9 @@ cd ops/api && node --test test/bonuses-calc.test.js
 
 export const DEFAULT_LADDER = { below_min: 0, min: 0.5, target: 1, max: 1.5 };
 
-export const DEFAULT_QUALITY_WEIGHTS = { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 };
+// По умолчанию в деньги входит только производительность; срок и переделки
+// считаются и показываются, вес 0. Включаются через quality_json.weights.
+export const DEFAULT_QUALITY_WEIGHTS = { productivity: 1, on_time_share: 0, rework_share: 0 };
 
 export const DEFAULT_QUALITY_THRESHOLDS = {
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
@@ -639,7 +641,7 @@ function specFixture() {
   return { orders, timeEntries };
 }
 
-test('computeProductionPeriod: проверочный пример спеки даёт 153 073 ₽', () => {
+test('computeProductionPeriod: веса 0.5/0.3/0.2 дают 153 073 ₽ без плана по деньгам', () => {
   const { orders, timeEntries } = specFixture();
   const result = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
@@ -650,6 +652,20 @@ test('computeProductionPeriod: проверочный пример спеки д
   assert.ok(Math.abs(result.output.rateApplied - 82.87) < 0.01);
   assert.ok(Math.abs(result.quality.multiplier - 1.1917) < 0.001);
   assert.ok(Math.abs(result.amountComputed - 153073) <= 2);
+});
+
+test('computeProductionPeriod: веса по умолчанию = только производительность', () => {
+  const { orders, timeEntries } = specFixture();
+  const defaultScheme = { ...scheme, quality_json: {} };
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: defaultScheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(),
+  });
+  assert.ok(Math.abs(result.quality.multiplier - 1.1667) < 0.001);
+  const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
+  assert.equal(onTime.weight, 0);
+  assert.ok(Math.abs(onTime.achievement - 1.25) < 0.001);
+  assert.ok(Math.abs(result.amountComputed - 130674) <= 2);
 });
 
 test('computeProductionPeriod: склад, предупреждения, границы периода', () => {
@@ -918,7 +934,7 @@ export function computeProductionPeriod(input) {
     const ach = available ? achievement(fact, thresholds, QUALITY_DIRECTIONS[key], ladder) : fallback;
     const weight = num(weights[key]);
     multiplier += weight * ach;
-    return { key, label: METRIC_LABELS[key], direction: QUALITY_DIRECTIONS[key], weight, thresholds, fact, achievement: roundTo(ach, 4), available };
+    return { key, label: METRIC_LABELS[key], direction: QUALITY_DIRECTIONS[key], weight, thresholds, fact, achievement: roundTo(ach, 4), available, informational: weight === 0 };
   });
   multiplier = roundTo(multiplier, 4);
 
@@ -1097,7 +1113,7 @@ git commit -m "Add annual top-up to the year level"
 ```js
 import { DEFAULT_LEVEL_WEIGHTS } from '../src/bonuses/calc.js';
 
-test('уровень квартала = 0.7 × часы + 0.3 × деньги; пример спеки даёт 133 474 ₽', () => {
+test('уровень квартала = 0.7 × часы + 0.3 × деньги; с весами 0.5/0.3/0.2 даёт 133 474 ₽', () => {
   const { orders, timeEntries } = specFixture();
   const result = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
@@ -2030,6 +2046,8 @@ test('renderQualityRow: доступный и недоступный показ�
     const none = renderQualityRow({ key: 'productivity', label: 'Производительность', direction: 'higher', weight: 0.5, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: null, achievement: 0.5, available: false });
     assert.match(none, /нет данных/);
     assert.match(none, /50%/);
+    const info = renderQualityRow({ key: 'rework_share', label: 'Переделки', direction: 'lower', weight: 0, thresholds: { min: 0.08, target: 0.05, max: 0.02 }, fact: 0.01, achievement: 1.5, available: true });
+    assert.match(info, /информация, в деньги не входит/);
 });
 
 test('renderBonusCard: формула, итог, детали под карточкой', () => {
@@ -2283,7 +2301,7 @@ function renderQualityRow(metric) {
     const weightPct = Math.round((Number(metric.weight) || 0) * 100);
     const fact = metric.available ? bonusesEscape(formatMetricValue(metric.key, metric.fact)) : '<span class="bn-muted">нет данных</span>';
     return `<div class="bn-row" data-metric="${bonusesEscape(metric.key)}">
-        <div class="bn-label">${bonusesEscape(metric.label)}<span>вес ${weightPct}%${metric.direction === 'lower' ? ' · меньше лучше' : ''}</span></div>
+        <div class="bn-label">${bonusesEscape(metric.label)}<span>${weightPct === 0 ? 'информация, в деньги не входит' : `вес ${weightPct}%`}${metric.direction === 'lower' ? ' · меньше лучше' : ''}</span></div>
         ${renderLevelBar(metric.thresholds, metric.available ? metric.fact : null, metric.direction, metric.key, metric.achievement)}
         <div class="bn-fact">${fact}</div>
         <div class="bn-ach">${Math.round((Number(metric.achievement) || 0) * 100)}%</div>
