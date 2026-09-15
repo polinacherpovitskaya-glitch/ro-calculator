@@ -82,7 +82,19 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
     assert.match(html, /Производительность/);
-    assert.doesNotMatch(html, /В срок/, 'строки с весом 0 на карточке не показываются');
+    assert.doesNotMatch(html, /data-metric="on_time_share"/, 'строки с весом 0 на карточке не показываются');
+    assert.match(html, /к выплате за квартал/);
+});
+
+test('renderBonusCard: без целей вместо суммы прочерк и подсказка', () => {
+    const html = renderBonusCard({
+        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: null,
+        output: { fact: 0, thresholds: null, thresholdsEffective: null, soldHours: null, achievement: null, rateApplied: 0, forecast: null, forecastAchievement: null, forecastAmount: null },
+        money: { fact: null, thresholds: null, achievement: null, blend: null },
+        quality: { multiplier: 0, metrics: [] }, amountComputed: 0, amountFinal: null, warnings: [], orders: [], adjustments: [], targetsDrift: false, hasTargets: false,
+    });
+    assert.match(html, /задайте цели квартала/);
+    assert.doesNotMatch(html, /0 ₽<small>/);
 });
 
 test('renderWarnings', () => {
