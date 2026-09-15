@@ -68,7 +68,10 @@ test('renderBonusCard: формула, итог, детали под карто�
         schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: 1.105,
         output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 1330, target: 1512, max: 1693 }, soldHours: 1600, achievement: 1.105, rateApplied: 82.87, forecast: null, forecastAchievement: null, forecastAmount: null },
         money: { fact: null, thresholds: null, achievement: null, blend: null },
-        quality: { multiplier: 1.1917, metrics: [] },
+        quality: { multiplier: 1.1917, metrics: [
+            { key: 'productivity', label: 'Производительность', direction: 'higher', weight: 1, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: 1.05, achievement: 1.1667, available: true },
+            { key: 'on_time_share', label: 'В срок', direction: 'higher', weight: 0, thresholds: { min: 0.7, target: 0.85, max: 0.95 }, fact: 0.9, achievement: 1.25, available: true },
+        ] },
         amountComputed: 153073, amountFinal: null, warnings: [],
         orders: [{ id: 1, name: 'Заказ', purpose: 'commercial', hoursPlan: 10, hoursFact: 9, deadline: '2026-09-20', completedAt: '2026-09-10', estimated: false, onTime: true, approved: null, included: true }],
         adjustments: [], targetsDrift: false, hasTargets: true,
@@ -78,6 +81,8 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(html, /1 550 ч × 82,87 ₽ × 1,19/);
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
+    assert.match(html, /Производительность/);
+    assert.doesNotMatch(html, /В срок/, 'строки с весом 0 на карточке не показываются');
 });
 
 test('renderWarnings', () => {

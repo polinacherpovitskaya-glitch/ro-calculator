@@ -256,7 +256,7 @@ function renderBonusCard(entry, options = {}) {
         ${noTargets}${drift}
         ${renderOutputRow(output, entry.rate)}
         ${renderLevelRow(entry)}
-        ${(quality.metrics || []).map(renderQualityRow).join('')}
+        ${(quality.metrics || []).filter((m) => Number(m.weight) > 0).map(renderQualityRow).join('')}
         <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
         ${formula}
         ${renderWarnings(entry.warnings)}
