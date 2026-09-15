@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { readCompatRows as readRows } from '../compat-rows.js';
 import { getPool, withTransaction } from '../db.js';
 import { withIdempotency } from '../idempotency.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -162,16 +163,6 @@ function redactSettingsRows(table, rows) {
   });
 }
 
-async function readRows(client, table, lock = false) {
-  const { rows } = await client.query(
-    `SELECT data
-       FROM compat_rows
-      WHERE table_name = $1
-      ORDER BY source_id${lock ? ' FOR UPDATE' : ''}`,
-    [table],
-  );
-  return rows.map((row) => row.data);
-}
 
 function nextNumericId(rows) {
   let maximum = 0;
@@ -220,6 +211,14 @@ function parseJsonObjectSnapshot(value) {
     }
   }
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? cloneRow(parsed) : {};
+}
+
+// Первый переход заказа в completed фиксирует дату завершения; потом не трогаем.
+export function stampCompletedAt(row, previous, nowIso) {
+  if (!row || String(row.status || '').trim().toLowerCase() !== 'completed') return row;
+  if (row.completed_at) return row;
+  row.completed_at = previous?.completed_at || nowIso;
+  return row;
 }
 
 function syncOrderStatusSnapshot(calculatorData, status, updatedAt) {
@@ -294,6 +293,7 @@ export async function executeAtomicOrderSave(client, body) {
     }
   }
   savedOrder.updated_at = incomingOrder.updated_at || nowIso;
+  stampCompletedAt(savedOrder, existingOrder, nowIso);
   savedOrder.calculator_data = syncOrderStatusSnapshot(
     savedOrder.calculator_data,
     savedOrder.status || 'draft',
@@ -419,6 +419,7 @@ async function executeMutation(req, client, table, primaryKey, body) {
     for (let index = 0; index < matchedRows.length; index += 1) {
       const current = matchedRows[index];
       const next = protectedRows[index];
+      if (table === 'orders') stampCompletedAt(next, current, new Date().toISOString());
       await writeRow(client, table, primaryKey, next, sourceId(current, primaryKey));
       changed.push(next);
     }
@@ -439,6 +440,7 @@ async function executeMutation(req, client, table, primaryKey, body) {
       if (body.action === 'upsert' && conflictIndex >= 0) {
         const current = rows[conflictIndex];
         const next = { ...current, ...incoming };
+        if (table === 'orders') stampCompletedAt(next, current, new Date().toISOString());
         await writeRow(client, table, primaryKey, next, sourceId(current, primaryKey));
         rows[conflictIndex] = next;
         changed.push(next);
@@ -449,6 +451,7 @@ async function executeMutation(req, client, table, primaryKey, body) {
       if (rows.some((row) => sourceId(row, primaryKey) === id)) {
         throw new CompatError(409, '23505', 'Строка с таким первичным ключом уже существует');
       }
+      if (table === 'orders') stampCompletedAt(incoming, null, new Date().toISOString());
       await writeRow(client, table, primaryKey, incoming);
       rows.push(incoming);
       changed.push(incoming);

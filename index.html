@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=432">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v452';
+        const CURRENT_HTML_VERSION = 'v453';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v452</span></span>
+            <span>Калькулятор <span id="app-version">v453</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -254,6 +254,10 @@
             <a href="#bugs" data-page="bugs">
                 <span class="nav-icon">&#128027;</span>
                 <span>Баги</span>
+            </a>
+            <a href="#bonuses" data-page="bonuses">
+                <span class="nav-icon">&#9733;</span>
+                <span>Бонусы</span>
             </a>
             <a href="#settings" data-page="settings">
                 <span class="nav-icon">&#9881;</span>
@@ -2802,6 +2806,19 @@
         </div>
 
         <!-- ========== SETTINGS ========== -->
+        <div class="page" id="page-bonuses">
+            <div class="bn-page">
+                <div class="bn-toolbar">
+                    <h1 class="bn-title">Бонусы</h1>
+                    <div class="bn-periods" id="bonuses-periods"></div>
+                </div>
+                <div id="bonuses-team"></div>
+                <div id="bonuses-cards" class="bn-cards"></div>
+                <div id="bonuses-people"></div>
+                <div id="bonuses-year" class="bn-year"></div>
+                <div id="bonuses-history" class="bn-history"></div>
+            </div>
+        </div>
         <div id="page-settings" class="page">
             <div class="page-header">
                 <h1>Настройки</h1>
@@ -3632,7 +3649,7 @@
 <script src="js/supabase.js?v=452"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=452"></script>
-<script src="js/app.js?v=452"></script>
+<script src="js/app.js?v=453"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=439"></script>
 <script src="js/orders.js?v=439"></script>
@@ -3652,6 +3669,7 @@
 <script src="js/indirect_costs.js?v=9"></script>
 <script src="js/factual.js?v=95"></script>
 <script src="js/production_load.js?v=408"></script>
+<script src="js/bonuses.js?v=1"></script>
 <script src="js/china.js?v=165"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
