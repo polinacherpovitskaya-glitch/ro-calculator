@@ -2,8 +2,30 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const {
     bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatMetricValue, renderOutputRow, renderLevelRow, renderQualityRow,
-    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock,
+    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary,
 } = require('../js/bonuses.js');
+
+test('renderSummary: одна фраза, сколько и почему', () => {
+    const html = renderSummary({
+        hasTargets: true, rate: 75, level: 1.105, amountComputed: 149861,
+        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 82.87, forecastAmount: 160000 },
+        money: { fact: 14400000, achievement: 0.6333, blend: 0.9635 },
+        quality: { multiplier: 1.1667, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
+    });
+    assert.match(html, /Сейчас к выплате 149 861 ₽/);
+    assert.match(html, /1 550 ч нормо-часов, это между medium и aspiration \(1 512 ч и 1 693 ч\)/);
+    assert.match(html, /вниз не тянут/);
+    assert.match(html, /Производительность 1,05/);
+    assert.match(html, /82,87 ₽ за час × 1 550 ч × 1,17 = 149 861 ₽/);
+    assert.match(html, /около 160 000 ₽/);
+    const lifted = renderSummary({
+        hasTargets: true, rate: 75, level: 1.2235, amountComputed: 1,
+        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 91.76, forecastAmount: null },
+        money: { fact: 17000000, achievement: 1.5, blend: 1.2235 }, quality: { multiplier: 1, metrics: [] },
+    });
+    assert.match(lifted, /поднимают уровень квартала до 1,22/);
+    assert.match(renderSummary({ hasTargets: false }), /Цели квартала ещё не заданы/);
+});
 
 test('bonusesCurrentPeriod и bonusesPeriodOptions', () => {
     assert.equal(bonusesCurrentPeriod(new Date(2026, 8, 15)), '2026-Q3');

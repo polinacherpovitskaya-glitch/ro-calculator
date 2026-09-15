@@ -1,7 +1,10 @@
 // Чистые функции расчёта бонусов. Без БД и без Express.
 // Спека: docs/specs/2026-09-09-bonuses-production-manager.md
 
-export const DEFAULT_LADDER = { below_min: 0, min: 0.5, target: 1, max: 1.5 };
+// Ниже base четверть ставки (что-то платится всегда), base половина, medium
+// единица, aspiration полторы, выше aspiration рост продолжается тем же
+// шагом до потолка cap.
+export const DEFAULT_LADDER = { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 };
 
 // По умолчанию в деньги входит только производительность; срок и переделки
 // считаются и показываются, вес 0. Включаются через quality_json.weights.
@@ -90,10 +93,16 @@ export function achievement(fact, thresholds, direction = 'higher', ladder = DEF
   const a = Number(thresholds.min) * sign;
   const b = Number(thresholds.target) * sign;
   const c = Number(thresholds.max) * sign;
+  const lMin = Number(ladder.min);
+  const lTarget = Number(ladder.target);
+  const lMax = Number(ladder.max);
+  const cap = ladder.cap === undefined || ladder.cap === null ? lMax : Number(ladder.cap);
   if (x < a) return Number(ladder.below_min);
-  if (x >= c) return Number(ladder.max);
-  if (x < b) return b === a ? Number(ladder.min) : lerp(Number(ladder.min), Number(ladder.target), (x - a) / (b - a));
-  return c === b ? Number(ladder.target) : lerp(Number(ladder.target), Number(ladder.max), (x - b) / (c - b));
+  if (x < b) return b === a ? lMin : lerp(lMin, lTarget, (x - a) / (b - a));
+  if (x < c) return c === b ? lTarget : lerp(lTarget, lMax, (x - b) / (c - b));
+  if (c === b) return Math.min(cap, lMax);
+  // Выше aspiration: тот же наклон, что между medium и aspiration, до потолка.
+  return Math.min(cap, lMax + (lMax - lTarget) * ((x - c) / (c - b)));
 }
 
 const NON_COMMERCIAL = new Set(['rework', 'stock_sample']);

@@ -33,6 +33,7 @@ const BONUSES_CSS = `
 .bn-ach span{display:block;font-size:13px;color:#57606a}
 .bn-formula{margin-top:8px;padding:10px 14px;background:#f6f8fa;border-radius:8px;font-size:17px;font-variant-numeric:tabular-nums}
 .bn-level{background:#eef6ff;border-radius:8px;padding:8px 14px;font-size:16px;margin:6px 0 4px;font-variant-numeric:tabular-nums}
+.bn-summary{font-size:18px;line-height:1.5;margin:4px 0 12px;max-width:80ch}
 .bn-muted{color:#57606a}
 .bn-warnings{margin-top:12px;padding:10px 14px;background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;font-size:15px}
 .bn-warnings li{margin:2px 0}
@@ -222,6 +223,34 @@ function renderOrdersTable(entry) {
     </tr></thead><tbody>${rows || '<tr><td colspan="7" class="bn-muted">Завершённых заказов в периоде нет</td></tr>'}</tbody></table>`;
 }
 
+// Одна фраза: сколько к выплате и почему. Для Лёши это главное на странице.
+function renderSummary(entry) {
+    if (!entry.hasTargets) return '<div class="bn-summary bn-muted">Цели квартала ещё не заданы, расчёта пока нет.</div>';
+    const o = entry.output || {};
+    const q = entry.quality || {};
+    const thr = o.thresholdsEffective || o.thresholds || {};
+    const outA = o.achievement;
+    const prod = (q.metrics || []).find((m) => m.key === 'productivity');
+    let levelText;
+    if (outA === null || outA === undefined) levelText = 'уровень пока не считается';
+    else if (outA < 0.5) levelText = `это ниже base (${bonusesEscape(formatHours(thr.min))}), уровень ${bonusesNum(outA, 2)}, платится четверть ставки`;
+    else if (outA < 1) levelText = `это между base и medium (${bonusesEscape(formatHours(thr.min))} и ${bonusesEscape(formatHours(thr.target))}), уровень ${bonusesNum(outA, 2)}`;
+    else if (outA < 1.5) levelText = `это между medium и aspiration (${bonusesEscape(formatHours(thr.target))} и ${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
+    else levelText = `это выше aspiration (${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
+    let moneyText = '';
+    if (entry.money && entry.money.achievement !== null && entry.money.achievement !== undefined) {
+        const lifted = entry.level !== null && entry.level > outA + 0.0001;
+        moneyText = ` Деньги компании ${bonusesEscape(formatMoney(entry.money.fact))} дают уровень ${bonusesNum(entry.money.achievement, 2)}${lifted ? `, они поднимают уровень квартала до ${bonusesNum(entry.level, 2)}` : ', они ниже часов и вниз не тянут'}.`;
+    }
+    const prodText = prod
+        ? (prod.available
+            ? ` Производительность ${bonusesNum(prod.fact, 2)} (норма к табелю) даёт множитель ${bonusesNum(q.multiplier, 2)}.`
+            : ` Табеля по заказам нет, множитель взят по минимуму ${bonusesNum(q.multiplier, 2)}.`)
+        : '';
+    const forecast = o.forecastAmount ? ` Если темп сохранится, к концу квартала будет около ${formatRub(o.forecastAmount)}.` : '';
+    return `<div class="bn-summary"><b>Сейчас к выплате ${formatRub(entry.amountComputed)}.</b> Цех сделал ${bonusesEscape(formatHours(o.fact))} нормо-часов, ${levelText}.${moneyText}${prodText} Итого ставка ${bonusesNum(o.rateApplied, 2)} ₽ за час × ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(q.multiplier, 2)} = ${formatRub(entry.amountComputed)}.${forecast}</div>`;
+}
+
 function renderBonusCard(entry, options = {}) {
     const expanded = options.expanded === true;
     const open = entry.resultStatus === 'open';
@@ -259,13 +288,14 @@ function renderBonusCard(entry, options = {}) {
             <div class="bn-status">производство · ставка ${bonusesNum(entry.rate)} ₽ за нормо-час на уровне medium · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
             <div class="bn-total"><small>${totalLabel}</small>${total}</div>
         </div>
+        ${renderSummary(entry)}
         ${noTargets}${drift}
         ${renderOutputRow(output, entry.rate)}
-        ${renderLevelRow(entry)}
+        ${expanded ? `${renderLevelRow(entry)}
         ${(quality.metrics || []).filter((m) => Number(m.weight) > 0).map(renderQualityRow).join('')}
         <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
         ${formula}
-        ${renderWarnings(entry.warnings)}
+        ${renderWarnings(entry.warnings)}` : ((entry.warnings || []).length ? `<div class="bn-muted" style="margin-top:8px">Предупреждений: ${entry.warnings.length}, см. «Детали».</div>` : '')}
         ${actions}
         ${details}
     </div>`;
@@ -474,7 +504,7 @@ const Bonuses = {
         const box = this.dialog(`<h2 class="bn-h2">Схема производства</h2>
             <label>Сотрудник</label><select id="bn-scheme-employee" ${employeeId ? 'disabled' : ''}>${options}</select>
             <label>Ставка за нормо-час на уровне medium, ₽</label><input id="bn-scheme-rate" type="number" value="${current ? current.rate : 75}">
-            <div class="bn-muted" style="margin-top:6px">base = ставка × 0,5; aspiration = ставка × 1,5; ниже base 0</div>
+            <div class="bn-muted" style="margin-top:6px">ниже base ставка × 0,25; base × 0,5; medium × 1; aspiration × 1,5; выше aspiration растёт дальше до × 2</div>
             <div class="bn-actions"><button class="bn-btn primary" id="bn-scheme-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
         box.querySelector('#bn-scheme-save').addEventListener('click', async () => {
             try {
@@ -565,6 +595,6 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatHours, formatMoney, formatMetricValue,
         renderLevelBar, renderOutputRow, renderLevelRow, renderQualityRow, renderBonusCard, renderWarnings,
-        renderTeamBlock, renderPeopleBlock, renderHistory, renderYear,
+        renderTeamBlock, renderPeopleBlock, renderHistory, renderYear, renderSummary,
     };
 }
