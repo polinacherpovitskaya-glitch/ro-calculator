@@ -227,9 +227,15 @@ function renderBonusCard(entry, options = {}) {
     const open = entry.resultStatus === 'open';
     const output = entry.output || {};
     const quality = entry.quality || { multiplier: 0, metrics: [] };
-    const total = entry.amountFinal !== null && entry.amountFinal !== undefined && Number(entry.amountFinal) !== Number(entry.amountComputed)
-        ? `${formatRub(entry.amountFinal)}<small>расчёт ${formatRub(entry.amountComputed)}</small>`
-        : `${formatRub(entry.amountComputed)}${output.forecastAmount ? `<small>прогноз ${formatRub(output.forecastAmount)}</small>` : ''}`;
+    let total;
+    if (!entry.hasTargets) {
+        total = '—<small>задайте цели квартала</small>';
+    } else if (entry.amountFinal !== null && entry.amountFinal !== undefined && Number(entry.amountFinal) !== Number(entry.amountComputed)) {
+        total = `${formatRub(entry.amountFinal)}<small>расчёт ${formatRub(entry.amountComputed)}</small>`;
+    } else {
+        total = `${formatRub(entry.amountComputed)}${output.forecastAmount ? `<small>прогноз ${formatRub(output.forecastAmount)}</small>` : ''}`;
+    }
+    const totalLabel = entry.resultStatus === 'paid' ? 'выплачено за квартал' : (entry.resultStatus === 'closed' ? 'к выплате за квартал, зафиксировано' : 'к выплате за квартал');
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';
     const formula = entry.hasTargets
@@ -251,12 +257,12 @@ function renderBonusCard(entry, options = {}) {
         <div class="bn-card-head">
             <div><div class="bn-name">${bonusesEscape(entry.employeeName || `Схема #${entry.schemeId}`)}</div>
             <div class="bn-status">производство · ставка ${bonusesNum(entry.rate)} ₽ за нормо-час на уровне medium · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
-            <div class="bn-total">${total}</div>
+            <div class="bn-total"><small>${totalLabel}</small>${total}</div>
         </div>
         ${noTargets}${drift}
         ${renderOutputRow(output, entry.rate)}
         ${renderLevelRow(entry)}
-        ${(quality.metrics || []).map(renderQualityRow).join('')}
+        ${(quality.metrics || []).filter((m) => Number(m.weight) > 0).map(renderQualityRow).join('')}
         <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
         ${formula}
         ${renderWarnings(entry.warnings)}
