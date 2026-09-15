@@ -136,7 +136,7 @@ function renderOutputRow(output, rate) {
         ? `<span>прогноз ${bonusesEscape(formatHours(output.forecast))}, если темп сохранится</span>`
         : '';
     const scaled = output.thresholdsEffective && output.thresholds && output.thresholdsEffective.target !== output.thresholds.target
-        ? `<span>продано ${bonusesEscape(formatHours(output.soldHours))} из плана ${bonusesEscape(formatHours(output.thresholds.target))}, уровни пересчитаны</span>`
+        ? `<span>продано ${bonusesEscape(formatHours(output.soldHours))} из плана ${bonusesEscape(formatHours(output.thresholds.target))}: планки от проданного, но не выше medium</span>`
         : '<span>base / medium / aspiration</span>';
     const level = output.achievement === null || output.achievement === undefined ? '—' : bonusesNum(output.achievement, 2);
     return `<div class="bn-row bn-output">
@@ -235,6 +235,7 @@ function renderSummary(entry) {
     if (outA === null || outA === undefined) levelText = 'уровень пока не считается';
     else if (outA < 0.5) levelText = `это ниже base (${bonusesEscape(formatHours(thr.min))}), уровень ${bonusesNum(outA, 2)}, платится четверть ставки`;
     else if (outA < 1) levelText = `это между base и medium (${bonusesEscape(formatHours(thr.min))} и ${bonusesEscape(formatHours(thr.target))}), уровень ${bonusesNum(outA, 2)}`;
+    else if (o.scaledCapped) levelText = `продано на квартал только ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано, поэтому уровень medium (1,00) и полная ставка; выше medium уровень растёт только от настоящего плана`;
     else if (outA < 1.5) levelText = `это между medium и aspiration (${bonusesEscape(formatHours(thr.target))} и ${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
     else levelText = `это выше aspiration (${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
     let moneyText = '';

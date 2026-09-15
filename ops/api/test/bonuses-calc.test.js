@@ -159,6 +159,33 @@ test('уровни от проданного: продано меньше пла
   assert.equal(result.amountComputed, Math.round(900 * 75 * 1 * 1.0));
 });
 
+test('уровни от проданного: выше проданного, но ниже плана → не выше medium', () => {
+  // Продано 1044 из плана 1512, сделано 1173 (как в Q3 2026): по пересчитанным
+  // планкам это выше aspiration, но реального плана нет → уровень 1.0, ставка 75.
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1173, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1173, order_id: 1 }];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: {} }, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(), soldHours: 1044,
+  });
+  assert.deepEqual(result.output.thresholdsEffective, { min: 918, target: 1044, max: 1169 });
+  assert.equal(result.output.achievement, 1);
+  assert.equal(result.output.scaledCapped, true);
+  assert.equal(result.output.rateApplied, 75);
+  assert.equal(result.amountComputed, Math.round(1173 * 75 * 1));
+});
+
+test('уровни от проданного: сделано больше реального плана → считается от плана', () => {
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1600, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1600, order_id: 1 }];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: {} }, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(), soldHours: 1044,
+  });
+  assert.ok(Math.abs(result.output.achievement - (1 + 0.5 * (1600 - 1512) / (1693 - 1512))) < 0.001);
+  assert.equal(result.output.scaledCapped, false);
+});
+
 test('soldHoursForPeriod: дедлайн в периоде, живые, не черновики без счёта', () => {
   const orders = [
     { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-09-20' },

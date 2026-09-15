@@ -295,11 +295,16 @@ export function computeProductionPeriod(input) {
     }
   }
 
-  // Выпуск и уровень. Если продано меньше плана medium, уровни масштабируются:
-  // цех не может сделать больше, чем продано.
+  // Выпуск и уровень. Если продано меньше плана medium, уровни масштабируются
+  // от проданного: цех не может сделать больше, чем продано, и не виноват в
+  // недоборе. Но пересчёт может поднять уровень только до medium (полная
+  // ставка); выше medium уровень считается только от настоящего плана.
   const planThresholds = targets?.output_hours || null;
   const sold = soldHours === null || soldHours === undefined ? null : num(soldHours);
+  const outputFact = roundTo(outputHours, 2);
   let outputThresholds = planThresholds;
+  let outputAch = planThresholds ? achievement(outputFact, planThresholds, 'higher', ladder) : null;
+  let scaledCapped = false;
   if (planThresholds && sold !== null && num(planThresholds.target) > 0 && sold < num(planThresholds.target)) {
     const scale = sold / num(planThresholds.target);
     outputThresholds = {
@@ -308,9 +313,13 @@ export function computeProductionPeriod(input) {
       max: Math.round(num(planThresholds.max) * scale),
     };
     warnings.push({ code: 'sold_below_plan', count: 0, hours: roundTo(sold, 2), orderIds: [] });
+    if (outputAch !== null && outputAch < Number(ladder.target)) {
+      const scaledAch = achievement(outputFact, outputThresholds, 'higher', ladder);
+      const capped = Math.min(Number(ladder.target), scaledAch);
+      scaledCapped = scaledAch > Number(ladder.target);
+      outputAch = Math.max(outputAch, capped);
+    }
   }
-  const outputFact = roundTo(outputHours, 2);
-  const outputAch = outputThresholds ? achievement(outputFact, outputThresholds, 'higher', ladder) : null;
 
   // Деньги компании: только поднимают уровень.
   const moneyThresholds = teamMoney?.thresholds || null;
@@ -373,7 +382,11 @@ export function computeProductionPeriod(input) {
   let forecastAmount = null;
   if (status === 'open' && share > 0 && share < 1 && outputThresholds) {
     forecast = roundTo(outputFact / share, 0);
-    forecastAchievement = roundTo(achievement(forecast, outputThresholds, 'higher', ladder), 4);
+    let fAch = achievement(forecast, planThresholds, 'higher', ladder);
+    if (outputThresholds !== planThresholds && fAch < Number(ladder.target)) {
+      fAch = Math.max(fAch, Math.min(Number(ladder.target), achievement(forecast, outputThresholds, 'higher', ladder)));
+    }
+    forecastAchievement = roundTo(fAch, 4);
     forecastLevel = moneyAch === null
       ? forecastAchievement
       : roundTo(Math.max(forecastAchievement, num(levelWeights.output) * forecastAchievement + num(levelWeights.money) * moneyAch), 4);
@@ -384,7 +397,7 @@ export function computeProductionPeriod(input) {
     period, schemeId: scheme.id, employeeId: scheme.employee_id, status, rate,
     level: level === null ? null : roundTo(level, 4),
     output: {
-      fact: outputFact, thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold,
+      fact: outputFact, thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold, scaledCapped,
       achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
       forecast, forecastAchievement, forecastLevel, forecastAmount,
     },
