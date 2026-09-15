@@ -119,15 +119,37 @@ function parseFintabloDate(value) {
     return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
 }
 
+// Направление и все его поднаправления (в отчёте Финтабло они сворачиваются в
+// колонку родителя, а операции привязаны к листьям).
+export function directionTreeIds(directions, rootId) {
+    const ids = new Set([String(rootId)]);
+    let grew = true;
+    while (grew) {
+        grew = false;
+        for (const d of directions) {
+            const parent = String(d?.parentId ?? '');
+            const id = String(d?.id ?? '');
+            if (id && !ids.has(id) && ids.has(parent)) { ids.add(id); grew = true; }
+        }
+    }
+    return ids;
+}
+
+function isRealParent(value) {
+    const s = String(value ?? '').trim();
+    return s !== '' && s !== '0' && s !== 'null';
+}
+
 // Поступления (group = income) направления по кварталам. Родительские операции,
 // разнесённые на части (parentId у детей), не считаются второй раз.
-export function sumIncomeByQuarter(transactions, directionId) {
-    const parents = new Set(transactions.map((t) => String(t?.parentId || '').trim()).filter(Boolean));
+export function sumIncomeByQuarter(transactions, directionIds) {
+    const wanted = directionIds instanceof Set ? directionIds : new Set([String(directionIds)]);
+    const parents = new Set(transactions.filter((t) => isRealParent(t?.parentId)).map((t) => String(t.parentId).trim()));
     const sums = {};
     for (const t of transactions) {
         if (String(t?.group || '').trim() !== 'income') continue;
         if (t?.isPlan) continue;
-        if (String(t?.directionId ?? '').trim() !== String(directionId)) continue;
+        if (!wanted.has(String(t?.directionId ?? '').trim())) continue;
         if (parents.has(String(t?.id || '').trim())) continue;
         const period = quarterOfDate(parseFintabloDate(t?.date));
         if (!period) continue;
@@ -202,7 +224,9 @@ async function fetchFacts(token, directionName, year, today) {
         dateFrom: toFintabloDate(`${year}-01-01`),
         dateTo: toFintabloDate(today),
     });
-    return { directionId: direction.id, directionName: direction.name, sums: sumIncomeByQuarter(transactions, direction.id), count: transactions.length };
+    const ids = directionTreeIds(directions, direction.id);
+    const names = directions.filter((d) => ids.has(String(d.id))).map((d) => d.name);
+    return { directionId: direction.id, directionName: direction.name, directionIds: [...ids], directionNames: names, sums: sumIncomeByQuarter(transactions, ids), count: transactions.length };
 }
 
 async function postSync(apiUrl, token, payload) {
@@ -232,7 +256,8 @@ export async function main(argv = process.argv, env = process.env) {
         const facts = await fetchFacts(env.FINTABLO_API_KEY, env.FINTABLO_DIRECTION || 'Recycle Object', year, today);
         factsByPeriod = facts.sums;
         note = `Финтабло, поступления «${facts.directionName}», синк ${today}`;
-        console.log(`FinTablo: ${facts.count} операций с начала года, направление ${facts.directionName} (#${facts.directionId})`);
+        console.log(`FinTablo: ${facts.count} операций с начала года, направление ${facts.directionName} (#${facts.directionId}) с поднаправлениями: ${facts.directionNames.join(', ')}`);
+        console.log(`Факт по кварталам: ${JSON.stringify(facts.sums)}`);
     } else {
         console.log('FINTABLO_API_KEY не задан: факт не синкается, только план');
     }
