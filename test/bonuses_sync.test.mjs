@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload } from '../scripts/bonuses-plan-fact-sync.mjs';
+import { parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds } from '../scripts/bonuses-plan-fact-sync.mjs';
 
 const CSV = `2025,,,,,
 ,,,,,
@@ -61,6 +61,26 @@ test('quarterOfDate и sumIncomeByQuarter: только поступления �
     { id: '8', group: 'income', directionId: 7, date: '05.09.2026', value: 400000, parentId: '7' },
   ];
   assert.deepEqual(sumIncomeByQuarter(tx, 7), { '2026-Q3': 1900000.5, '2026-Q4': 250000 });
+  // parentId 0 у Финтабло значит «нет родителя», не должен ничего исключать
+  const flat = [{ id: '10', group: 'income', directionId: 7, date: '10.07.2026', value: 5, parentId: 0 }, { id: '11', group: 'income', directionId: 7, date: '10.07.2026', value: 5, parentId: 0 }];
+  assert.deepEqual(sumIncomeByQuarter(flat, 7), { '2026-Q3': 10 });
+});
+
+test('directionTreeIds: направление с поднаправлениями, как в Финтабло', () => {
+  const directions = [
+    { id: 31970, name: 'Recycle Object', parentId: null },
+    { id: 32024, name: 'Музейные магазины Акрил', parentId: null },
+    { id: 33181, name: 'Интернет магазин Recycle Object', parentId: 31970 },
+    { id: 33999, name: 'Подподнаправление', parentId: 33181 },
+    { id: 33182, name: 'Чужое', parentId: 32024 },
+  ];
+  assert.deepEqual([...directionTreeIds(directions, 31970)].sort(), ['31970', '33181', '33999']);
+  const tx = [
+    { id: '1', group: 'income', directionId: 33181, date: '15.09.2026', value: 1718.2, parentId: 0 },
+    { id: '2', group: 'income', directionId: 31970, date: '15.09.2026', value: 100, parentId: 0 },
+    { id: '3', group: 'income', directionId: 33182, date: '15.09.2026', value: 999, parentId: 0 },
+  ];
+  assert.deepEqual(sumIncomeByQuarter(tx, directionTreeIds(directions, 31970)), { '2026-Q3': 1818.2 });
 });
 
 test('buildPayload', () => {
