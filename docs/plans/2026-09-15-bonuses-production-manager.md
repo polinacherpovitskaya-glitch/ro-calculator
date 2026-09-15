@@ -1219,6 +1219,102 @@ git commit -m "Blend team money plan into production bonus level"
 
 ---
 
+### Task 5c: Пробелы табеля по людям
+
+**Files:**
+- Modify: `ops/api/src/bonuses/calc.js` (`computeProductionPeriod`), `ops/api/src/routes/bonuses.js` (`computeEntry` передаёт `employees`)
+- Test: `ops/api/test/bonuses-calc.test.js`
+
+**Interfaces:**
+- Consumes: `workingDays`, `holidaySet`, legacy `employees` (`{ id, name, role, is_active }`).
+- Produces: вход `computeProductionPeriod` принимает `employees = []`; предупреждение `{ code: 'timesheet_gaps', count: <всего дней>, hours: 0, orderIds: [], byEmployee: [{ id, name, days }] }` для активных сотрудников с `role === 'production'`, у которых есть рабочие дни периода (до `today` включительно) без записей табеля.
+
+- [ ] **Step 1: Тест**
+
+```js
+test('timesheet_gaps: дни без табеля по каждому производственнику', () => {
+  const employees = [
+    { id: 5, name: 'Женя', role: 'production', is_active: true },
+    { id: 6, name: 'Тая', role: 'production', is_active: true },
+    { id: 7, name: 'Аня', role: 'sales', is_active: true },
+    { id: 8, name: 'Бывший', role: 'production', is_active: false },
+  ];
+  // период 2026-Q3, today 2026-07-03 (пт): рабочие дни 1, 2, 3 июля
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-07-01', hours: 9, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-07-02', hours: 9, order_id: 1 },
+    { id: 3, employee_id: 5, date: '2026-07-03', hours: 9, order_id: 1 },
+    { id: 4, employee_id: 6, date: '2026-07-01', hours: 9, order_id: null },
+  ];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-07-03', status: 'open', scheme, targets, orders: [], timeEntries,
+    settings: { production_holidays: '' }, stockApprovals: new Set(), employees,
+  });
+  const gaps = result.warnings.find((w) => w.code === 'timesheet_gaps');
+  assert.equal(gaps.count, 2);
+  assert.deepEqual(gaps.byEmployee, [{ id: 6, name: 'Тая', days: 2 }]);
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться, что падает**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js
+```
+
+- [ ] **Step 3: Реализация**
+
+В `computeProductionPeriod` деструктурировать `employees = []` и после блока предупреждений о часах добавить:
+
+```js
+  const untilYmd = status === 'open' ? (String(today).slice(0, 10) < to ? String(today).slice(0, 10) : to) : to;
+  if (untilYmd >= from) {
+    const daysByEmployee = new Map();
+    for (const entry of timeEntries) {
+      const d = day(entry?.date);
+      if (!d || d < from || d > untilYmd) continue;
+      const key = String(entry.employee_id);
+      if (!daysByEmployee.has(key)) daysByEmployee.set(key, new Set());
+      daysByEmployee.get(key).add(d);
+    }
+    const expectedDays = workingDays(from, untilYmd, holidays);
+    const byEmployee = [];
+    for (const employee of employees) {
+      if (!employee || employee.is_active === false) continue;
+      if (String(employee.role || '').trim().toLowerCase() !== 'production') continue;
+      const logged = daysByEmployee.get(String(employee.id))?.size || 0;
+      const days = Math.max(0, expectedDays - logged);
+      if (days > 0) byEmployee.push({ id: employee.id, name: String(employee.name || ''), days });
+    }
+    if (byEmployee.length) {
+      warnings.push({ code: 'timesheet_gaps', count: byEmployee.reduce((acc, e) => acc + e.days, 0), hours: 0, orderIds: [], byEmployee });
+    }
+  }
+```
+
+В `routes/bonuses.js` в `computeEntry` и в `close` передавать `employees: legacy.employees` в `computeProductionPeriod`.
+
+В `js/bonuses.js` (Task 8) в `BONUSES_WARNING_TEXT` добавить:
+
+```js
+    timesheet_gaps: (w) => `Дни без табеля: ${w.count}. ${(w.byEmployee || []).map((e) => `${bonusesEscape(e.name)}: ${e.days}`).join(', ')}`,
+```
+
+- [ ] **Step 4: Запустить**
+
+```bash
+cd ops/api && node --test test/bonuses-calc.test.js
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ops/api/src/bonuses/calc.js ops/api/src/routes/bonuses.js ops/api/test/bonuses-calc.test.js
+git commit -m "Report timesheet gaps per production employee"
+```
+
+---
+
 ### Task 6: Хранилище, загрузка legacy-данных, маршруты схем и целей
 
 **Files:**
