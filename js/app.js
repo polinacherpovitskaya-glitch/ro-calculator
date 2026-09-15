@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v453';
+const APP_VERSION = 'v454';
 
 const App = {
     currentPage: 'orders',
@@ -178,12 +178,12 @@ const App = {
         return this.canAccess('settings');
     },
 
-    // Владелец: admin без привязки к сотруднику. Только он видит бонусы.
+    // Владелец: тот, у кого есть доступ к «Настройкам». То же правило даёт
+    // роль admin на API (legacyApiRole), поэтому страница и API совпадают.
     isOwner() {
         if (!this.currentUser) return false;
-        const role = this.currentUser.role === 'admin' || this.currentUser.id === '__admin';
-        const empId = this.currentUser.employee_id;
-        return role && (empId === null || empId === undefined || empId === '');
+        if (this.currentUser.id === '__admin' || this.currentUser.role === 'admin') return true;
+        return this.canAccess('settings');
     },
 
     // Get page permissions for an employee
