@@ -235,7 +235,7 @@ function renderSummary(entry) {
     if (outA === null || outA === undefined) levelText = 'уровень пока не считается';
     else if (outA < 0.5) levelText = `это ниже base (${bonusesEscape(formatHours(thr.min))}), уровень ${bonusesNum(outA, 2)}, платится четверть ставки`;
     else if (outA < 1) levelText = `это между base и medium (${bonusesEscape(formatHours(thr.min))} и ${bonusesEscape(formatHours(thr.target))}), уровень ${bonusesNum(outA, 2)}`;
-    else if (o.scaledCapped) levelText = `продано на квартал только ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано, поэтому уровень medium (1,00) и полная ставка; выше medium уровень растёт только от настоящего плана`;
+    else if (o.scaledCapped) levelText = `продано на квартал только ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано, поэтому уровень medium (1,00) и полная ставка. Это защита от недопродажи, а не повод сбавлять темп: каждый новый заказ с дедлайном в квартале поднимает планку, а проданное и не сделанное роняет уровень ниже medium; выше medium уровень растёт только от настоящего плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}`;
     else if (outA < 1.5) levelText = `это между medium и aspiration (${bonusesEscape(formatHours(thr.target))} и ${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
     else levelText = `это выше aspiration (${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
     let moneyText = '';
@@ -249,7 +249,10 @@ function renderSummary(entry) {
             : ` Табеля по заказам нет, множитель взят по минимуму ${bonusesNum(q.multiplier, 2)}.`)
         : '';
     const forecast = o.forecastAmount ? ` Если темп сохранится, к концу квартала будет около ${formatRub(o.forecastAmount)}.` : '';
-    return `<div class="bn-summary"><b>Сейчас к выплате ${formatRub(entry.amountComputed)}.</b> Цех сделал ${bonusesEscape(formatHours(o.fact))} нормо-часов, ${levelText}.${moneyText}${prodText} Итого ставка ${bonusesNum(o.rateApplied, 2)} ₽ за час × ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(q.multiplier, 2)} = ${formatRub(entry.amountComputed)}.${forecast}</div>`;
+    const remaining = o.remainingSoldHours > 0
+        ? ` <b>Из проданного ещё не сделано ${bonusesEscape(formatHours(o.remainingSoldHours))}</b> (${(o.remainingSoldOrders || []).length} заказ${(o.remainingSoldOrders || []).length === 1 ? '' : 'а(ов)'} с дедлайном в этом квартале): закрыть до конца квартала, иначе уровень опустится ниже medium.`
+        : '';
+    return `<div class="bn-summary"><b>Сейчас к выплате ${formatRub(entry.amountComputed)}.</b> Цех сделал ${bonusesEscape(formatHours(o.fact))} нормо-часов, ${levelText}.${moneyText}${prodText} Итого ставка ${bonusesNum(o.rateApplied, 2)} ₽ за час × ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(q.multiplier, 2)} = ${formatRub(entry.amountComputed)}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {

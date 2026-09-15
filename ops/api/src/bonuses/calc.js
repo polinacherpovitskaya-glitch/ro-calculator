@@ -265,6 +265,21 @@ export function computeProductionPeriod(input) {
     else if (purpose !== 'stock_sample') commercialPeriodHours += num(entry.hours);
   }
 
+  // Проданное, но ещё не сделанное: коммерческие заказы с дедлайном в периоде,
+  // не завершённые, остаток нормы за вычетом табеля. Прямой призыв на карточке.
+  let remainingSoldHours = 0;
+  const remainingSoldOrders = [];
+  for (const order of orders) {
+    if (!isAlive(order) || isCompleted(order) || !isCommercialOrder(order) || isUnpaidDraft(order)) continue;
+    const deadline = day(order.deadline);
+    if (!deadline || deadline < from || deadline > to) continue;
+    const left = Math.max(0, num(order.total_hours_plan) - sumHours(entriesByOrder.get(String(order.id)) || []));
+    if (left > 0) {
+      remainingSoldHours += left;
+      remainingSoldOrders.push(order.id);
+    }
+  }
+
   if (noHours.length) warnings.push({ code: 'no_hours', count: noHours.length, hours: 0, orderIds: noHours });
   if (noDeadline.length) warnings.push({ code: 'no_deadline', count: noDeadline.length, hours: 0, orderIds: noDeadline });
   if (estimated.length) warnings.push({ code: 'estimated_dates', count: estimated.length, hours: 0, orderIds: estimated });
@@ -398,6 +413,7 @@ export function computeProductionPeriod(input) {
     level: level === null ? null : roundTo(level, 4),
     output: {
       fact: outputFact, thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold, scaledCapped,
+      remainingSoldHours: roundTo(remainingSoldHours, 2), remainingSoldOrders,
       achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
       forecast, forecastAchievement, forecastLevel, forecastAmount,
     },

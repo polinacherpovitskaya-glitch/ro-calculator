@@ -171,8 +171,28 @@ test('уровни от проданного: выше проданного, н�
   assert.deepEqual(result.output.thresholdsEffective, { min: 918, target: 1044, max: 1169 });
   assert.equal(result.output.achievement, 1);
   assert.equal(result.output.scaledCapped, true);
+  assert.equal(result.output.remainingSoldHours, 0);
   assert.equal(result.output.rateApplied, 75);
   assert.equal(result.amountComputed, Math.round(1173 * 75 * 1));
+});
+
+test('remainingSoldHours: проданное с дедлайном в квартале, ещё не сделанное', () => {
+  const orders = [
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
+    { id: 2, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 300, deadline: '2026-09-25' },
+    { id: 3, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 200, deadline: '2026-10-25' },
+    { id: 4, status: 'draft', payment_status: 'not_sent', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-09-25' },
+  ];
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-08-01', hours: 500, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-09-01', hours: 120, order_id: 2 },
+  ];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-09-15', status: 'open', scheme: { ...scheme, quality_json: {} }, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(), soldHours: 800,
+  });
+  assert.equal(result.output.remainingSoldHours, 180);
+  assert.deepEqual(result.output.remainingSoldOrders, [2]);
 });
 
 test('уровни от проданного: сделано больше реального плана → считается от плана', () => {
