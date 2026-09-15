@@ -246,3 +246,38 @@ test('план и факт по деньгам отдела влияют на у
   res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', { facts: { cash_in: { value: -5 } } }, cookie);
   assert.equal(res.status, 400);
 });
+
+test('POST /api/bonuses/sync/team-money: бот записывает план и факт из Финтабло', async (t) => {
+  const port = await startServer(t);
+  const token = `sync-${crypto.randomUUID()}`;
+  await getPool().query(`INSERT INTO bot_tokens (name, token, role) VALUES ($1, $2, 'bot')`, [`bonuses-sync-${Date.now()}`, token]);
+  const period = `2031-Q${1 + (Date.now() % 4)}`;
+  const res = await fetch(`http://127.0.0.1:${port}/api/bonuses/sync/team-money`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ periods: { [period]: {
+      targets: { cash_in: { min: 14000000, target: 15500000, max: 17000000 } },
+      fact: { value: 13824924, source: 'fintablo', note: 'Финтабло, синк' },
+    } } }),
+  });
+  assert.equal(res.status, 200);
+  const written = (await res.json()).data;
+  assert.deepEqual(written, { targets: [period], facts: [period] });
+
+  const { cookie } = await setup(t);
+  const check = await requestJson(port, 'GET', `/api/bonuses/periods/${period}/team/commercial`, undefined, cookie);
+  const data = (await check.json()).data;
+  assert.equal(data.targets.cash_in.target, 15500000);
+  assert.equal(data.facts.cash_in.value, 13824924);
+  assert.equal(data.facts.cash_in.source, 'fintablo');
+
+  const bad = await fetch(`http://127.0.0.1:${port}/api/bonuses/sync/team-money`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ periods: { 'nope': { fact: { value: 1 } } } }),
+  });
+  assert.equal(bad.status, 400);
+
+  const forbidden = await fetch(`http://127.0.0.1:${port}/api/bonuses/schemes`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(forbidden.status, 403);
+});

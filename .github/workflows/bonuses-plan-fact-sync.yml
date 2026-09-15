@@ -1,0 +1,32 @@
+name: Bonuses plan and fact sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Sync plan from the sheet and fact from FinTablo
+        env:
+          OPS_API_URL: https://api.recycleobject.ru
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          FINTABLO_API_KEY: ${{ secrets.FINTABLO_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+          node scripts/bonuses-plan-fact-sync.mjs

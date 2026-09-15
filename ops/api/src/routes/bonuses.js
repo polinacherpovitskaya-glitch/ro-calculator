@@ -9,7 +9,43 @@ import { loadLegacyBonusData, activeEmployees } from '../bonuses/legacy.js';
 import * as store from '../bonuses/store.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth);
+
+// Синк плана (таблица) и факта (Финтабло) по деньгам отдела. Доступен боту
+// синка и владельцу; остальные маршруты ниже только для admin.
+router.post('/sync/team-money', requireRole('admin', 'bot'), asyncHandler(async (req, res) => {
+  const periods = req.body?.periods;
+  if (!periods || typeof periods !== 'object' || Array.isArray(periods)) return error(res, 400, 'INVALID_PAYLOAD', 'Нужен объект periods');
+  for (const [period, entry] of Object.entries(periods)) {
+    try {
+      periodBounds(period);
+    } catch {
+      return error(res, 400, 'INVALID_PERIOD', `Период ${period} задаётся как 2026-Q3`);
+    }
+    if (entry?.targets && !validTargets(res, entry.targets, false)) return;
+    if (entry?.fact) {
+      const value = Number(entry.fact.value);
+      if (!Number.isFinite(value) || value < 0) return error(res, 400, 'INVALID_FACT', `Факт ${period} должен быть числом не меньше нуля`);
+      if (!['fintablo', 'manual'].includes(String(entry.fact.source || 'fintablo'))) return error(res, 400, 'INVALID_SOURCE', 'Источник факта: fintablo или manual');
+    }
+  }
+  const written = { targets: [], facts: [] };
+  for (const [period, entry] of Object.entries(periods)) {
+    if (entry?.targets) {
+      await store.upsertTeamTargets('commercial', period, entry.targets);
+      written.targets.push(period);
+    }
+    if (entry?.fact) {
+      await store.setTeamFact('commercial', period, 'cash_in', {
+        value: Number(entry.fact.value), source: String(entry.fact.source || 'fintablo'), note: entry.fact.note,
+      }, req.user.email);
+      written.facts.push(period);
+    }
+  }
+  res.json({ data: written });
+}));
+
+router.use(requireRole('admin'));
 
 function error(res, status, code, message) {
   return res.status(status).json({ error: { code, message } });

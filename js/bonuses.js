@@ -278,13 +278,14 @@ function renderTeamBlock(team, period) {
     const button = '<button class="bn-btn" data-action="team-money">План и факт по деньгам</button>';
     if (!thresholds) {
         return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)}</div>${button}</div>
-            <div class="bn-warnings">План по деньгам за квартал не задан. Уровень производства считается только по часам.</div></div>`;
+            <div class="bn-warnings">План по деньгам за квартал ещё не пришёл из таблицы (синк раз в день). Уровень производства пока считается только по часам.</div></div>`;
     }
     const ach = c.cashAchievement;
+    const sourceLabel = fact?.source === 'fintablo' ? 'из Финтабло автоматически' : 'введено вручную';
     const factHtml = fact
-        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${bonusesEscape(fact.note || 'Финтабло, направление Recycle Object')} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
-        : '<div class="bn-fact bn-muted">факт не введён</div>';
-    return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · поступления Recycle Object по Финтабло</div>${button}</div>
+        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${bonusesEscape(fact.note || 'Финтабло, направление Recycle Object')} · ${sourceLabel} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
+        : '<div class="bn-fact bn-muted">факт ещё не пришёл из Финтабло</div>';
+    return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · план из таблицы, факт из Финтабло</div>${button}</div>
         <div class="bn-row" style="border-top:0">
             <div class="bn-label">План отдела<span>base / medium / aspiration</span></div>
             ${renderLevelBar(thresholds, fact ? fact.value : null, 'higher', 'cash_in', ach)}
