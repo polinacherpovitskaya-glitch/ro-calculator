@@ -236,7 +236,11 @@ test('план и факт по деньгам отдела влияют на у
   const body = (await res.json()).data;
   entry = body.entries.find((e) => e.schemeId === scheme.id);
   assert.equal(entry.money.achievement, 1.5);
-  assert.ok(entry.level > entry.output.achievement);
+  // Заказы других тестов копятся в общей базе, поэтому уровень по часам не фиксируем,
+  // проверяем только правило: деньги поднимают уровень до max(часы, смесь).
+  const expectedLevel = Math.max(entry.output.achievement, 0.7 * entry.output.achievement + 0.3 * 1.5);
+  assert.ok(Math.abs(entry.level - expectedLevel) < 0.001);
+  assert.ok(entry.level >= entry.output.achievement);
   assert.equal(body.team.commercial.cashAchievement, 1.5);
 
   res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', { facts: { cash_in: { value: -5 } } }, cookie);
