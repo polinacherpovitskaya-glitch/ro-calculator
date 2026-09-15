@@ -160,13 +160,19 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error https://api.recycleobject.ru/api/health \
             | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+          deploy_sha="${GITHUB_SHA::12}"
           ssh -i "$HOME/.ssh/yandex_vm" \
-            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "DEPLOY_SHA='$deploy_sha' bash -s" <<'REMOTE'
           set -euo pipefail
           test "$(docker inspect --format '{{.State.Status}}' ro-platform-shadow-api)" = running
           test "$(docker inspect --format '{{.RestartCount}}' ro-platform-shadow-api)" = 0
           test "$(docker inspect --format '{{.State.Status}}' ro-platform-shadow-postgres)" = running
           test "$(docker inspect --format '{{.State.Status}}' ro-timebot)" = running
           test "$(docker inspect --format '{{.State.Status}}' supabase-db)" = running
-          docker image inspect ro-timebot:pre-yandex-cutover-v421-20260728 >/dev/null
+          # Контур отката: проверенный pre-deploy dump этого деплоя лежит на VM.
+          # (Образ ro-timebot:pre-yandex-cutover-v421 от июльского переезда больше не хранится.)
+          rollback_dump="$(ls -1t /home/robot/platform-backups/api-deploy/pre-api-deploy-"${DEPLOY_SHA}"-*.dump 2>/dev/null | head -n 1)"
+          test -n "$rollback_dump"
+          test -s "$rollback_dump"
           REMOTE
