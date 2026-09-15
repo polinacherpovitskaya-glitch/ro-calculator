@@ -17,7 +17,7 @@
 - Страница `bonuses` НЕ добавляется в `App.ALL_PAGES` и `App.DEFAULT_PAGES`; доступ только через `App.isOwner()` = `currentUser.role === 'admin' && currentUser.employee_id == null`.
 - Legacy-данные только из `compat_rows` (`orders`, `time_entries`, `employees`, `settings`).
 - Шкала (одна для всего): ниже `min` 0; `min` 0,5; `target` 1,0; `max` 1,5; линейно между; выше `max` 1,5. Для выпуска `min/target/max` = base / medium / aspiration.
-- Сумма квартала = `output_hours × rate × A_level × quality`, где `A_level = 0,7 × A_output + 0,3 × A_cash` (без плана/факта денег `A_level = A_output`), `quality = Σ вес × A` по `quality_json.weights`; веса по умолчанию `productivity: 1, on_time_share: 0, rework_share: 0` (срок и переделки считаются и показываются как информация). Округление до рубля.
+- Сумма квартала = `output_hours × rate × A_level × quality`, где `A_level = max(A_output, 0,7 × A_output + 0,3 × A_cash)` (деньги только поднимают; без плана/факта денег `A_level = A_output`); уровни выпуска масштабируются на `min(1, продано / medium)`, если продано меньше плана; `quality = Σ вес × A` по `quality_json.weights`; веса по умолчанию `productivity: 1, on_time_share: 0, rework_share: 0` (срок и переделки считаются и показываются как информация). Округление до рубля.
 - Факт денег квартала = «Поступления» по направлению Recycle Object в Финтабло, вводится владельцем (`bonus_team_facts`, `source = manual`).
 - Пустой табель по завершённым заказам: `A_prod = 0,5` и предупреждение `no_timesheet`. Нет заказов с дедлайном: `A_ontime = 1`, предупреждение `no_deadline_orders`. Нет часов периода: `A_rework = 1`, предупреждение `no_period_hours`.
 - Коммерческий заказ = `production_purpose` не `rework` и не `stock_sample`, статус не `cancelled`/`deleted`, нет `deleted_at`.
@@ -665,7 +665,7 @@ test('computeProductionPeriod: веса по умолчанию = только �
   const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
   assert.equal(onTime.weight, 0);
   assert.ok(Math.abs(onTime.achievement - 1.25) < 0.001);
-  assert.ok(Math.abs(result.amountComputed - 130674) <= 2);
+  assert.ok(Math.abs(result.amountComputed - 149861) <= 3);
 });
 
 test('computeProductionPeriod: склад, предупреждения, границы периода', () => {
@@ -819,7 +819,7 @@ function sumHours(entries) {
 }
 
 export function computeProductionPeriod(input) {
-  const { period, today, status = 'open', scheme, targets, orders, timeEntries, settings, stockApprovals } = input;
+  const { period, today, status = 'open', scheme, targets, orders, timeEntries, settings, stockApprovals, soldHours = null } = input;
   const { from, to } = periodBounds(period);
   const holidays = holidaySet(settings);
   const ladder = scheme.ladder_json || DEFAULT_LADDER;
@@ -898,8 +898,16 @@ export function computeProductionPeriod(input) {
   if (estimated.length) warnings.push({ code: 'estimated_dates', count: estimated.length, hours: 0, orderIds: estimated });
   if (unmarkedHours > 0) warnings.push({ code: 'unmarked_hours', count: 0, hours: roundTo(unmarkedHours, 2), orderIds: [] });
 
-  // Выпуск и уровень
-  const outputThresholds = targets?.output_hours || null;
+  // Выпуск и уровень. Если продано меньше плана medium, уровни масштабируются:
+  // цех не может сделать больше, чем продано.
+  const planThresholds = targets?.output_hours || null;
+  const sold = soldHours === null || soldHours === undefined ? null : num(soldHours);
+  let outputThresholds = planThresholds;
+  if (planThresholds && sold !== null && num(planThresholds.target) > 0 && sold < num(planThresholds.target)) {
+    const scale = sold / num(planThresholds.target);
+    outputThresholds = { min: Math.round(num(planThresholds.min) * scale), target: Math.round(sold), max: Math.round(num(planThresholds.max) * scale) };
+    warnings.push({ code: 'sold_below_plan', count: 0, hours: roundTo(sold, 2), orderIds: [] });
+  }
   const outputFact = roundTo(outputHours, 2);
   const outputAch = outputThresholds ? achievement(outputFact, outputThresholds, 'higher', ladder) : null;
   const rateApplied = outputAch === null ? 0 : roundTo(rate * outputAch, 2);
@@ -954,7 +962,7 @@ export function computeProductionPeriod(input) {
   return {
     period, schemeId: scheme.id, employeeId: scheme.employee_id, status, rate,
     output: {
-      fact: outputFact, thresholds: outputThresholds,
+      fact: outputFact, thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold,
       achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
       forecast, forecastAchievement, forecastAmount,
     },
@@ -1113,7 +1121,7 @@ git commit -m "Add annual top-up to the year level"
 ```js
 import { DEFAULT_LEVEL_WEIGHTS } from '../src/bonuses/calc.js';
 
-test('уровень квартала = 0.7 × часы + 0.3 × деньги; с весами 0.5/0.3/0.2 даёт 133 474 ₽', () => {
+test('деньги ниже часов не тянут уровень вниз', () => {
   const { orders, timeEntries } = specFixture();
   const result = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
@@ -1122,10 +1130,37 @@ test('уровень квартала = 0.7 × часы + 0.3 × деньги; �
   });
   assert.deepEqual(DEFAULT_LEVEL_WEIGHTS, { output: 0.7, money: 0.3 });
   assert.ok(Math.abs(result.money.achievement - 0.6333) < 0.001);
-  assert.ok(Math.abs(result.level - 0.9635) < 0.001);
-  assert.ok(Math.abs(result.output.rateApplied - 72.26) < 0.01);
-  assert.ok(Math.abs(result.amountComputed - 133474) <= 2);
+  assert.ok(Math.abs(result.money.blend - 0.9635) < 0.001);
+  assert.ok(Math.abs(result.level - 1.105) < 0.001);
+  assert.ok(Math.abs(result.output.rateApplied - 82.87) < 0.01);
+  assert.ok(Math.abs(result.amountComputed - 153073) <= 3);
   assert.ok(!result.warnings.some((w) => w.code === 'no_money_plan'));
+});
+
+test('деньги выше часов поднимают уровень', () => {
+  const { orders, timeEntries } = specFixture();
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(),
+    teamMoney: { fact: 17000000, thresholds: { min: 14000000, target: 15500000, max: 17000000 } },
+  });
+  assert.ok(Math.abs(result.level - 1.2235) < 0.001);
+  assert.ok(Math.abs(result.output.rateApplied - 91.76) < 0.01);
+  assert.ok(Math.abs(result.amountComputed - 169493) <= 3);
+});
+
+test('уровни от проданного: продано меньше плана', () => {
+  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 900, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
+  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 900, order_id: 1 }];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(), soldHours: 900,
+  });
+  assert.deepEqual(result.output.thresholdsEffective, { min: 792, target: 900, max: 1008 });
+  assert.equal(result.output.soldHours, 900);
+  assert.ok(Math.abs(result.output.achievement - 1) < 0.001);
+  assert.ok(result.warnings.some((w) => w.code === 'sold_below_plan'));
+  assert.equal(result.amountComputed, Math.round(900 * 75 * 1 * 1.0));
 });
 
 test('без плана по деньгам уровень = A_output и предупреждение', () => {
@@ -1170,8 +1205,10 @@ export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
   const moneyAch = moneyThresholds && moneyFact !== null ? achievement(moneyFact, moneyThresholds, 'higher', ladder) : null;
   const levelWeights = { ...DEFAULT_LEVEL_WEIGHTS, ...(scheme.quality_json?.level_weights || {}) };
   let level = outputAch;
+  let blend = null;
   if (outputAch !== null && moneyAch !== null) {
-    level = roundTo(num(levelWeights.output) * outputAch + num(levelWeights.money) * moneyAch, 4);
+    blend = roundTo(num(levelWeights.output) * outputAch + num(levelWeights.money) * moneyAch, 4);
+    level = Math.max(outputAch, blend); // деньги только поднимают
   } else if (outputAch !== null) {
     warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
   }
@@ -1199,7 +1236,7 @@ export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 
 ```js
     level: level === null ? null : roundTo(level, 4),
-    money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4) },
+    money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4), blend },
 ```
 
 - [ ] **Step 4: Запустить**
