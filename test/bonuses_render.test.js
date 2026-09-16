@@ -2,12 +2,31 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const {
     bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatMetricValue, renderOutputRow, renderLevelRow, renderQualityRow,
-    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary, renderReceipt,
+    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary, renderReceipt, renderLevelLadder,
 } = require('../js/bonuses.js');
+
+test('renderLevelLadder: планки, текущий уровень и почему', () => {
+    const scaled = renderLevelLadder({
+        hasTargets: true, rate: 100,
+        output: { fact: 1173, soldHours: 1163, achievement: 1, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1024, target: 1163, max: 1302 } },
+    });
+    assert.match(scaled, /bn-step bn-step-on"><div class="n">medium<\/div><div class="h">от 1 163 ч<\/div><div class="r">100 ₽\/ч/);
+    assert.match(scaled, /base<\/div><div class="h">от 1 024 ч<\/div><div class="r">50 ₽\/ч/);
+    assert.match(scaled, /bn-step-locked"><div class="n">aspiration/);
+    assert.match(scaled, /Продано 1 163 ч, это 77% плана 1 512 ч/);
+    assert.match(scaled, /сделано 1 173 ч = 101% проданного, поэтому <b>medium<\/b>/);
+    assert.match(scaled, /Aspiration откроется, когда продадут и сделают больше 1 693 ч/);
+    const plain = renderLevelLadder({
+        hasTargets: true, rate: 100,
+        output: { fact: 1200, soldHours: 1600, achievement: 0.25, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 } },
+    });
+    assert.match(plain, /Сделано 1 200 ч, поэтому <b>ниже base<\/b>/);
+    assert.match(plain, /четверть ставки, 25 ₽\/ч/);
+});
 
 test('renderReceipt: из чего складывается сумма', () => {
     const html = renderReceipt({
-        hasTargets: true, rate: 100, level: 1, amountComputed: 103788, hourRate: 105,
+        hasTargets: true, rate: 100, level: 1, amountComputed: 103788, hourRate: 105, rateParts: { rate: 100, level: 1, productivity: 1.05 },
         quality: { multiplier: 1.05, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
         output: { rateApplied: 100 },
         receipt: { commercial: { hours: 753, amount: 79065 }, internal: { hours: 80, amount: 8400 }, unmarked: { hours: 328, rate: 50, amount: 16400 }, upside: { hours: 701, amount: 73605 } },
