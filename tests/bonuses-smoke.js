@@ -13,7 +13,7 @@ assert.match(html, /id="bonuses-team"/, 'team block container');
 assert.match(html, /id="bonuses-people"/, 'people block container');
 assert.match(html, /<script src="js\/bonuses\.js\?v=\d+"><\/script>/, 'script tag');
 assert.match(app, /isOwner\(\)\s*\{/, 'App.isOwner exists');
-assert.match(app, /if \(page === 'bonuses'\) return this\.isOwner\(\);/, 'canAccess gates bonuses by owner');
+assert.match(app, /if \(page === 'bonuses'\) return this\.isOwner\(\) \|\| this\._bonusesMine === true;/, 'canAccess gates bonuses by owner or own scheme');
 assert.doesNotMatch(app, /ALL_PAGES: \[[^\]]*'bonuses'/, 'bonuses must not be grantable');
 assert.match(app, /case 'bonuses': Bonuses\.load\(\); break;/, 'onPageEnter loads page');
 assert.match(bonuses, /credentials: 'include'/, 'API calls carry session cookie');

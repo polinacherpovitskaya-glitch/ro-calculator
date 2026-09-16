@@ -46,6 +46,40 @@ router.post('/sync/team-money', requireRole('admin', 'bot'), asyncHandler(async 
   res.json({ data: written });
 }));
 
+// Личный просмотр: сотрудник видит только свою схему, без действий.
+async function mySchemeOr404(req, res) {
+  const employeeId = req.user?.employeeId;
+  if (employeeId === null || employeeId === undefined) {
+    error(res, 404, 'NO_SCHEME', 'У этой учётной записи нет схемы бонуса');
+    return null;
+  }
+  const schemes = await store.listSchemes();
+  const scheme = schemes.find((s) => Number(s.employee_id) === Number(employeeId) && s.kind === 'production') || null;
+  if (!scheme) error(res, 404, 'NO_SCHEME', 'У этой учётной записи нет схемы бонуса');
+  return scheme;
+}
+
+router.get('/me', asyncHandler(async (req, res) => {
+  const employeeId = req.user?.employeeId;
+  if (employeeId === null || employeeId === undefined) return res.json({ data: { hasScheme: false } });
+  const schemes = await store.listSchemes();
+  const scheme = schemes.find((s) => Number(s.employee_id) === Number(employeeId) && s.kind === 'production') || null;
+  res.json({ data: { hasScheme: !!scheme, schemeId: scheme?.id || null } });
+}));
+
+router.get('/me/periods/:period', asyncHandler(async (req, res) => {
+  const period = parsePeriod(res, req.params.period);
+  if (!period) return;
+  const scheme = await mySchemeOr404(req, res);
+  if (!scheme) return;
+  const [legacy, approvals, team] = await Promise.all([loadLegacyBonusData(getPool()), store.listStockApprovals(period), loadTeamMoney(period)]);
+  const entry = await computeEntry(scheme, period, legacy, approvals, team.teamMoney);
+  const year = Number(period.slice(0, 4));
+  const mine = (await yearEntries(year)).find((e) => e.schemeId === scheme.id) || null;
+  const cashAchievement = team.teamMoney ? achievement(team.teamMoney.fact, team.teamMoney.thresholds, 'higher', DEFAULT_LADDER) : null;
+  res.json({ data: { period, entry, team: { commercial: { targets: team.targets, facts: team.facts, cashAchievement } }, year: mine } });
+}));
+
 router.use(requireRole('admin'));
 
 // Кнопка «Обновить из Финтабло сейчас»: тот же синк, что по расписанию, но с

@@ -142,7 +142,18 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(collapsed, /98 323 ₽/);
     assert.match(collapsed, /прогноз на конец квартала 105 665 ₽/);
     assert.match(collapsed, /1,00 <small>medium<\/small>/);
-    assert.match(collapsed, /продано 1 044 ч из плана 1 512 ч, почти всё сделано/);
+    assert.match(collapsed, /продано 69% плана · сделано 112% от проданного/);
+    const mine = renderBonusCard({
+        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 100, level: 1.2,
+        output: { fact: 1600, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, soldHours: 1700, scaledCapped: false, achievement: 1.24, rateApplied: 124, forecastAmount: null, remainingSoldHours: 0 },
+        money: { achievement: null }, quality: { multiplier: 1, metrics: [] }, unmarked: { hours: 0, share: 0.5, amount: 0 }, amountBase: 198400, amountComputed: 198400, amountFinal: null,
+        warnings: [], orders: [{ id: 1, name: 'Заказ', purpose: 'stock_sample', hoursPlan: 10, hoursFact: 9, deadline: null, completedAt: '2026-09-10', estimated: false, onTime: null, approved: true, included: true }], adjustments: [], targetsDrift: false, hasTargets: true,
+    }, { expanded: true, readOnly: true });
+    assert.match(mine, /сделано 106% плана medium/);
+    assert.doesNotMatch(mine, /Закрыть квартал|Цели квартала|data-action="scheme"/);
+    assert.match(mine, /bn-approve[^>]*disabled/);
+    const teamRo = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: {}, cashAchievement: null } }, '2026-Q3', { readOnly: true });
+    assert.doesNotMatch(teamRo, /data-action=/);
     assert.match(collapsed, /bn-chip-amber">Без заказа <b>232 ч<\/b>/);
     assert.match(collapsed, /bn-chip-red">Не сделано из проданного <b>53 ч<\/b>/);
     assert.match(collapsed, /Предупреждений <b>1<\/b>/);

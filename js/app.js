@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v465';
+const APP_VERSION = 'v466';
 
 const App = {
     currentPage: 'orders',
@@ -159,7 +159,7 @@ const App = {
         page = this.normalizePageAlias(page);
         if (page === 'bugs') return true;
         if (page === 'leads') return true;
-        if (page === 'bonuses') return this.isOwner();
+        if (page === 'bonuses') return this.isOwner() || this._bonusesMine === true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
