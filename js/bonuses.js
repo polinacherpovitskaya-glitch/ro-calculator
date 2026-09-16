@@ -47,6 +47,13 @@ const BONUSES_CSS = `
 .bn-tile .v small{font-size:15px;font-weight:500;color:#57606a;margin-left:6px}
 .bn-tile .s{font-size:14px;color:#57606a;margin-top:4px}
 .bn-chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+.bn-receipt{width:100%;border-collapse:collapse;font-size:17px;margin:10px 0 6px;font-variant-numeric:tabular-nums}
+.bn-receipt td{padding:8px 10px;border-bottom:1px solid #eaeef2;vertical-align:top}
+.bn-receipt td.num{text-align:right;white-space:nowrap}
+.bn-receipt td:nth-child(2){color:#57606a}
+.bn-receipt-rate td{background:#f6f8fa}
+.bn-receipt-total td{border-top:2px solid #24292f;border-bottom:0;font-size:19px}
+.bn-receipt-upside td{color:#1a7f37;border-bottom:0}
 .bn-chip{border-radius:999px;padding:6px 12px;font-size:15px;border:1px solid transparent}
 .bn-chip b{font-variant-numeric:tabular-nums}
 .bn-chip-green{background:#dafbe1;border-color:#2da44e}
@@ -316,24 +323,38 @@ function bonusesChipClass(achievement, available) {
 }
 
 function renderChips(entry) {
-    const o = entry.output || {};
     const q = entry.quality || { metrics: [] };
     const chips = [];
     for (const m of q.metrics || []) {
-        if (Number(m.weight) <= 0) continue;
         const value = m.available ? formatMetricValue(m.key, m.fact) : 'нет данных';
-        chips.push(`<span class="bn-chip ${bonusesChipClass(m.achievement, m.available)}">${bonusesEscape(m.label)} <b>${bonusesEscape(value)}</b></span>`);
-    }
-    if (entry.unmarked && entry.unmarked.hours > 0) {
-        chips.push(`<span class="bn-chip bn-chip-amber">Без заказа <b>${bonusesEscape(formatHours(entry.unmarked.hours))}</b> · ${Math.round(entry.unmarked.share * 100)}% ставки</span>`);
-    }
-    if (o.remainingSoldHours > 0) {
-        chips.push(`<span class="bn-chip bn-chip-red">Не сделано из проданного <b>${bonusesEscape(formatHours(o.remainingSoldHours))}</b></span>`);
+        if (Number(m.weight) > 0) {
+            chips.push(`<span class="bn-chip ${bonusesChipClass(m.achievement, m.available)}">${bonusesEscape(m.label)} <b>${bonusesEscape(value)}</b></span>`);
+        } else {
+            chips.push(`<span class="bn-chip bn-chip-grey" title="в сумму не входит, обсуждается отдельно">${bonusesEscape(m.label)} <b>${bonusesEscape(value)}</b> · не в деньгах</span>`);
+        }
     }
     if ((entry.warnings || []).length) {
-        chips.push(`<span class="bn-chip bn-chip-grey">Предупреждений <b>${entry.warnings.length}</b></span>`);
+        chips.push(`<span class="bn-chip bn-chip-grey">Предупреждений <b>${entry.warnings.length}</b> · в «Деталях»</span>`);
     }
     return chips.length ? `<div class="bn-chips">${chips.join('')}</div>` : '';
+}
+
+// Чек: из чего складывается сумма. Каждая строка умножается сама.
+function renderReceipt(entry) {
+    if (!entry.hasTargets) return '';
+    const r = entry.receipt || {};
+    const o = entry.output || {};
+    const q = entry.quality || {};
+    const prod = (q.metrics || []).find((m) => m.key === 'productivity');
+    const rate = entry.hourRate ?? (o.rateApplied || 0) * (q.multiplier || 0);
+    const lines = [];
+    lines.push(`<tr class="bn-receipt-rate"><td>Ставка за нормо-час</td><td>${bonusesNum(entry.rate)} ₽ × уровень ${bonusesNum(entry.level, 2)}${prod && prod.available ? ` × производительность ${bonusesNum(prod.fact, 2)}` : (prod ? ' × табеля нет (0,5)' : '')}</td><td class="num"><b>${exactNum(rate, 2)} ₽/ч</b></td></tr>`);
+    lines.push(`<tr><td>Заказы клиентов</td><td>${exactNum(r.commercial?.hours || 0, 2)} ч × ${exactNum(rate, 2)} ₽</td><td class="num">${formatRub(r.commercial?.amount || 0)}</td></tr>`);
+    if ((r.internal?.hours || 0) > 0) lines.push(`<tr><td>Внутренние работы, утверждено</td><td>${exactNum(r.internal.hours, 2)} ч × ${exactNum(rate, 2)} ₽</td><td class="num">${formatRub(r.internal.amount)}</td></tr>`);
+    if ((r.unmarked?.hours || 0) > 0) lines.push(`<tr><td>Часы без заказа, половина ставки</td><td>${exactNum(r.unmarked.hours, 2)} ч × ${exactNum(r.unmarked.rate, 2)} ₽</td><td class="num">${formatRub(r.unmarked.amount)}</td></tr>`);
+    lines.push(`<tr class="bn-receipt-total"><td>Итого к выплате</td><td></td><td class="num"><b>${formatRub(entry.amountComputed)}</b></td></tr>`);
+    if ((r.upside?.hours || 0) > 0) lines.push(`<tr class="bn-receipt-upside"><td>Продано, но ещё не сделано</td><td>${exactNum(r.upside.hours, 2)} ч × ${exactNum(rate, 2)} ₽</td><td class="num">+ ${formatRub(r.upside.amount)} если доделать до конца квартала</td></tr>`);
+    return `<table class="bn-receipt">${lines.join('')}</table>`;
 }
 
 function bonusesLevelWord(entry) {
@@ -370,7 +391,7 @@ function renderBonusCard(entry, options = {}) {
     const hero = `<div class="bn-hero">
         <div class="bn-tile bn-tile-pay"><div class="k">${payTitle}</div><div class="v">${entry.hasTargets ? formatRub(final ? entry.amountFinal : entry.amountComputed) : '—'}</div><div class="s">${bonusesEscape(paySub)}</div></div>
         <div class="bn-tile"><div class="k">Уровень квартала</div><div class="v">${entry.level === null || entry.level === undefined ? '—' : bonusesNum(entry.level, 2)} <small>${bonusesEscape(level.word)}${lifted ? ' + деньги' : ''}</small></div><div class="s">${bonusesEscape(level.why)}</div></div>
-        <div class="bn-tile"><div class="k">Ставка за нормо-час</div><div class="v">${bonusesNum(output.rateApplied || 0, 2)} ₽</div><div class="s">${bonusesNum(entry.rate)} ₽ на medium · качество × ${bonusesNum(quality.multiplier, 2)}</div></div>
+        <div class="bn-tile"><div class="k">Итоговая ставка за час</div><div class="v">${exactNum(entry.hourRate ?? ((output.rateApplied || 0) * (quality.multiplier || 0)), 2)} ₽</div><div class="s">${bonusesNum(entry.rate)} ₽ × уровень ${bonusesNum(entry.level, 2)} × производительность ${bonusesNum(quality.multiplier, 2)}</div></div>
     </div>`;
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';
@@ -405,6 +426,7 @@ function renderBonusCard(entry, options = {}) {
         </div>
         ${noTargets}${drift}
         ${hero}
+        ${renderReceipt(entry)}
         ${renderOutputRow(output, entry.rate)}
         ${renderChips(entry)}
         ${actions}
@@ -770,6 +792,6 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatHours, formatMoney, formatMetricValue,
         renderLevelBar, renderOutputRow, renderLevelRow, renderQualityRow, renderBonusCard, renderWarnings,
-        renderTeamBlock, renderPeopleBlock, renderHistory, renderYear, renderSummary,
+        renderTeamBlock, renderPeopleBlock, renderHistory, renderYear, renderSummary, renderReceipt,
     };
 }

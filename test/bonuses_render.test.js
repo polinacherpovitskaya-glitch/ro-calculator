@@ -2,8 +2,24 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const {
     bonusesCurrentPeriod, bonusesPeriodOptions, formatRub, formatMetricValue, renderOutputRow, renderLevelRow, renderQualityRow,
-    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary,
+    renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary, renderReceipt,
 } = require('../js/bonuses.js');
+
+test('renderReceipt: из чего складывается сумма', () => {
+    const html = renderReceipt({
+        hasTargets: true, rate: 100, level: 1, amountComputed: 103788, hourRate: 105,
+        quality: { multiplier: 1.05, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
+        output: { rateApplied: 100 },
+        receipt: { commercial: { hours: 753, amount: 79065 }, internal: { hours: 80, amount: 8400 }, unmarked: { hours: 328, rate: 50, amount: 16400 }, upside: { hours: 701, amount: 73605 } },
+    });
+    assert.match(html, /100 ₽ × уровень 1,00 × производительность 1,05/);
+    assert.match(html, /<b>105 ₽\/ч<\/b>/);
+    assert.match(html, /Заказы клиентов<\/td><td>753 ч × 105 ₽<\/td><td class="num">79 065 ₽/);
+    assert.match(html, /Внутренние работы, утверждено<\/td><td>80 ч × 105 ₽<\/td><td class="num">8 400 ₽/);
+    assert.match(html, /Часы без заказа, половина ставки<\/td><td>328 ч × 50 ₽<\/td><td class="num">16 400 ₽/);
+    assert.match(html, /Итого к выплате<\/td><td><\/td><td class="num"><b>103 788 ₽/);
+    assert.match(html, /Продано, но ещё не сделано<\/td><td>701 ч × 105 ₽<\/td><td class="num">\+ 73 605 ₽ если доделать/);
+});
 
 test('renderSummary: коротко, сколько и из чего', () => {
     const html = renderSummary({
@@ -128,6 +144,13 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
     assert.match(html, /bn-chip-green">Производительность <b>1,05<\/b>/);
+    const info = renderBonusCard({
+        schemeId: 7, employeeId: 5, employeeName: 'Лёша', resultStatus: 'open', rate: 100, level: 1,
+        output: { fact: 1000, thresholds: { min: 1331, target: 1512, max: 1693 }, achievement: 0.25, rateApplied: 25 },
+        money: { achievement: null }, quality: { multiplier: 1, metrics: [{ key: 'on_time_share', label: 'В срок', weight: 0, fact: 0.5, achievement: 0.25, available: true }] },
+        amountComputed: 1, hasTargets: true, warnings: [], orders: [], adjustments: [],
+    }, {});
+    assert.match(info, /bn-chip-grey[^>]*>В срок <b>50%<\/b> · не в деньгах/);
     assert.doesNotMatch(html, /data-metric="on_time_share"/, 'строки с весом 0 на карточке не показываются');
     assert.match(html, /К выплате сейчас/);
     assert.match(html, /bn-hero/);
@@ -154,9 +177,8 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(mine, /bn-approve[^>]*disabled/);
     const teamRo = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: {}, cashAchievement: null } }, '2026-Q3', { readOnly: true });
     assert.doesNotMatch(teamRo, /data-action=/);
-    assert.match(collapsed, /bn-chip-amber">Без заказа <b>232 ч<\/b>/);
-    assert.match(collapsed, /bn-chip-red">Не сделано из проданного <b>53 ч<\/b>/);
     assert.match(collapsed, /Предупреждений <b>1<\/b>/);
+    assert.match(collapsed, /bn-receipt/);
     assert.doesNotMatch(collapsed, /bn-summary/, 'в свёрнутом виде текста нет');
 });
 

@@ -8,7 +8,9 @@ export const DEFAULT_LADDER = { below_min: 0.25, min: 0.5, target: 1, max: 1.5, 
 
 // Веса множителя качества. У срока и переделок планки «цель = максимум»:
 // всё в срок и без брака даёт ровно 1,0, срывы снижают.
-export const DEFAULT_QUALITY_WEIGHTS = { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 };
+// В деньги входит только производительность. Срок и переделки считаются и
+// показываются как информация; их последствия владелец вносит корректировкой.
+export const DEFAULT_QUALITY_WEIGHTS = { productivity: 1, on_time_share: 0, rework_share: 0 };
 
 // Уровень квартала = max(A_output, 0.7 × A_output + 0.3 × A_cash).
 export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
@@ -402,6 +404,7 @@ export function computeProductionPeriod(input) {
   multiplier = roundTo(multiplier, 4);
 
   const baseAmount = Math.round(outputFact * rateApplied * multiplier);
+  const hourRate = roundTo(rateApplied * multiplier, 2); // итоговая ставка за нормо-час
   const unmarkedShare = scheme.quality_json?.unmarked_rate_share === undefined || scheme.quality_json?.unmarked_rate_share === null
     ? DEFAULT_UNMARKED_RATE_SHARE
     : num(scheme.quality_json.unmarked_rate_share);
@@ -441,6 +444,13 @@ export function computeProductionPeriod(input) {
     money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4), blend },
     quality: { multiplier, metrics: qualityMetrics },
     unmarked: { hours: roundTo(unmarkedHours, 2), share: unmarkedShare, amount: unmarkedAmount },
+    hourRate,
+    receipt: {
+      commercial: { hours: roundTo(commercialOutputHours, 2), amount: Math.round(commercialOutputHours * hourRate) },
+      internal: { hours: roundTo(internalOutputHours, 2), amount: Math.round(internalOutputHours * hourRate) },
+      unmarked: { hours: roundTo(unmarkedHours, 2), rate: roundTo(rateApplied * unmarkedShare, 2), amount: unmarkedAmount },
+      upside: { hours: roundTo(remainingSoldHours, 2), amount: Math.round(remainingSoldHours * hourRate) },
+    },
     amountBase: baseAmount,
     amountComputed: amount, warnings, orders: detail,
   };
