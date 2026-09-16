@@ -341,15 +341,22 @@ function bonusesLevelWord(entry) {
     const a = o.achievement;
     if (a === null || a === undefined) return { word: '—', why: 'цели не заданы' };
     const thr = o.thresholds || {};
-    if (o.scaledCapped) return { word: 'medium', why: `продано ${formatHours(o.soldHours)} из плана ${formatHours(thr.target)}, ${o.remainingSoldHours > 0 ? 'почти всё сделано' : 'всё сделано'}` };
-    if (a < 0.5) return { word: 'ниже base', why: `сделано меньше ${formatHours(thr.min)}` };
-    if (a < 1) return { word: 'base → medium', why: `между ${formatHours(thr.min)} и ${formatHours(thr.target)}` };
-    if (a < 1.5) return { word: 'medium → aspiration', why: `между ${formatHours(thr.target)} и ${formatHours(thr.max)}` };
-    return { word: 'выше aspiration', why: `больше ${formatHours(thr.max)}` };
+    const pctPlan = thr.target ? Math.round((Number(o.fact) / Number(thr.target)) * 100) : null;
+    if (o.scaledCapped) {
+        const soldPct = thr.target ? Math.round((Number(o.soldHours) / Number(thr.target)) * 100) : null;
+        const donePct = o.soldHours ? Math.round((Number(o.fact) / Number(o.soldHours)) * 100) : null;
+        return { word: 'medium', why: `продано ${soldPct}% плана · сделано ${donePct}% от проданного` };
+    }
+    const planText = pctPlan === null ? '' : `сделано ${pctPlan}% плана medium`;
+    if (a < 0.5) return { word: 'ниже base', why: planText };
+    if (a < 1) return { word: 'base → medium', why: planText };
+    if (a < 1.5) return { word: 'medium → aspiration', why: planText };
+    return { word: 'выше aspiration', why: planText };
 }
 
 function renderBonusCard(entry, options = {}) {
     const expanded = options.expanded === true;
+    const readOnly = options.readOnly === true;
     const open = entry.resultStatus === 'open';
     const output = entry.output || {};
     const quality = entry.quality || { multiplier: 0, metrics: [] };
@@ -370,7 +377,9 @@ function renderBonusCard(entry, options = {}) {
     const formula = entry.hasTargets
         ? `<div class="bn-formula">${exactNum(output.fact, 2)} ч × ${exactNum(output.rateApplied, 2)} ₽ × ${exactNum(quality.multiplier, 4)} = ${formatRub(entry.amountBase ?? entry.amountComputed)}${entry.unmarked && entry.unmarked.amount ? ` + без заказа ${exactNum(entry.unmarked.hours, 2)} ч × ${Math.round(entry.unmarked.share * 100)}% × ${exactNum(output.rateApplied, 2)} ₽ = ${formatRub(entry.unmarked.amount)}` : ''} → <b>${formatRub(entry.amountComputed)}</b></div>`
         : '';
-    const actions = `<div class="bn-actions">
+    const actions = readOnly
+        ? `<div class="bn-actions"><button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали и как посчитано'}</button></div>`
+        : `<div class="bn-actions">
         <button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали и как посчитано'}</button>
         <button class="bn-btn" data-action="targets" data-scheme="${entry.schemeId}" ${open ? '' : 'disabled'}>Цели квартала</button>
         <button class="bn-btn" data-action="scheme" data-scheme="${entry.schemeId}" data-employee="${entry.employeeId}">Ставка</button>
@@ -386,7 +395,7 @@ function renderBonusCard(entry, options = {}) {
         ${formula}
         ${renderWarnings(entry.warnings)}
         <h3 class="bn-h2" style="margin-top:14px">Заказы квартала</h3>
-        ${renderOrdersTable(entry)}
+        ${renderOrdersTable(readOnly ? { ...entry, resultStatus: 'closed' } : entry)}
         ${adjustments ? `<h3 class="bn-h2" style="margin-top:14px">Корректировки</h3><ul>${adjustments}</ul>` : ''}
     </div>` : '';
     return `<div class="bn-card" data-scheme="${entry.schemeId}">
@@ -403,11 +412,13 @@ function renderBonusCard(entry, options = {}) {
     </div>`;
 }
 
-function renderTeamBlock(team, period) {
+function renderTeamBlock(team, period, options = {}) {
     const c = team?.commercial || {};
     const thresholds = c.targets?.cash_in || null;
     const fact = c.facts?.cash_in || null;
-    const button = '<span class="bn-actions" style="margin-top:0"><button class="bn-btn primary" data-action="sync-money">Обновить из Финтабло сейчас</button><button class="bn-btn" data-action="team-money">План и факт по деньгам</button></span>';
+    const button = options.readOnly === true
+        ? ''
+        : '<span class="bn-actions" style="margin-top:0"><button class="bn-btn primary" data-action="sync-money">Обновить из Финтабло сейчас</button><button class="bn-btn" data-action="team-money">План и факт по деньгам</button></span>';
     if (!thresholds) {
         return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)}</div>${button}</div>
             <div class="bn-warnings">План по деньгам за квартал ещё не пришёл из таблицы (синк раз в день). Уровень производства пока считается только по часам.</div></div>`;
@@ -468,15 +479,16 @@ function renderHistory(history, entries) {
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderYear(yearData, year) {
+function renderYear(yearData, year, options = {}) {
     if (!Array.isArray(yearData) || !yearData.length) return '';
+    const readOnly = options.readOnly === true;
     const rows = yearData.map((e) => {
         const q = e.year.quarters.map((x) => `<td class="num">${x.fact === null ? '—' : formatHours(x.fact)}</td>`).join('');
         return `<tr><td>${bonusesEscape(e.employeeName)}</td>${q}
             <td class="num">${formatHours(e.year.factSum)} / ${formatHours(e.year.thresholdsSum.target)}</td>
             <td class="num">${e.year.achievement === null ? '—' : bonusesNum(e.year.achievement, 2)}</td>
             <td class="num">${formatRub(e.year.topUp)}</td>
-            <td><button class="bn-btn" data-action="close-year" data-scheme="${e.schemeId}" ${e.year.quartersCounted === 4 ? '' : 'disabled'}>Закрыть год</button></td></tr>`;
+            <td>${readOnly ? '' : `<button class="bn-btn" data-action="close-year" data-scheme="${e.schemeId}" ${e.year.quartersCounted === 4 ? '' : 'disabled'}>Закрыть год</button>`}</td></tr>`;
     }).join('');
     return `<h2 class="bn-h2">Год ${year}: выпуск</h2><table class="bn-table"><thead><tr>
         <th>Сотрудник</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Факт / medium</th><th>Уровень года</th><th>Добор</th><th></th>
@@ -508,8 +520,27 @@ const Bonuses = {
         this._cssInjected = true;
     },
 
+    isOwnerView() {
+        return typeof App === 'undefined' || typeof App.isOwner !== 'function' || App.isOwner();
+    },
+
+    // Сотрудник со схемой (Лёша) видит только свой раздел, без действий.
+    async probeMine() {
+        if (typeof App === 'undefined' || !App.currentUser || App.isOwner()) return;
+        const empId = App.currentUser.employee_id;
+        if (empId === null || empId === undefined || empId === '') return;
+        try {
+            const me = await this.api('GET', '/me');
+            App._bonusesMine = !!me?.hasScheme;
+        } catch (e) {
+            App._bonusesMine = false;
+        }
+        if (typeof App.applyNavVisibility === 'function') App.applyNavVisibility();
+    },
+
     async load() {
-        if (typeof App !== 'undefined' && typeof App.isOwner === 'function' && !App.isOwner()) { App.navigate('orders'); return; }
+        const owner = this.isOwnerView();
+        if (!owner && typeof App !== 'undefined' && App._bonusesMine !== true) { App.navigate('orders'); return; }
         this.injectCss();
         this.bind();
         if (!this.period) this.period = bonusesCurrentPeriod();
@@ -518,11 +549,27 @@ const Bonuses = {
         cards.innerHTML = '<div class="bn-muted">Загрузка…</div>';
         try {
             const year = Number(this.period.slice(0, 4));
-            [this.data, this.yearData] = await Promise.all([this.api('GET', `/periods/${this.period}`), this.api('GET', `/years/${year}`)]);
-            this.render();
+            if (owner) {
+                [this.data, this.yearData] = await Promise.all([this.api('GET', `/periods/${this.period}`), this.api('GET', `/years/${year}`)]);
+                this.render();
+            } else {
+                const mine = await this.api('GET', `/me/periods/${this.period}`);
+                this.data = { period: mine.period, entries: [mine.entry], history: [], team: mine.team, people: null };
+                this.yearData = mine.year ? [mine.year] : [];
+                this.renderMine();
+            }
         } catch (e) {
             cards.innerHTML = `<div class="bn-warnings">${bonusesEscape(e.message)}</div>`;
         }
+    },
+
+    renderMine() {
+        const entries = this.data?.entries || [];
+        document.getElementById('bonuses-team').innerHTML = renderTeamBlock(this.data?.team, this.period, { readOnly: true });
+        document.getElementById('bonuses-cards').innerHTML = entries.map((e) => renderBonusCard(e, { expanded: this.expanded.has(e.schemeId), readOnly: true })).join('');
+        document.getElementById('bonuses-people').innerHTML = '';
+        document.getElementById('bonuses-year').innerHTML = renderYear(this.yearData, Number(this.period.slice(0, 4)), { readOnly: true });
+        document.getElementById('bonuses-history').innerHTML = '';
     },
 
     renderPeriods() {
@@ -531,6 +578,7 @@ const Bonuses = {
     },
 
     render() {
+        if (!this.isOwnerView()) { this.renderMine(); return; }
         const entries = this.data?.entries || [];
         document.getElementById('bonuses-team').innerHTML = renderTeamBlock(this.data?.team, this.period);
         document.getElementById('bonuses-cards').innerHTML = (entries.length
@@ -703,6 +751,20 @@ const Bonuses = {
         return wrap;
     },
 };
+
+// После входа проверяем, есть ли у сотрудника своя схема, и показываем пункт меню.
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    let tries = 0;
+    const timer = setInterval(() => {
+        tries += 1;
+        if (typeof App !== 'undefined' && App.currentUser) {
+            clearInterval(timer);
+            Bonuses.probeMine();
+        } else if (tries > 60) {
+            clearInterval(timer);
+        }
+    }, 1000);
+}
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {

@@ -293,3 +293,37 @@ test('POST /api/bonuses/sync/run без ключа Финтабло → 503', as
     if (saved !== undefined) process.env.FINTABLO_API_KEY = saved;
   }
 });
+
+test('GET /api/bonuses/me: сотрудник со схемой видит свой расчёт, без схемы 404, admin-маршруты 403', async (t) => {
+  const employeeId = Date.now();
+  await putCompatRow('employees', { id: employeeId, name: 'Лёша', role: 'production', is_active: true });
+  const admin = await setup(t);
+  const scheme = (await (await requestJson(admin.port, 'PUT', `/api/bonuses/schemes/${employeeId}`, { kind: 'production', rate: 100 }, admin.cookie)).json()).data;
+  await requestJson(admin.port, 'PUT', `/api/bonuses/periods/2026-Q3/targets/${scheme.id}`, { targets: QUARTER_TARGETS }, admin.cookie);
+
+  const email = `lesha-${crypto.randomUUID()}@x.test`;
+  const passwordHash = await hashPassword('testpass1234');
+  // auth_users.employee_id ссылается на нормализованную таблицу employees
+  await getPool().query(`INSERT INTO employees (id, name, role, is_active) VALUES ($1, 'Лёша', 'production', TRUE) ON CONFLICT (id) DO NOTHING`, [employeeId]);
+  await getPool().query(
+    `INSERT INTO auth_users (email, password_hash, role, must_change_password, employee_id) VALUES ($1, $2, 'user', FALSE, $3)`,
+    [email, passwordHash, employeeId],
+  );
+  const cookie = await login(admin.port, email);
+  let res = await requestJson(admin.port, 'GET', '/api/bonuses/me', undefined, cookie);
+  assert.deepEqual((await res.json()).data, { hasScheme: true, schemeId: scheme.id });
+  res = await requestJson(admin.port, 'GET', '/api/bonuses/me/periods/2026-Q3', undefined, cookie);
+  assert.equal(res.status, 200);
+  const body = (await res.json()).data;
+  assert.equal(body.entry.schemeId, scheme.id);
+  assert.equal(body.entry.employeeName, 'Лёша');
+  assert.ok(body.team.commercial);
+  res = await requestJson(admin.port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
+  assert.equal(res.status, 403);
+
+  const other = await setup(t, 'user');
+  res = await requestJson(other.port, 'GET', '/api/bonuses/me', undefined, other.cookie);
+  assert.deepEqual((await res.json()).data, { hasScheme: false });
+  res = await requestJson(other.port, 'GET', '/api/bonuses/me/periods/2026-Q3', undefined, other.cookie);
+  assert.equal(res.status, 404);
+});
