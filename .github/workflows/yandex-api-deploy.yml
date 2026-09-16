@@ -153,21 +153,23 @@ jobs:
             echo "FINTABLO_API_KEY secret is not set; API sync button stays disabled"
             exit 0
           fi
-          # Ключ уходит через stdin, не через аргументы команды.
+          # Ключ уходит через stdin; скрипт передаётся аргументом, чтобы не
+          # делить stdin с ключом.
           printf '%s' "$FINTABLO_API_KEY" | ssh -i "$HOME/.ssh/yandex_vm" \
-            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
-          set -euo pipefail
-          key="$(cat)"
-          env_file=/home/robot/platform/infra/.env.shadow
-          install -d -m 700 /home/robot/platform/infra
-          touch "$env_file"
-          chmod 600 "$env_file"
-          grep -v '^FINTABLO_API_KEY=' "$env_file" > "$env_file.next" || true
-          printf 'FINTABLO_API_KEY=%s\n' "$key" >> "$env_file.next"
-          chmod 600 "$env_file.next"
-          mv "$env_file.next" "$env_file"
-          echo "FINTABLO_API_KEY provisioned"
-          REMOTE
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" '
+              set -euo pipefail
+              key="$(cat)"
+              test -n "$key"
+              env_file=/home/robot/platform/infra/.env.shadow
+              install -d -m 700 /home/robot/platform/infra
+              touch "$env_file"
+              chmod 600 "$env_file"
+              grep -v "^FINTABLO_API_KEY=" "$env_file" > "$env_file.next" || true
+              printf "FINTABLO_API_KEY=%s\n" "$key" >> "$env_file.next"
+              chmod 600 "$env_file.next"
+              mv "$env_file.next" "$env_file"
+              grep -c "^FINTABLO_API_KEY=" "$env_file" >/dev/null && echo "FINTABLO_API_KEY provisioned"
+            '
 
       - name: Deploy replacement API without data refresh
         env:
