@@ -27,6 +27,9 @@ const BONUSES_CSS = `
 .bn-fill.below{background:#cf222e}.bn-fill.mid{background:#bf8700}
 .bn-tick{position:absolute;top:-6px;width:2px;height:26px;background:#24292f}
 .bn-tick-label{position:absolute;top:22px;transform:translateX(-50%);font-size:12px;color:#57606a;white-space:nowrap}
+.bn-tick-label.bn-tick-above{top:-24px}
+.bn-tick-medium{background:#1a7f37;width:3px}
+.bn-row{padding:26px 0 30px}
 .bn-tick-sold{background:#1f6feb;height:34px;top:-10px}
 .bn-tick-sold-label{top:-26px;color:#1f6feb;font-weight:600}
 .bn-fact{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -35,7 +38,22 @@ const BONUSES_CSS = `
 .bn-ach span{display:block;font-size:13px;color:#57606a}
 .bn-formula{margin-top:8px;padding:10px 14px;background:#f6f8fa;border-radius:8px;font-size:17px;font-variant-numeric:tabular-nums}
 .bn-level{background:#eef6ff;border-radius:8px;padding:8px 14px;font-size:16px;margin:6px 0 4px;font-variant-numeric:tabular-nums}
-.bn-summary{font-size:18px;line-height:1.5;margin:4px 0 12px;max-width:80ch}
+.bn-summary{font-size:17px;line-height:1.5;margin:4px 0 12px;max-width:80ch}
+.bn-hero{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;margin:8px 0 6px}
+.bn-tile{border:1px solid #d0d7de;border-radius:12px;padding:14px 16px;background:#f6f8fa}
+.bn-tile-pay{background:#dafbe1;border-color:#2da44e}
+.bn-tile .k{font-size:13px;color:#57606a;text-transform:uppercase;letter-spacing:.04em}
+.bn-tile .v{font-size:30px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.15}
+.bn-tile .v small{font-size:15px;font-weight:500;color:#57606a;margin-left:6px}
+.bn-tile .s{font-size:14px;color:#57606a;margin-top:4px}
+.bn-chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+.bn-chip{border-radius:999px;padding:6px 12px;font-size:15px;border:1px solid transparent}
+.bn-chip b{font-variant-numeric:tabular-nums}
+.bn-chip-green{background:#dafbe1;border-color:#2da44e}
+.bn-chip-amber{background:#fff8c5;border-color:#d4a72c}
+.bn-chip-red{background:#ffebe9;border-color:#cf222e}
+.bn-chip-grey{background:#f6f8fa;border-color:#d0d7de;color:#57606a}
+@media (max-width:800px){.bn-hero{grid-template-columns:1fr}}
 .bn-muted{color:#57606a}
 .bn-warnings{margin-top:12px;padding:10px 14px;background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;font-size:15px}
 .bn-warnings li{margin:2px 0}
@@ -99,6 +117,14 @@ function formatHours(value) {
     return `${bonusesNum(Math.round(Number(value) || 0))} ч`;
 }
 
+// Короткие деньги для подписей на полосе: 14,5 млн, 850 тыс.
+function formatMoneyShort(value) {
+    const n = Number(value) || 0;
+    if (Math.abs(n) >= 1e6) return `${bonusesNum(n / 1e6, Number.isInteger(n / 1e5) ? 1 : 1).replace(/,0$/, '')} млн`;
+    if (Math.abs(n) >= 1e3) return `${bonusesNum(n / 1e3)} тыс.`;
+    return bonusesNum(n);
+}
+
 // Точные значения для формулы: часы до сотых, множитель до 4 знаков, без
 // лишних нулей, чтобы произведение сходилось с суммой.
 function exactNum(value, digits) {
@@ -116,7 +142,7 @@ function formatMetricValue(key, value) {
         case 'productivity': return bonusesNum(value, 2);
         case 'on_time_share':
         case 'rework_share': return `${Math.round(Number(value) * 100)}%`;
-        case 'cash_in': return formatMoney(value);
+        case 'cash_in': return formatMoneyShort(value);
         default: return String(value);
     }
 }
@@ -140,9 +166,13 @@ function renderLevelBar(thresholds, fact, direction, key, achievement) {
     const ach = Number(achievement) || 0;
     const fillClass = ach === 0 ? 'below' : (ach < 1 ? 'mid' : '');
     const fill = fact === null || fact === undefined ? '' : `<div class="bn-fill ${fillClass}" style="width:${bonusesTrackPercent(fact, thresholds, direction).toFixed(1)}%"></div>`;
+    // Подписи в два ряда: base и aspiration под полосой, medium над ней,
+    // чтобы близкие планки не наезжали друг на друга.
+    const rows = { min: 'below', target: 'above', max: 'below' };
+    const names = { min: 'base', target: 'medium', max: 'aspiration' };
     const ticks = ['min', 'target', 'max'].map((k) => {
         const pct = bonusesTrackPercent(thresholds[k], thresholds, direction).toFixed(1);
-        return `<div class="bn-tick" style="left:${pct}%"></div><div class="bn-tick-label" style="left:${pct}%">${bonusesEscape(formatMetricValue(key, thresholds[k]))}</div>`;
+        return `<div class="bn-tick bn-tick-${names[k]}" style="left:${pct}%"></div><div class="bn-tick-label bn-tick-${rows[k]}" style="left:${pct}%">${names[k]} ${bonusesEscape(formatMetricValue(key, thresholds[k]))}</div>`;
     }).join('');
     return `<div class="bn-track">${fill}${ticks}</div>`;
 }
@@ -277,27 +307,71 @@ function renderSummary(entry) {
     return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b>: ${exactNum(o.fact, 2)} ч × ${exactNum(o.rateApplied, 2)} ₽ × ${exactNum(q.multiplier, 4)} = ${formatRub(base)}.${split}${unmarked}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
 }
 
+function bonusesChipClass(achievement, available) {
+    if (!available) return 'bn-chip-grey';
+    const a = Number(achievement) || 0;
+    if (a >= 1) return 'bn-chip-green';
+    if (a >= 0.5) return 'bn-chip-amber';
+    return 'bn-chip-red';
+}
+
+function renderChips(entry) {
+    const o = entry.output || {};
+    const q = entry.quality || { metrics: [] };
+    const chips = [];
+    for (const m of q.metrics || []) {
+        if (Number(m.weight) <= 0) continue;
+        const value = m.available ? formatMetricValue(m.key, m.fact) : 'нет данных';
+        chips.push(`<span class="bn-chip ${bonusesChipClass(m.achievement, m.available)}">${bonusesEscape(m.label)} <b>${bonusesEscape(value)}</b></span>`);
+    }
+    if (entry.unmarked && entry.unmarked.hours > 0) {
+        chips.push(`<span class="bn-chip bn-chip-amber">Без заказа <b>${bonusesEscape(formatHours(entry.unmarked.hours))}</b> · ${Math.round(entry.unmarked.share * 100)}% ставки</span>`);
+    }
+    if (o.remainingSoldHours > 0) {
+        chips.push(`<span class="bn-chip bn-chip-red">Не сделано из проданного <b>${bonusesEscape(formatHours(o.remainingSoldHours))}</b></span>`);
+    }
+    if ((entry.warnings || []).length) {
+        chips.push(`<span class="bn-chip bn-chip-grey">Предупреждений <b>${entry.warnings.length}</b></span>`);
+    }
+    return chips.length ? `<div class="bn-chips">${chips.join('')}</div>` : '';
+}
+
+function bonusesLevelWord(entry) {
+    const o = entry.output || {};
+    const a = o.achievement;
+    if (a === null || a === undefined) return { word: '—', why: 'цели не заданы' };
+    const thr = o.thresholds || {};
+    if (o.scaledCapped) return { word: 'medium', why: `продано ${formatHours(o.soldHours)} из плана ${formatHours(thr.target)}, ${o.remainingSoldHours > 0 ? 'почти всё сделано' : 'всё сделано'}` };
+    if (a < 0.5) return { word: 'ниже base', why: `сделано меньше ${formatHours(thr.min)}` };
+    if (a < 1) return { word: 'base → medium', why: `между ${formatHours(thr.min)} и ${formatHours(thr.target)}` };
+    if (a < 1.5) return { word: 'medium → aspiration', why: `между ${formatHours(thr.target)} и ${formatHours(thr.max)}` };
+    return { word: 'выше aspiration', why: `больше ${formatHours(thr.max)}` };
+}
+
 function renderBonusCard(entry, options = {}) {
     const expanded = options.expanded === true;
     const open = entry.resultStatus === 'open';
     const output = entry.output || {};
     const quality = entry.quality || { multiplier: 0, metrics: [] };
-    let total;
-    if (!entry.hasTargets) {
-        total = '—<small>задайте цели квартала</small>';
-    } else if (entry.amountFinal !== null && entry.amountFinal !== undefined && Number(entry.amountFinal) !== Number(entry.amountComputed)) {
-        total = `${formatRub(entry.amountFinal)}<small>расчёт ${formatRub(entry.amountComputed)}</small>`;
-    } else {
-        total = `${formatRub(entry.amountComputed)}${output.forecastAmount ? `<small>прогноз ${formatRub(output.forecastAmount)}</small>` : ''}`;
-    }
-    const totalLabel = entry.resultStatus === 'paid' ? 'выплачено за квартал' : (entry.resultStatus === 'closed' ? 'к выплате за квартал, зафиксировано' : 'к выплате за квартал');
+    const level = bonusesLevelWord(entry);
+    const lifted = entry.money && entry.money.achievement !== null && entry.money.achievement !== undefined && entry.level !== null && entry.level > (output.achievement || 0) + 0.0001;
+    const final = entry.amountFinal !== null && entry.amountFinal !== undefined && Number(entry.amountFinal) !== Number(entry.amountComputed);
+    const payTitle = entry.resultStatus === 'paid' ? 'Выплачено' : (entry.resultStatus === 'closed' ? 'К выплате, зафиксировано' : 'К выплате сейчас');
+    const paySub = !entry.hasTargets
+        ? 'задайте цели квартала'
+        : (final ? `расчёт ${formatRub(entry.amountComputed)}` : (output.forecastAmount ? `прогноз на конец квартала ${formatRub(output.forecastAmount)}` : ''));
+    const hero = `<div class="bn-hero">
+        <div class="bn-tile bn-tile-pay"><div class="k">${payTitle}</div><div class="v">${entry.hasTargets ? formatRub(final ? entry.amountFinal : entry.amountComputed) : '—'}</div><div class="s">${bonusesEscape(paySub)}</div></div>
+        <div class="bn-tile"><div class="k">Уровень квартала</div><div class="v">${entry.level === null || entry.level === undefined ? '—' : bonusesNum(entry.level, 2)} <small>${bonusesEscape(level.word)}${lifted ? ' + деньги' : ''}</small></div><div class="s">${bonusesEscape(level.why)}</div></div>
+        <div class="bn-tile"><div class="k">Ставка за нормо-час</div><div class="v">${bonusesNum(output.rateApplied || 0, 2)} ₽</div><div class="s">${bonusesNum(entry.rate)} ₽ на medium · качество × ${bonusesNum(quality.multiplier, 2)}</div></div>
+    </div>`;
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';
     const formula = entry.hasTargets
         ? `<div class="bn-formula">${exactNum(output.fact, 2)} ч × ${exactNum(output.rateApplied, 2)} ₽ × ${exactNum(quality.multiplier, 4)} = ${formatRub(entry.amountBase ?? entry.amountComputed)}${entry.unmarked && entry.unmarked.amount ? ` + без заказа ${exactNum(entry.unmarked.hours, 2)} ч × ${Math.round(entry.unmarked.share * 100)}% × ${exactNum(output.rateApplied, 2)} ₽ = ${formatRub(entry.unmarked.amount)}` : ''} → <b>${formatRub(entry.amountComputed)}</b></div>`
         : '';
     const actions = `<div class="bn-actions">
-        <button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали'}</button>
+        <button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали и как посчитано'}</button>
         <button class="bn-btn" data-action="targets" data-scheme="${entry.schemeId}" ${open ? '' : 'disabled'}>Цели квартала</button>
         <button class="bn-btn" data-action="scheme" data-scheme="${entry.schemeId}" data-employee="${entry.employeeId}">Ставка</button>
         ${open ? `<button class="bn-btn primary" data-action="close" data-scheme="${entry.schemeId}" ${entry.hasTargets ? '' : 'disabled'}>Закрыть квартал</button>` : ''}
@@ -305,23 +379,25 @@ function renderBonusCard(entry, options = {}) {
     </div>`;
     const adjustments = (entry.adjustments || []).map((a) => `<li>${bonusesEscape(String(a.at).slice(0, 10))}: ${formatRub(a.from)} → ${formatRub(a.to)}. ${bonusesEscape(a.comment)}</li>`).join('');
     const details = expanded ? `<div class="bn-card-details">
+        ${renderSummary(entry)}
+        ${renderLevelRow(entry)}
+        ${(quality.metrics || []).filter((m) => Number(m.weight) > 0).map(renderQualityRow).join('')}
+        <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
+        ${formula}
+        ${renderWarnings(entry.warnings)}
+        <h3 class="bn-h2" style="margin-top:14px">Заказы квартала</h3>
         ${renderOrdersTable(entry)}
         ${adjustments ? `<h3 class="bn-h2" style="margin-top:14px">Корректировки</h3><ul>${adjustments}</ul>` : ''}
     </div>` : '';
     return `<div class="bn-card" data-scheme="${entry.schemeId}">
         <div class="bn-card-head">
             <div><div class="bn-name">${bonusesEscape(entry.employeeName || `Схема #${entry.schemeId}`)}</div>
-            <div class="bn-status">производство · ставка ${bonusesNum(entry.rate)} ₽ за нормо-час на уровне medium · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
-            <div class="bn-total"><small>${totalLabel}</small>${total}</div>
+            <div class="bn-status">производство · ${bonusesEscape(entry.period || '')} · период ${bonusesStatusLabel(entry.resultStatus)}</div></div>
         </div>
-        ${renderSummary(entry)}
         ${noTargets}${drift}
+        ${hero}
         ${renderOutputRow(output, entry.rate)}
-        ${expanded ? `${renderLevelRow(entry)}
-        ${(quality.metrics || []).filter((m) => Number(m.weight) > 0).map(renderQualityRow).join('')}
-        <div class="bn-row"><div class="bn-label">Множитель качества</div><div></div><div class="bn-fact">${bonusesNum(quality.multiplier, 2)}</div><div></div></div>
-        ${formula}
-        ${renderWarnings(entry.warnings)}` : ((entry.warnings || []).length ? `<div class="bn-muted" style="margin-top:8px">Предупреждений: ${entry.warnings.length}, см. «Детали».</div>` : '')}
+        ${renderChips(entry)}
         ${actions}
         ${details}
     </div>`;
@@ -340,7 +416,7 @@ function renderTeamBlock(team, period) {
     const sourceLabel = fact?.source === 'fintablo' ? 'из Финтабло автоматически' : 'введено вручную';
     const done = fact && Number(thresholds.target) > 0 ? Math.round((fact.value / Number(thresholds.target)) * 100) : null;
     const factHtml = fact
-        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${done !== null ? `${done}% от medium ${formatMoney(thresholds.target)} · ` : ''}${sourceLabel} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
+        ? `<div class="bn-fact">${formatMoneyShort(fact.value)}<span>${done !== null ? `${done}% от medium ${formatMoneyShort(thresholds.target)} · ` : ''}${fact.source === 'fintablo' ? 'Финтабло' : 'вручную'} ${bonusesEscape(String(fact.updated_at || '').slice(5, 10).split('-').reverse().join('.'))}</span></div>`
         : '<div class="bn-fact bn-muted">факт ещё не пришёл из Финтабло</div>';
     return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · план из таблицы, факт из Финтабло</div>${button}</div>
         <div class="bn-row" style="border-top:0">
