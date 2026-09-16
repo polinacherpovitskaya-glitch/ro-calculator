@@ -83,7 +83,7 @@ test('renderOutputRow: уровни, факт, прогноз, пересчёт 
         fact: 900, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 792, target: 900, max: 1008 },
         soldHours: 900, achievement: 1, rateApplied: 75, forecast: null, forecastAchievement: null, forecastAmount: null,
     }, 75);
-    assert.match(scaled, /план 1 331 ч \/ 1 512 ч \/ 1 693 ч; продано меньше плана/);
+    assert.match(scaled, /план 1 330 ч \/ 1 512 ч \/ 1 693 ч; продано меньше плана/);
     assert.match(scaled, /bn-tick-sold-label[^>]*>продано 900 ч/);
 
     assert.match(scaled, /1 693/);
