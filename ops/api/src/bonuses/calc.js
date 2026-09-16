@@ -205,6 +205,8 @@ export function computeProductionPeriod(input) {
   const warnings = [];
   const detail = [];
   let outputHours = 0;
+  let commercialOutputHours = 0;
+  let internalOutputHours = 0;
   let timesheetOnIncluded = 0;
   let onTimeCount = 0;
   let deadlineCount = 0;
@@ -240,6 +242,7 @@ export function computeProductionPeriod(input) {
     }
     if (included) {
       outputHours += hoursPlan;
+      if (isStock) internalOutputHours += hoursPlan; else commercialOutputHours += hoursPlan;
       timesheetOnIncluded += hoursFact;
     }
     detail.push({
@@ -415,7 +418,9 @@ export function computeProductionPeriod(input) {
     period, schemeId: scheme.id, employeeId: scheme.employee_id, status, rate,
     level: level === null ? null : roundTo(level, 4),
     output: {
-      fact: outputFact, thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold, scaledCapped,
+      fact: outputFact, commercialHours: roundTo(commercialOutputHours, 2), internalHours: roundTo(internalOutputHours, 2),
+      unmarkedHours: roundTo(unmarkedHours, 2),
+      thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold, scaledCapped,
       remainingSoldHours: roundTo(remainingSoldHours, 2), remainingSoldOrders,
       achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
       forecast, forecastAchievement, forecastLevel, forecastAmount,

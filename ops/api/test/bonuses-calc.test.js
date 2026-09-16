@@ -259,6 +259,9 @@ test('computeProductionPeriod: склад, предупреждения, гра�
     settings: {}, stockApprovals: new Set(['2']),
   });
   assert.equal(result.output.fact, 1050);
+  assert.equal(result.output.commercialHours, 1010);
+  assert.equal(result.output.internalHours, 40);
+  assert.equal(result.output.unmarkedHours, 3);
   assert.equal(result.orders.find((o) => o.id === 3).included, false);
   assert.equal(result.orders.find((o) => o.id === 4), undefined);
   assert.equal(result.orders.find((o) => o.id === 7), undefined);
