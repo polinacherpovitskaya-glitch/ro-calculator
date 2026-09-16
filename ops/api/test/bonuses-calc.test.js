@@ -109,7 +109,7 @@ test('computeProductionPeriod: веса 0.5/0.3/0.2 дают 153 073 ₽ без 
   assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
 });
 
-test('computeProductionPeriod: веса по умолчанию 0.5/0.3/0.2, норма по сроку и переделкам даёт 1', () => {
+test('computeProductionPeriod: веса по умолчанию = только производительность; срок и переделки информация', () => {
   const { orders, timeEntries } = specFixture();
   const defaultScheme = { ...scheme, quality_json: {} };
   const defaultTargets = { output_hours: targets.output_hours };
@@ -119,13 +119,16 @@ test('computeProductionPeriod: веса по умолчанию 0.5/0.3/0.2, н�
   });
   const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
   const rework = result.quality.metrics.find((m) => m.key === 'rework_share');
-  assert.equal(onTime.weight, 0.3);
-  assert.equal(onTime.informational, false);
-  // 9 из 10 в срок при планках 0.85 / 1 / 1 → 0.6667; переделки 4% при 0.05 / 0 / 0 → 0.6
+  assert.equal(onTime.weight, 0);
+  assert.equal(onTime.informational, true);
   assert.ok(Math.abs(onTime.achievement - 0.6667) < 0.001);
   assert.ok(Math.abs(rework.achievement - 0.6) < 0.001);
-  // 0.5 × 1.1667 + 0.3 × 0.6667 + 0.2 × 0.6 = 0.9033
-  assert.ok(Math.abs(result.quality.multiplier - 0.9033) < 0.001);
+  assert.ok(Math.abs(result.quality.multiplier - 1.1667) < 0.001);
+  // чек: ставка за час = 82.87 × 1.1667, заказы 1550 ч
+  assert.ok(Math.abs(result.hourRate - 82.87 * 1.1667) < 0.01);
+  assert.equal(result.receipt.commercial.hours, 1550);
+  assert.equal(result.receipt.commercial.amount, Math.round(1550 * result.hourRate));
+  assert.equal(result.receipt.unmarked.rate, 41.44);
   const perfect = computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: defaultScheme, targets: defaultTargets,
     orders: orders.filter((o) => o.id !== 10 && o.id !== 99).map((o) => ({ ...o })), timeEntries: [timeEntries[0]],
