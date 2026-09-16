@@ -13,6 +13,12 @@ test('renderSummary: коротко, сколько и из чего', () => {
         quality: { multiplier: 1.1667, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
     });
     assert.match(html, /К выплате сейчас 149 861 ₽<\/b> = 1 550 ч × 82,87 ₽ × 1,17/);
+    const split = renderSummary({
+        hasTargets: true, rate: 75, level: 1, amountComputed: 1,
+        output: { fact: 1173, commercialHours: 1100, internalHours: 73, unmarkedHours: 12, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, achievement: 1, rateApplied: 75, forecastAmount: null, remainingSoldHours: 0 },
+        money: { achievement: null }, quality: { multiplier: 1, metrics: [] },
+    });
+    assert.match(split, /по заказам 1 100 ч, внутренние работы \(сток, образцы, утверждено\) 73 ч; часы без заказа 12 ч не считаются/);
     assert.match(html, /между medium и aspiration/);
     assert.match(html, /производительность 1,05/);
     assert.match(html, /Прогноз к концу квартала 160 000 ₽/);
@@ -148,6 +154,7 @@ test('renderTeamBlock: уровни, факт из Финтабло, A_cash', ()
     assert.match(html, /14 000 000/);
     assert.match(html, /17 000 000/);
     assert.match(html, /уровень 0,63/);
+    assert.match(html, /93% от medium 15 500 000 ₽/);
     assert.match(html, /Финтабло 15\.09/);
     assert.match(html, /введено вручную/);
     const auto = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: { cash_in: { value: 2, source: 'fintablo', note: 'Финтабло, синк 2026-09-16', updated_at: '2026-09-16T04:15:00.000Z' } }, cashAchievement: 1 } }, '2026-Q3');
