@@ -362,7 +362,10 @@ export function computeProductionPeriod(input) {
   } else if (outputAch !== null) {
     warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
   }
-  const rateApplied = level === null ? 0 : roundTo(rate * level, 2);
+  // Для денег уровень и производительность округляются до сотых, ставка за час
+  // до рубля: то, что видно на экране, и есть то, что умножается.
+  const levelMoney = level === null ? null : roundTo(roundTo(level, 4), 2);
+  const rateApplied = levelMoney === null ? 0 : roundTo(rate * levelMoney, 2);
 
   // Качество
   const qualityFacts = {};
@@ -403,12 +406,16 @@ export function computeProductionPeriod(input) {
   });
   multiplier = roundTo(multiplier, 4);
 
-  const baseAmount = Math.round(outputFact * rateApplied * multiplier);
-  const hourRate = roundTo(rateApplied * multiplier, 2); // итоговая ставка за нормо-час
+  const multiplierMoney = roundTo(multiplier, 2);
+  const hourRate = Math.round(rateApplied * multiplierMoney); // итоговая ставка за нормо-час, ₽
+  const commercialAmount = Math.round(commercialOutputHours * hourRate);
+  const internalAmount = Math.round(internalOutputHours * hourRate);
+  const baseAmount = commercialAmount + internalAmount;
   const unmarkedShare = scheme.quality_json?.unmarked_rate_share === undefined || scheme.quality_json?.unmarked_rate_share === null
     ? DEFAULT_UNMARKED_RATE_SHARE
     : num(scheme.quality_json.unmarked_rate_share);
-  const unmarkedAmount = Math.round(unmarkedHours * rateApplied * unmarkedShare);
+  const unmarkedHourRate = Math.round(hourRate * unmarkedShare);
+  const unmarkedAmount = Math.round(unmarkedHours * unmarkedHourRate);
   const amount = baseAmount + unmarkedAmount;
 
   // Прогноз выпуска по доле прошедших рабочих дней.
@@ -427,7 +434,7 @@ export function computeProductionPeriod(input) {
     forecastLevel = moneyAch === null
       ? forecastAchievement
       : roundTo(Math.max(forecastAchievement, num(levelWeights.output) * forecastAchievement + num(levelWeights.money) * moneyAch), 4);
-    forecastAmount = Math.round(forecast * rate * forecastLevel * multiplier);
+    forecastAmount = Math.round(forecast * Math.round(rate * roundTo(forecastLevel, 2) * multiplierMoney));
   }
 
   return {
@@ -445,10 +452,11 @@ export function computeProductionPeriod(input) {
     quality: { multiplier, metrics: qualityMetrics },
     unmarked: { hours: roundTo(unmarkedHours, 2), share: unmarkedShare, amount: unmarkedAmount },
     hourRate,
+    rateParts: { rate, level: levelMoney, productivity: multiplierMoney },
     receipt: {
-      commercial: { hours: roundTo(commercialOutputHours, 2), amount: Math.round(commercialOutputHours * hourRate) },
-      internal: { hours: roundTo(internalOutputHours, 2), amount: Math.round(internalOutputHours * hourRate) },
-      unmarked: { hours: roundTo(unmarkedHours, 2), rate: roundTo(rateApplied * unmarkedShare, 2), amount: unmarkedAmount },
+      commercial: { hours: roundTo(commercialOutputHours, 2), amount: commercialAmount },
+      internal: { hours: roundTo(internalOutputHours, 2), amount: internalAmount },
+      unmarked: { hours: roundTo(unmarkedHours, 2), rate: unmarkedHourRate, amount: unmarkedAmount },
       upside: { hours: roundTo(remainingSoldHours, 2), amount: Math.round(remainingSoldHours * hourRate) },
     },
     amountBase: baseAmount,
