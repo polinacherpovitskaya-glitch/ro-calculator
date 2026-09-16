@@ -12,13 +12,23 @@ test('renderSummary: коротко, сколько и из чего', () => {
         money: { fact: 14400000, achievement: 0.6333, blend: 0.9635 },
         quality: { multiplier: 1.1667, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
     });
-    assert.match(html, /К выплате сейчас 149 861 ₽<\/b> = 1 550 ч × 82,87 ₽ × 1,17/);
+    assert.match(html, /К выплате сейчас 149 861 ₽<\/b> = 1 550 ч × 82,87 ₽ × 1,1667/);
+    const exact = renderSummary({
+        hasTargets: true, rate: 75, level: 1, amountComputed: 89623,
+        output: { fact: 1173.04, commercialHours: 1173.04, internalHours: 0, unmarkedHours: 232, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, achievement: 1, rateApplied: 75, scaledCapped: true, forecastAmount: null, remainingSoldHours: 53, remainingSoldOrders: [1] },
+        money: { achievement: null }, quality: { multiplier: 1.0187, metrics: [] },
+    });
+    assert.match(exact, /1 173,04 ч × 75 ₽ × 1,0187/);
+    assert.match(exact, /Часы табеля без заказа, 232 ч, в выпуск не входят/);
+    assert.match(exact, /проданное почти сделано/);
+    assert.doesNotMatch(exact, /Из них/);
     const split = renderSummary({
         hasTargets: true, rate: 75, level: 1, amountComputed: 1,
         output: { fact: 1173, commercialHours: 1100, internalHours: 73, unmarkedHours: 12, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, achievement: 1, rateApplied: 75, forecastAmount: null, remainingSoldHours: 0 },
         money: { achievement: null }, quality: { multiplier: 1, metrics: [] },
     });
-    assert.match(split, /по заказам 1 100 ч, внутренние работы \(сток, образцы, утверждено\) 73 ч; часы без заказа 12 ч не считаются/);
+    assert.match(split, /по заказам 1 100 ч и внутренние работы \(сток, образцы, утверждено\) 73 ч/);
+    assert.match(split, /без заказа, 12 ч, в выпуск не входят/);
     assert.match(html, /между medium и aspiration/);
     assert.match(html, /производительность 1,05/);
     assert.match(html, /Прогноз к концу квартала 160 000 ₽/);
@@ -34,7 +44,7 @@ test('renderSummary: коротко, сколько и из чего', () => {
         output: { fact: 1173, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, achievement: 1, rateApplied: 75, scaledCapped: true, forecastAmount: null, remainingSoldHours: 53, remainingSoldOrders: [1, 2, 3] },
         money: { achievement: null }, quality: { multiplier: 1.04, metrics: [] },
     });
-    assert.match(capped, /medium: продано 1 044 ч из плана 1 512 ч, всё проданное сделано/);
+    assert.match(capped, /medium: продано 1 044 ч из плана 1 512 ч, проданное почти сделано/);
     assert.match(capped, /Не сделано из проданного: 53 ч/);
     assert.match(renderSummary({ hasTargets: false }), /Цели квартала ещё не заданы/);
 });
@@ -73,9 +83,10 @@ test('renderOutputRow: уровни, факт, прогноз, пересчёт 
         fact: 900, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 792, target: 900, max: 1008 },
         soldHours: 900, achievement: 1, rateApplied: 75, forecast: null, forecastAchievement: null, forecastAmount: null,
     }, 75);
-    assert.match(scaled, /продано 900 ч из плана 1 512 ч: планки от проданного, но не выше medium/);
+    assert.match(scaled, /план 1 331 ч \/ 1 512 ч \/ 1 693 ч; продано меньше плана/);
+    assert.match(scaled, /bn-tick-sold-label[^>]*>продано 900 ч/);
 
-    assert.match(scaled, /1 008/);
+    assert.match(scaled, /1 693/);
 });
 
 test('renderLevelRow: формула уровня', () => {

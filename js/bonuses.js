@@ -27,6 +27,8 @@ const BONUSES_CSS = `
 .bn-fill.below{background:#cf222e}.bn-fill.mid{background:#bf8700}
 .bn-tick{position:absolute;top:-6px;width:2px;height:26px;background:#24292f}
 .bn-tick-label{position:absolute;top:22px;transform:translateX(-50%);font-size:12px;color:#57606a;white-space:nowrap}
+.bn-tick-sold{background:#1f6feb;height:34px;top:-10px}
+.bn-tick-sold-label{top:-26px;color:#1f6feb;font-weight:600}
 .bn-fact{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
 .bn-fact span{display:block;font-size:13px;color:#57606a;font-weight:400}
 .bn-ach{font-size:18px;font-variant-numeric:tabular-nums}
@@ -97,6 +99,16 @@ function formatHours(value) {
     return `${bonusesNum(Math.round(Number(value) || 0))} ч`;
 }
 
+// Точные значения для формулы: часы до сотых, множитель до 4 знаков, без
+// лишних нулей, чтобы произведение сходилось с суммой.
+function exactNum(value, digits) {
+    const n = Number(value) || 0;
+    const fixed = n.toFixed(digits);
+    const trimmed = fixed.replace(/\.?0+$/, '');
+    const [int, frac] = trimmed.split('.');
+    return `${bonusesNum(Number(int))}${frac ? `,${frac}` : ''}`;
+}
+
 function formatMetricValue(key, value) {
     if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
     switch (key) {
@@ -136,17 +148,23 @@ function renderLevelBar(thresholds, fact, direction, key, achievement) {
 }
 
 function renderOutputRow(output, rate) {
-    const thresholds = output.thresholdsEffective || output.thresholds || null;
+    const thresholds = output.thresholds || output.thresholdsEffective || null;
     const forecast = output.forecast !== null && output.forecast !== undefined
         ? `<span>прогноз ${bonusesEscape(formatHours(output.forecast))}, если темп сохранится</span>`
         : '';
     const scaled = output.thresholdsEffective && output.thresholds && output.thresholdsEffective.target !== output.thresholds.target
-        ? `<span>продано ${bonusesEscape(formatHours(output.soldHours))} из плана ${bonusesEscape(formatHours(output.thresholds.target))}: планки от проданного, но не выше medium</span>`
+        ? `<span>план ${bonusesEscape(formatHours(output.thresholds.min))} / ${bonusesEscape(formatHours(output.thresholds.target))} / ${bonusesEscape(formatHours(output.thresholds.max))}; продано меньше плана, уровень считается от проданного, но не выше medium</span>`
         : '<span>base / medium / aspiration</span>';
     const level = output.achievement === null || output.achievement === undefined ? '—' : bonusesNum(output.achievement, 2);
+    let bar = renderLevelBar(thresholds, output.fact, 'higher', 'output_hours', output.achievement);
+    if (thresholds && output.soldHours !== null && output.soldHours !== undefined && Number(output.soldHours) > 0) {
+        const pct = bonusesTrackPercent(output.soldHours, thresholds, 'higher').toFixed(1);
+        bar = bar.replace('</div>$', '') ;
+        bar = bar.slice(0, -6) + `<div class="bn-tick bn-tick-sold" style="left:${pct}%"></div><div class="bn-tick-label bn-tick-sold-label" style="left:${pct}%">продано ${bonusesEscape(formatHours(output.soldHours))}</div></div>`;
+    }
     return `<div class="bn-row bn-output">
         <div class="bn-label">Выпуск, нормо-часы${scaled}</div>
-        ${renderLevelBar(thresholds, output.fact, 'higher', 'output_hours', output.achievement)}
+        ${bar}
         <div class="bn-fact">${bonusesEscape(formatHours(output.fact))}${forecast}</div>
         <div class="bn-ach">${level}<span>уровень по часам</span></div>
     </div>`;
@@ -237,7 +255,7 @@ function renderSummary(entry) {
     const prod = (q.metrics || []).find((m) => m.key === 'productivity');
     let levelShort;
     if (outA === null || outA === undefined) levelShort = 'уровень не считается';
-    else if (o.scaledCapped) levelShort = `medium: продано ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано`;
+    else if (o.scaledCapped) levelShort = `medium: продано ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, ${o.remainingSoldHours > 0 ? 'проданное почти сделано' : 'всё проданное сделано'}, выше medium только от плана`;
     else if (outA < 0.5) levelShort = 'ниже base';
     else if (outA < 1) levelShort = 'между base и medium';
     else if (outA < 1.5) levelShort = 'между medium и aspiration';
@@ -248,10 +266,11 @@ function renderSummary(entry) {
         .map((m) => `${m.key === 'on_time_share' ? 'в срок' : 'переделки'} ${bonusesEscape(formatMetricValue(m.key, m.fact))}`).join(', ');
     const forecast = o.forecastAmount ? ` Прогноз к концу квартала ${formatRub(o.forecastAmount)}.` : '';
     const remaining = o.remainingSoldHours > 0 ? ` <b>Не сделано из проданного: ${bonusesEscape(formatHours(o.remainingSoldHours))}.</b>` : '';
-    const split = (o.internalHours > 0 || o.unmarkedHours > 0)
-        ? ` Из них по заказам ${bonusesEscape(formatHours(o.commercialHours))}${o.internalHours > 0 ? `, внутренние работы (сток, образцы, утверждено) ${bonusesEscape(formatHours(o.internalHours))}` : ''}${o.unmarkedHours > 0 ? `; часы без заказа ${bonusesEscape(formatHours(o.unmarkedHours))} не считаются` : ''}.`
+    const split = o.internalHours > 0
+        ? ` В выпуске по заказам ${bonusesEscape(formatHours(o.commercialHours))} и внутренние работы (сток, образцы, утверждено) ${bonusesEscape(formatHours(o.internalHours))}.`
         : '';
-    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.${split}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
+    const unmarked = o.unmarkedHours > 0 ? ` Часы табеля без заказа, ${bonusesEscape(formatHours(o.unmarkedHours))}, в выпуск не входят.` : '';
+    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${exactNum(o.fact, 2)} ч × ${exactNum(o.rateApplied, 2)} ₽ × ${exactNum(q.multiplier, 4)}.${split}${unmarked}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {
