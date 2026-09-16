@@ -64,7 +64,7 @@ test('formatRub и formatMetricValue', () => {
     assert.equal(formatMetricValue('productivity', 1.0523), '1,05');
     assert.equal(formatMetricValue('on_time_share', 0.9), '90%');
     assert.equal(formatMetricValue('rework_share', null), '—');
-    assert.equal(formatMetricValue('cash_in', 14400000), '14 400 000 ₽');
+    assert.equal(formatMetricValue('cash_in', 14400000), '14,4 млн');
 });
 
 test('renderOutputRow: уровни, факт, прогноз, пересчёт от проданного', () => {
@@ -74,8 +74,8 @@ test('renderOutputRow: уровни, факт, прогноз, пересчёт 
     }, 75);
     assert.match(html, /bn-output/);
     assert.match(html, /1 550 ч/);
-    assert.match(html, /1 330/);
-    assert.match(html, /1 693/);
+    assert.match(html, /base 1 330 ч/);
+    assert.match(html, /aspiration 1 693 ч/);
     assert.match(html, /1,11/);
     assert.match(html, /уровень по часам/);
     assert.match(html, /прогноз 1 610 ч/);
@@ -127,9 +127,26 @@ test('renderBonusCard: формула, итог, детали под карто�
     assert.match(html, /1 550 ч × 82,87 ₽ × 1,1917 = 153 073 ₽/);
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
-    assert.match(html, /Производительность/);
+    assert.match(html, /bn-chip-green">Производительность <b>1,05<\/b>/);
     assert.doesNotMatch(html, /data-metric="on_time_share"/, 'строки с весом 0 на карточке не показываются');
-    assert.match(html, /к выплате за квартал/);
+    assert.match(html, /К выплате сейчас/);
+    assert.match(html, /bn-hero/);
+    assert.match(html, /medium → aspiration/);
+    const collapsed = renderBonusCard({
+        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: 1,
+        output: { fact: 1173, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, scaledCapped: true, achievement: 1, rateApplied: 75, forecastAmount: 105665, remainingSoldHours: 53 },
+        money: { achievement: null }, quality: { multiplier: 1.02, metrics: [{ key: 'productivity', label: 'Производительность', weight: 0.5, fact: 1.01, achievement: 1.03, available: true }] },
+        unmarked: { hours: 232, share: 0.5, amount: 8700 }, amountBase: 89623, amountComputed: 98323, amountFinal: null,
+        warnings: [{ code: 'unmarked_hours', hours: 232, count: 0, orderIds: [] }], orders: [], adjustments: [], targetsDrift: false, hasTargets: true,
+    }, { expanded: false });
+    assert.match(collapsed, /98 323 ₽/);
+    assert.match(collapsed, /прогноз на конец квартала 105 665 ₽/);
+    assert.match(collapsed, /1,00 <small>medium<\/small>/);
+    assert.match(collapsed, /продано 1 044 ч из плана 1 512 ч, почти всё сделано/);
+    assert.match(collapsed, /bn-chip-amber">Без заказа <b>232 ч<\/b>/);
+    assert.match(collapsed, /bn-chip-red">Не сделано из проданного <b>53 ч<\/b>/);
+    assert.match(collapsed, /Предупреждений <b>1<\/b>/);
+    assert.doesNotMatch(collapsed, /bn-summary/, 'в свёрнутом виде текста нет');
 });
 
 test('renderBonusCard: без целей вместо суммы прочерк и подсказка', () => {
@@ -161,14 +178,16 @@ test('renderTeamBlock: уровни, факт из Финтабло, A_cash', ()
         cashAchievement: 0.6333,
     } }, '2026-Q3');
     assert.match(html, /bn-team/);
-    assert.match(html, /14 400 000 ₽/);
-    assert.match(html, /14 000 000/);
-    assert.match(html, /17 000 000/);
+    assert.match(html, /14,4 млн/);
+    assert.match(html, /base 14 млн/);
+    assert.match(html, /medium 15,5 млн/);
+    assert.match(html, /aspiration 17 млн/);
+    assert.match(html, /bn-tick-above/);
     assert.match(html, /уровень 0,63/);
-    assert.match(html, /93% от medium 15 500 000 ₽/);
-    assert.match(html, /введено вручную/);
+    assert.match(html, /93% от medium 15,5 млн/);
+    assert.match(html, /вручную 15\.09/);
     const auto = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: { cash_in: { value: 2, source: 'fintablo', note: 'Финтабло, синк 2026-09-16', updated_at: '2026-09-16T04:15:00.000Z' } }, cashAchievement: 1 } }, '2026-Q3');
-    assert.match(auto, /из Финтабло автоматически/);
+    assert.match(auto, /Финтабло 16\.09/);
     assert.match(html, /План и факт по деньгам/);
     assert.match(html, /Обновить из Финтабло сейчас/);
     const none = renderTeamBlock({ commercial: { targets: null, facts: {}, cashAchievement: null } }, '2026-Q3');
