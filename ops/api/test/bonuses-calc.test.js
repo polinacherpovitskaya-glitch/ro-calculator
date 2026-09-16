@@ -262,6 +262,17 @@ test('computeProductionPeriod: склад, предупреждения, гра�
   assert.equal(result.output.commercialHours, 1010);
   assert.equal(result.output.internalHours, 40);
   assert.equal(result.output.unmarkedHours, 3);
+  // часы без заказа: половина ставки, отдельной строкой, не в уровне
+  assert.equal(result.unmarked.hours, 3);
+  assert.equal(result.unmarked.share, 0.5);
+  assert.equal(result.unmarked.amount, Math.round(3 * result.output.rateApplied * 0.5));
+  assert.equal(result.amountComputed, result.amountBase + result.unmarked.amount);
+  const noPay = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: { ...scheme.quality_json, unmarked_rate_share: 0 } }, targets, orders, timeEntries,
+    settings: {}, stockApprovals: new Set(['2']),
+  });
+  assert.equal(noPay.unmarked.amount, 0);
+  assert.equal(noPay.amountComputed, noPay.amountBase);
   assert.equal(result.orders.find((o) => o.id === 3).included, false);
   assert.equal(result.orders.find((o) => o.id === 4), undefined);
   assert.equal(result.orders.find((o) => o.id === 7), undefined);

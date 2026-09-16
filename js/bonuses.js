@@ -269,8 +269,12 @@ function renderSummary(entry) {
     const split = o.internalHours > 0
         ? ` В выпуске по заказам ${bonusesEscape(formatHours(o.commercialHours))} и внутренние работы (сток, образцы, утверждено) ${bonusesEscape(formatHours(o.internalHours))}.`
         : '';
-    const unmarked = o.unmarkedHours > 0 ? ` Часы табеля без заказа, ${bonusesEscape(formatHours(o.unmarkedHours))}, в выпуск не входят.` : '';
-    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${exactNum(o.fact, 2)} ч × ${exactNum(o.rateApplied, 2)} ₽ × ${exactNum(q.multiplier, 4)}.${split}${unmarked}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
+    const u = entry.unmarked || { hours: o.unmarkedHours || 0, share: 0, amount: 0 };
+    const unmarked = u.hours > 0
+        ? ` Плюс часы без заказа (быт, сток, съёмки): ${exactNum(u.hours, 2)} ч × ${Math.round(u.share * 100)}% ставки = ${formatRub(u.amount)}; разнесите их по проектам, чтобы получить полную ставку.`
+        : '';
+    const base = entry.amountBase !== undefined && entry.amountBase !== null ? entry.amountBase : entry.amountComputed;
+    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b>: ${exactNum(o.fact, 2)} ч × ${exactNum(o.rateApplied, 2)} ₽ × ${exactNum(q.multiplier, 4)} = ${formatRub(base)}.${split}${unmarked}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {
@@ -290,7 +294,7 @@ function renderBonusCard(entry, options = {}) {
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';
     const formula = entry.hasTargets
-        ? `<div class="bn-formula">${bonusesEscape(formatHours(output.fact))} × ${bonusesNum(output.rateApplied, 2)} ₽ × ${bonusesNum(quality.multiplier, 2)} = <b>${formatRub(entry.amountComputed)}</b></div>`
+        ? `<div class="bn-formula">${exactNum(output.fact, 2)} ч × ${exactNum(output.rateApplied, 2)} ₽ × ${exactNum(quality.multiplier, 4)} = ${formatRub(entry.amountBase ?? entry.amountComputed)}${entry.unmarked && entry.unmarked.amount ? ` + без заказа ${exactNum(entry.unmarked.hours, 2)} ч × ${Math.round(entry.unmarked.share * 100)}% × ${exactNum(output.rateApplied, 2)} ₽ = ${formatRub(entry.unmarked.amount)}` : ''} → <b>${formatRub(entry.amountComputed)}</b></div>`
         : '';
     const actions = `<div class="bn-actions">
         <button class="bn-btn" data-action="toggle" data-scheme="${entry.schemeId}">${expanded ? 'Скрыть детали' : 'Детали'}</button>
