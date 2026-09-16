@@ -239,9 +239,11 @@ function renderSummary(entry) {
     else levelShort = 'выше aspiration';
     const lifted = entry.money && entry.money.achievement !== null && entry.money.achievement !== undefined && entry.level !== null && entry.level > outA + 0.0001;
     const prodText = prod ? (prod.available ? `производительность ${bonusesNum(prod.fact, 2)}` : 'табеля нет, множитель по минимуму') : '';
+    const extras = (q.metrics || []).filter((m) => m.key !== 'productivity' && Number(m.weight) > 0 && m.available)
+        .map((m) => `${m.key === 'on_time_share' ? 'в срок' : 'переделки'} ${bonusesEscape(formatMetricValue(m.key, m.fact))}`).join(', ');
     const forecast = o.forecastAmount ? ` Прогноз к концу квартала ${formatRub(o.forecastAmount)}.` : '';
     const remaining = o.remainingSoldHours > 0 ? ` <b>Не сделано из проданного: ${bonusesEscape(formatHours(o.remainingSoldHours))}.</b>` : '';
-    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}.${forecast}${remaining}</div>`;
+    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {
@@ -298,7 +300,7 @@ function renderTeamBlock(team, period) {
     const c = team?.commercial || {};
     const thresholds = c.targets?.cash_in || null;
     const fact = c.facts?.cash_in || null;
-    const button = '<button class="bn-btn" data-action="team-money">План и факт по деньгам</button>';
+    const button = '<span class="bn-actions" style="margin-top:0"><button class="bn-btn primary" data-action="sync-money">Обновить из Финтабло сейчас</button><button class="bn-btn" data-action="team-money">План и факт по деньгам</button></span>';
     if (!thresholds) {
         return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)}</div>${button}</div>
             <div class="bn-warnings">План по деньгам за квартал ещё не пришёл из таблицы (синк раз в день). Уровень производства пока считается только по часам.</div></div>`;
@@ -462,6 +464,16 @@ const Bonuses = {
                 await this.openSchemeDialog(Number(dataset.employee), schemeId);
             } else if (action === 'team-money') {
                 await this.openTeamDialog();
+            } else if (action === 'sync-money') {
+                const btn = document.querySelector('[data-action="sync-money"]');
+                if (btn) { btn.disabled = true; btn.textContent = 'Обновляю…'; }
+                try {
+                    const result = await this.api('POST', '/sync/run', { year: Number(this.period.slice(0, 4)) });
+                    const fact = result?.facts?.[this.period];
+                    App.toast(fact !== undefined ? `Финтабло: ${formatMoney(fact)} за ${this.period}` : 'Финтабло обновлено');
+                } finally {
+                    await this.load();
+                }
             } else if (action === 'close') {
                 if (!confirm('Закрыть квартал? Факт зафиксируется и больше не пересчитается.')) return;
                 await this.api('POST', `/periods/${this.period}/close/${schemeId}`, {});
@@ -497,7 +509,7 @@ const Bonuses = {
         const box = this.dialog(`<h2 class="bn-h2">Схема производства</h2>
             <label>Сотрудник</label><select id="bn-scheme-employee" ${employeeId ? 'disabled' : ''}>${options}</select>
             <label>Ставка за нормо-час на уровне medium, ₽</label><input id="bn-scheme-rate" type="number" value="${current ? current.rate : 75}">
-            <div class="bn-muted" style="margin-top:6px">ниже base ставка × 0,25; base × 0,5; medium × 1; aspiration × 1,5; выше aspiration растёт дальше до × 2</div>
+            <div class="bn-muted" style="margin-top:6px">ниже base ставка × 0,25; base × 0,5; medium × 1; aspiration × 1,5; выше aspiration растёт дальше до × 2. Множитель качества: производительность 50%, в срок 30%, переделки 20%.</div>
             <div class="bn-actions"><button class="bn-btn primary" id="bn-scheme-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
         box.querySelector('#bn-scheme-save').addEventListener('click', async () => {
             try {

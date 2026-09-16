@@ -33,6 +33,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PORT: "3000"
       APP_VERSION: ${APP_VERSION:-shadow}
+      FINTABLO_API_KEY: ${FINTABLO_API_KEY:-}
     ports:
       - "127.0.0.1:${SHADOW_API_PORT:-3100}:3000"
     depends_on:
