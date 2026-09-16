@@ -223,36 +223,25 @@ function renderOrdersTable(entry) {
     </tr></thead><tbody>${rows || '<tr><td colspan="7" class="bn-muted">Завершённых заказов в периоде нет</td></tr>'}</tbody></table>`;
 }
 
-// Одна фраза: сколько к выплате и почему. Для Лёши это главное на странице.
+// Коротко: сколько к выплате и из чего сложилось. Для Лёши это главное.
 function renderSummary(entry) {
     if (!entry.hasTargets) return '<div class="bn-summary bn-muted">Цели квартала ещё не заданы, расчёта пока нет.</div>';
     const o = entry.output || {};
     const q = entry.quality || {};
-    const thr = o.thresholdsEffective || o.thresholds || {};
     const outA = o.achievement;
     const prod = (q.metrics || []).find((m) => m.key === 'productivity');
-    let levelText;
-    if (outA === null || outA === undefined) levelText = 'уровень пока не считается';
-    else if (outA < 0.5) levelText = `это ниже base (${bonusesEscape(formatHours(thr.min))}), уровень ${bonusesNum(outA, 2)}, платится четверть ставки`;
-    else if (outA < 1) levelText = `это между base и medium (${bonusesEscape(formatHours(thr.min))} и ${bonusesEscape(formatHours(thr.target))}), уровень ${bonusesNum(outA, 2)}`;
-    else if (o.scaledCapped) levelText = `продано на квартал только ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано, поэтому уровень medium (1,00) и полная ставка. Это защита от недопродажи, а не повод сбавлять темп: каждый новый заказ с дедлайном в квартале поднимает планку, а проданное и не сделанное роняет уровень ниже medium; выше medium уровень растёт только от настоящего плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}`;
-    else if (outA < 1.5) levelText = `это между medium и aspiration (${bonusesEscape(formatHours(thr.target))} и ${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
-    else levelText = `это выше aspiration (${bonusesEscape(formatHours(thr.max))}), уровень ${bonusesNum(outA, 2)}`;
-    let moneyText = '';
-    if (entry.money && entry.money.achievement !== null && entry.money.achievement !== undefined) {
-        const lifted = entry.level !== null && entry.level > outA + 0.0001;
-        moneyText = ` Деньги компании ${bonusesEscape(formatMoney(entry.money.fact))} дают уровень ${bonusesNum(entry.money.achievement, 2)}${lifted ? `, они поднимают уровень квартала до ${bonusesNum(entry.level, 2)}` : ', они ниже часов и вниз не тянут'}.`;
-    }
-    const prodText = prod
-        ? (prod.available
-            ? ` Производительность ${bonusesNum(prod.fact, 2)} (норма к табелю) даёт множитель ${bonusesNum(q.multiplier, 2)}.`
-            : ` Табеля по заказам нет, множитель взят по минимуму ${bonusesNum(q.multiplier, 2)}.`)
-        : '';
-    const forecast = o.forecastAmount ? ` Если темп сохранится, к концу квартала будет около ${formatRub(o.forecastAmount)}.` : '';
-    const remaining = o.remainingSoldHours > 0
-        ? ` <b>Из проданного ещё не сделано ${bonusesEscape(formatHours(o.remainingSoldHours))}</b> (${(o.remainingSoldOrders || []).length} заказ${(o.remainingSoldOrders || []).length === 1 ? '' : 'а(ов)'} с дедлайном в этом квартале): закрыть до конца квартала, иначе уровень опустится ниже medium.`
-        : '';
-    return `<div class="bn-summary"><b>Сейчас к выплате ${formatRub(entry.amountComputed)}.</b> Цех сделал ${bonusesEscape(formatHours(o.fact))} нормо-часов, ${levelText}.${moneyText}${prodText} Итого ставка ${bonusesNum(o.rateApplied, 2)} ₽ за час × ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(q.multiplier, 2)} = ${formatRub(entry.amountComputed)}.${forecast}${remaining}</div>`;
+    let levelShort;
+    if (outA === null || outA === undefined) levelShort = 'уровень не считается';
+    else if (o.scaledCapped) levelShort = `medium: продано ${bonusesEscape(formatHours(o.soldHours))} из плана ${bonusesEscape(formatHours((o.thresholds || {}).target))}, всё проданное сделано`;
+    else if (outA < 0.5) levelShort = 'ниже base';
+    else if (outA < 1) levelShort = 'между base и medium';
+    else if (outA < 1.5) levelShort = 'между medium и aspiration';
+    else levelShort = 'выше aspiration';
+    const lifted = entry.money && entry.money.achievement !== null && entry.money.achievement !== undefined && entry.level !== null && entry.level > outA + 0.0001;
+    const prodText = prod ? (prod.available ? `производительность ${bonusesNum(prod.fact, 2)}` : 'табеля нет, множитель по минимуму') : '';
+    const forecast = o.forecastAmount ? ` Прогноз к концу квартала ${formatRub(o.forecastAmount)}.` : '';
+    const remaining = o.remainingSoldHours > 0 ? ` <b>Не сделано из проданного: ${bonusesEscape(formatHours(o.remainingSoldHours))}.</b>` : '';
+    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {
