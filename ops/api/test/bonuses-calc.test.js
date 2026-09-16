@@ -272,6 +272,29 @@ test('computeProductionPeriod: склад, предупреждения, гра�
   assert.equal(onTime.fact, 1);
 });
 
+test('on_time_share: заказы с оценочной датой завершения не участвуют', () => {
+  const orders = [
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
+    { id: 2, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-08-01', updated_at: '2026-09-25T00:00:00.000Z' },
+  ];
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-09-01', hours: 100, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-09-02', hours: 100, order_id: 2 },
+  ];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries, settings: {}, stockApprovals: new Set(),
+  });
+  const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
+  assert.equal(onTime.fact, 1); // только заказ 1; заказ 2 с оценочной датой исключён
+  assert.ok(result.warnings.some((w) => w.code === 'estimated_dates' && w.orderIds.includes(2)));
+  const onlyEstimated = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders: [orders[1]], timeEntries: [timeEntries[1]], settings: {}, stockApprovals: new Set(),
+  });
+  const neutral = onlyEstimated.quality.metrics.find((m) => m.key === 'on_time_share');
+  assert.equal(neutral.available, false);
+  assert.equal(neutral.achievement, 1); // нейтрально
+});
+
 test('computeProductionPeriod: пустой табель → A_prod 0.5 и предупреждение', () => {
   const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1512, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
   const result = computeProductionPeriod({

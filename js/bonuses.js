@@ -109,13 +109,18 @@ function formatMetricValue(key, value) {
     }
 }
 
+// Полоса от нуля: aspiration на 85% ширины, запас справа под перевыполнение.
 function bonusesTrackPercent(value, thresholds, direction) {
     const lower = direction === 'lower';
-    const lo = lower ? Number(thresholds.max) : Number(thresholds.min);
-    const hi = lower ? Number(thresholds.min) : Number(thresholds.max);
-    const span = hi - lo || 1;
-    const v = lower ? (hi - Number(value)) + lo : Number(value);
-    return Math.max(0, Math.min(1, ((v - lo) / span) * 0.8 + 0.1)) * 100;
+    if (lower) {
+        const lo = Number(thresholds.max);
+        const hi = Number(thresholds.min);
+        const span = hi - lo || 1;
+        const v = (hi - Number(value)) + lo;
+        return Math.max(0, Math.min(1, ((v - lo) / span) * 0.8 + 0.1)) * 100;
+    }
+    const top = Number(thresholds.max) || 1;
+    return Math.max(0, Math.min(100, (Number(value) / top) * 85));
 }
 
 function renderLevelBar(thresholds, fact, direction, key, achievement) {
@@ -243,7 +248,10 @@ function renderSummary(entry) {
         .map((m) => `${m.key === 'on_time_share' ? 'в срок' : 'переделки'} ${bonusesEscape(formatMetricValue(m.key, m.fact))}`).join(', ');
     const forecast = o.forecastAmount ? ` Прогноз к концу квартала ${formatRub(o.forecastAmount)}.` : '';
     const remaining = o.remainingSoldHours > 0 ? ` <b>Не сделано из проданного: ${bonusesEscape(formatHours(o.remainingSoldHours))}.</b>` : '';
-    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
+    const split = (o.internalHours > 0 || o.unmarkedHours > 0)
+        ? ` Из них по заказам ${bonusesEscape(formatHours(o.commercialHours))}${o.internalHours > 0 ? `, внутренние работы (сток, образцы, утверждено) ${bonusesEscape(formatHours(o.internalHours))}` : ''}${o.unmarkedHours > 0 ? `; часы без заказа ${bonusesEscape(formatHours(o.unmarkedHours))} не считаются` : ''}.`
+        : '';
+    return `<div class="bn-summary"><b>К выплате сейчас ${formatRub(entry.amountComputed)}</b> = ${bonusesEscape(formatHours(o.fact))} × ${bonusesNum(o.rateApplied, 2)} ₽ × ${bonusesNum(q.multiplier, 2)}.${split}<br>Уровень ${bonusesNum(entry.level, 2)} (${levelShort}${lifted ? `, деньги подняли` : ''}); ${prodText}${extras ? `, ${extras}` : ''}.${forecast}${remaining}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {
@@ -307,8 +315,9 @@ function renderTeamBlock(team, period) {
     }
     const ach = c.cashAchievement;
     const sourceLabel = fact?.source === 'fintablo' ? 'из Финтабло автоматически' : 'введено вручную';
+    const done = fact && Number(thresholds.target) > 0 ? Math.round((fact.value / Number(thresholds.target)) * 100) : null;
     const factHtml = fact
-        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${bonusesEscape(fact.note || 'Финтабло, направление Recycle Object')} · ${sourceLabel} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
+        ? `<div class="bn-fact">${formatMoney(fact.value)}<span>${done !== null ? `${done}% от medium ${formatMoney(thresholds.target)} · ` : ''}${sourceLabel} · ${bonusesEscape(String(fact.updated_at || '').slice(0, 10))}</span></div>`
         : '<div class="bn-fact bn-muted">факт ещё не пришёл из Финтабло</div>';
     return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · план из таблицы, факт из Финтабло</div>${button}</div>
         <div class="bn-row" style="border-top:0">

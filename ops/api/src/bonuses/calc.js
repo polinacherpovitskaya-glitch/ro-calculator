@@ -232,11 +232,14 @@ export function computeProductionPeriod(input) {
 
     if (hoursPlan <= 0) noHours.push(order.id);
     if (completion.estimated) estimated.push(order.id);
+    // «В срок» считаем только по заказам с настоящей датой завершения:
+    // оценочная дата (по табелю или последнему изменению) делает старые
+    // заказы «просроченными» без вины цеха.
     if (!isStock) {
-      if (deadline) {
+      if (deadline && !completion.estimated) {
         deadlineCount += 1;
         if (onTime) onTimeCount += 1;
-      } else {
+      } else if (!deadline) {
         noDeadline.push(order.id);
       }
     }
