@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds } from '../scripts/bonuses-plan-fact-sync.mjs';
+import { parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds, moneyQuarterWindow } from '../scripts/bonuses-plan-fact-sync.mjs';
 
 const CSV = `2025,,,,,
 ,,,,,
@@ -49,14 +49,19 @@ test('parsePlanCsv + tiersToPeriods: план 2026 из таблицы, опеч
 
 test('quarterOfDate и sumIncomeByQuarter: только поступления направления, без плановых и без двойного счёта', () => {
   assert.equal(quarterOfDate('2026-09-15'), '2026-Q3');
-  assert.equal(quarterOfDate('2026-01-02'), '2026-Q1');
+  assert.equal(quarterOfDate('2026-10-05'), '2026-Q3'); // до 7 октября ещё III квартал
+  assert.equal(quarterOfDate('2026-10-08'), '2026-Q4');
+  assert.equal(quarterOfDate('2026-07-03'), '2026-Q2'); // до 7 июля ещё II квартал
+  assert.equal(quarterOfDate('2026-01-02'), '2025-Q4');
+  assert.deepEqual(moneyQuarterWindow('2026-Q3'), { from: '2026-07-08', to: '2026-10-07' });
+  assert.deepEqual(moneyQuarterWindow('2026-Q4'), { from: '2026-10-08', to: '2027-01-07' });
   const tx = [
     { id: '1', group: 'income', directionId: 7, date: '10.07.2026', value: 1000000 },
     { id: '2', group: 'income', directionId: 7, date: '20.08.2026', value: 500000.5 },
     { id: '3', group: 'income', directionId: 8, date: '20.08.2026', value: 999999 },
     { id: '4', group: 'expense', directionId: 7, date: '20.08.2026', value: 300000 },
     { id: '5', group: 'income', directionId: 7, date: '20.08.2026', value: 100, isPlan: true },
-    { id: '6', group: 'income', directionId: 7, date: '01.10.2026', value: 250000 },
+    { id: '6', group: 'income', directionId: 7, date: '10.10.2026', value: 250000 },
     { id: '7', group: 'income', directionId: 7, date: '05.09.2026', value: 400000 },
     { id: '8', group: 'income', directionId: 7, date: '05.09.2026', value: 400000, parentId: '7' },
   ];

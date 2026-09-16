@@ -106,10 +106,27 @@ export function tiersToPeriods(year, tiers) {
     return out;
 }
 
-export function quarterOfDate(ymd) {
-    const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(ymd || ''));
+// Квартал по деньгам считается со сдвигом на неделю: деньги приходят не в срок,
+// поэтому III квартал это 8 июля – 7 октября. Сдвиг только для денег, часы
+// производства остаются по календарному кварталу.
+export const MONEY_QUARTER_SHIFT_DAYS = 7;
+
+export function quarterOfDate(ymd, shiftDays = MONEY_QUARTER_SHIFT_DAYS) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
     if (!m) return null;
-    return `${m[1]}-Q${Math.floor((Number(m[2]) - 1) / 3) + 1}`;
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    d.setUTCDate(d.getUTCDate() - shiftDays);
+    return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+}
+
+export function moneyQuarterWindow(period, shiftDays = MONEY_QUARTER_SHIFT_DAYS) {
+    const m = /^(\d{4})-Q([1-4])$/.exec(String(period || ''));
+    if (!m) return null;
+    const year = Number(m[1]);
+    const q = Number(m[2]);
+    const from = new Date(Date.UTC(year, (q - 1) * 3, 1 + shiftDays));
+    const to = new Date(Date.UTC(year, q * 3, shiftDays));
+    return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }
 
 function parseFintabloDate(value) {
@@ -221,7 +238,7 @@ async function fetchFacts(token, directionName, year, today) {
     }
     const transactions = await loadPaged(token, '/transaction', {
         isPlan: 0,
-        dateFrom: toFintabloDate(`${year}-01-01`),
+        dateFrom: toFintabloDate(moneyQuarterWindow(`${year}-Q1`).from),
         dateTo: toFintabloDate(today),
     });
     const ids = directionTreeIds(directions, direction.id);
@@ -255,7 +272,7 @@ export async function main(argv = process.argv, env = process.env) {
     if (env.FINTABLO_API_KEY) {
         const facts = await fetchFacts(env.FINTABLO_API_KEY, env.FINTABLO_DIRECTION || 'Recycle Object', year, today);
         factsByPeriod = facts.sums;
-        note = `Финтабло, поступления «${facts.directionName}», синк ${today}`;
+        note = `Финтабло, поступления «${facts.directionName}», квартал со сдвигом +7 дней, синк ${today}`;
         console.log(`FinTablo: ${facts.count} операций с начала года, направление ${facts.directionName} (#${facts.directionId}) с поднаправлениями: ${facts.directionNames.join(', ')}`);
         console.log(`Факт по кварталам: ${JSON.stringify(facts.sums)}`);
     } else {
