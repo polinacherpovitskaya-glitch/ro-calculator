@@ -142,6 +142,33 @@ jobs:
             ops/infra/scripts/deploy-yandex-shadow.sh \
             "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/infra/scripts/deploy-yandex-shadow.sh"
 
+      - name: Provision FinTablo key on the VM
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+          FINTABLO_API_KEY: ${{ secrets.FINTABLO_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FINTABLO_API_KEY:-}" ]; then
+            echo "FINTABLO_API_KEY secret is not set; API sync button stays disabled"
+            exit 0
+          fi
+          # Ключ уходит через stdin, не через аргументы команды.
+          printf '%s' "$FINTABLO_API_KEY" | ssh -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+          set -euo pipefail
+          key="$(cat)"
+          env_file=/home/robot/platform/infra/.env.shadow
+          install -d -m 700 /home/robot/platform/infra
+          touch "$env_file"
+          chmod 600 "$env_file"
+          grep -v '^FINTABLO_API_KEY=' "$env_file" > "$env_file.next" || true
+          printf 'FINTABLO_API_KEY=%s\n' "$key" >> "$env_file.next"
+          chmod 600 "$env_file.next"
+          mv "$env_file.next" "$env_file"
+          echo "FINTABLO_API_KEY provisioned"
+          REMOTE
+
       - name: Deploy replacement API without data refresh
         env:
           YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}

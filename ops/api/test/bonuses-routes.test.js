@@ -281,3 +281,15 @@ test('POST /api/bonuses/sync/team-money: бот записывает план и
   const forbidden = await fetch(`http://127.0.0.1:${port}/api/bonuses/schemes`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(forbidden.status, 403);
 });
+
+test('POST /api/bonuses/sync/run без ключа Финтабло → 503', async (t) => {
+  const { port, cookie } = await setup(t);
+  const saved = process.env.FINTABLO_API_KEY;
+  delete process.env.FINTABLO_API_KEY;
+  try {
+    const res = await requestJson(port, 'POST', '/api/bonuses/sync/run', { year: 2026 }, cookie);
+    assert.equal(res.status, 503);
+  } finally {
+    if (saved !== undefined) process.env.FINTABLO_API_KEY = saved;
+  }
+});

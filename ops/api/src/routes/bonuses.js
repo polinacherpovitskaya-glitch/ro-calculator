@@ -6,6 +6,7 @@ import {
   soldHoursForPeriod, achievement, DEFAULT_LADDER,
 } from '../bonuses/calc.js';
 import { loadLegacyBonusData, activeEmployees } from '../bonuses/legacy.js';
+import { runMoneySync } from '../bonuses/fintablo.js';
 import * as store from '../bonuses/store.js';
 
 const router = Router();
@@ -46,6 +47,47 @@ router.post('/sync/team-money', requireRole('admin', 'bot'), asyncHandler(async 
 }));
 
 router.use(requireRole('admin'));
+
+// Кнопка «Обновить из Финтабло сейчас»: тот же синк, что по расписанию, но с
+// сервера. Ключ Финтабло приходит на сервер из секрета GitHub при деплое.
+async function applyMoneySync(periods, by) {
+  const written = { targets: [], facts: [] };
+  for (const [period, entry] of Object.entries(periods)) {
+    if (entry?.targets) {
+      await store.upsertTeamTargets('commercial', period, entry.targets);
+      written.targets.push(period);
+    }
+    if (entry?.fact) {
+      await store.setTeamFact('commercial', period, 'cash_in', {
+        value: Number(entry.fact.value), source: String(entry.fact.source || 'fintablo'), note: entry.fact.note,
+      }, by);
+      written.facts.push(period);
+    }
+  }
+  return written;
+}
+
+router.post('/sync/run', asyncHandler(async (req, res) => {
+  const token = process.env.FINTABLO_API_KEY || '';
+  if (!token) return error(res, 503, 'NO_FINTABLO_KEY', 'На сервере нет ключа Финтабло: синк работает только по расписанию из GitHub');
+  const today = todayYmd();
+  const year = Number.isInteger(Number(req.body?.year)) && Number(req.body?.year) > 2000 ? Number(req.body.year) : Number(today.slice(0, 4));
+  const lines = [];
+  let run;
+  try {
+    run = await runMoneySync({
+      token, year, today,
+      sheetId: process.env.BONUS_PLAN_SHEET_ID || undefined,
+      gid: process.env.BONUS_PLAN_SHEET_GID || undefined,
+      directionName: process.env.FINTABLO_DIRECTION || undefined,
+      log: (line) => lines.push(line),
+    });
+  } catch (e) {
+    return error(res, 502, 'SYNC_FAILED', e.message || String(e));
+  }
+  const written = await applyMoneySync(run.payload.periods, req.user.email);
+  res.json({ data: { written, facts: run.facts?.sums || {}, targets: run.targetsByPeriod, log: lines, syncedAt: new Date().toISOString() } });
+}));
 
 function error(res, status, code, message) {
   return res.status(status).json({ error: { code, message } });

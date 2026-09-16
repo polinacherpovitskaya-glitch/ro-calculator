@@ -6,17 +6,17 @@
 // шагом до потолка cap.
 export const DEFAULT_LADDER = { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 };
 
-// По умолчанию в деньги входит только производительность; срок и переделки
-// считаются и показываются, вес 0. Включаются через quality_json.weights.
-export const DEFAULT_QUALITY_WEIGHTS = { productivity: 1, on_time_share: 0, rework_share: 0 };
+// Веса множителя качества. У срока и переделок планки «цель = максимум»:
+// всё в срок и без брака даёт ровно 1,0, срывы снижают.
+export const DEFAULT_QUALITY_WEIGHTS = { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 };
 
 // Уровень квартала = max(A_output, 0.7 × A_output + 0.3 × A_cash).
 export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 
 export const DEFAULT_QUALITY_THRESHOLDS = {
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
-  on_time_share: { min: 0.7, target: 0.85, max: 0.95 },
-  rework_share: { min: 0.08, target: 0.05, max: 0.02 },
+  on_time_share: { min: 0.85, target: 1.0, max: 1.0 },
+  rework_share: { min: 0.05, target: 0, max: 0 },
 };
 
 export const QUALITY_DIRECTIONS = { productivity: 'higher', on_time_share: 'higher', rework_share: 'lower' };
@@ -100,7 +100,8 @@ export function achievement(fact, thresholds, direction = 'higher', ladder = DEF
   if (x < a) return Number(ladder.below_min);
   if (x < b) return b === a ? lMin : lerp(lMin, lTarget, (x - a) / (b - a));
   if (x < c) return c === b ? lTarget : lerp(lTarget, lMax, (x - b) / (c - b));
-  if (c === b) return Math.min(cap, lMax);
+  // target = max: попадание в цель даёт ровно target, выше не бывает.
+  if (c === b) return lTarget;
   // Выше aspiration: тот же наклон, что между medium и aspiration, до потолка.
   return Math.min(cap, lMax + (lMax - lTarget) * ((x - c) / (c - b)));
 }
@@ -377,7 +378,9 @@ export function computeProductionPeriod(input) {
   const qualityMetrics = ['productivity', 'on_time_share', 'rework_share'].map((key) => {
     const thresholds = targets?.[key] || DEFAULT_QUALITY_THRESHOLDS[key];
     const { fact, available, fallback } = qualityFacts[key];
-    const ach = available ? achievement(fact, thresholds, QUALITY_DIRECTIONS[key], ladder) : fallback;
+    // Для качества потолок = max (1,5): рост «выше aspiration» только у выпуска.
+    const qualityLadder = { ...ladder, cap: Number(ladder.max) };
+    const ach = available ? achievement(fact, thresholds, QUALITY_DIRECTIONS[key], qualityLadder) : fallback;
     const weight = num(weights[key]);
     multiplier += weight * ach;
     return {

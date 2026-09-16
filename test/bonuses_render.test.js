@@ -153,6 +153,7 @@ test('renderTeamBlock: уровни, факт из Финтабло, A_cash', ()
     const auto = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: { cash_in: { value: 2, source: 'fintablo', note: 'Финтабло, синк 2026-09-16', updated_at: '2026-09-16T04:15:00.000Z' } }, cashAchievement: 1 } }, '2026-Q3');
     assert.match(auto, /из Финтабло автоматически/);
     assert.match(html, /План и факт по деньгам/);
+    assert.match(html, /Обновить из Финтабло сейчас/);
     const none = renderTeamBlock({ commercial: { targets: null, facts: {}, cashAchievement: null } }, '2026-Q3');
     assert.match(none, /ещё не пришёл из таблицы/);
 });
