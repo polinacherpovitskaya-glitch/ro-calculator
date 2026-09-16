@@ -303,6 +303,8 @@ test('GET /api/bonuses/me: сотрудник со схемой видит св�
 
   const email = `lesha-${crypto.randomUUID()}@x.test`;
   const passwordHash = await hashPassword('testpass1234');
+  // auth_users.employee_id ссылается на нормализованную таблицу employees
+  await getPool().query(`INSERT INTO employees (id, name, role, is_active) VALUES ($1, 'Лёша', 'production', TRUE) ON CONFLICT (id) DO NOTHING`, [employeeId]);
   await getPool().query(
     `INSERT INTO auth_users (email, password_hash, role, must_change_password, employee_id) VALUES ($1, $2, 'user', FALSE, $3)`,
     [email, passwordHash, employeeId],
