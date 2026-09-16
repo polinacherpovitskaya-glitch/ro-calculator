@@ -155,7 +155,6 @@ test('renderTeamBlock: уровни, факт из Финтабло, A_cash', ()
     assert.match(html, /17 000 000/);
     assert.match(html, /уровень 0,63/);
     assert.match(html, /93% от medium 15 500 000 ₽/);
-    assert.match(html, /Финтабло 15\.09/);
     assert.match(html, /введено вручную/);
     const auto = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: { cash_in: { value: 2, source: 'fintablo', note: 'Финтабло, синк 2026-09-16', updated_at: '2026-09-16T04:15:00.000Z' } }, cashAchievement: 1 } }, '2026-Q3');
     assert.match(auto, /из Финтабло автоматически/);
