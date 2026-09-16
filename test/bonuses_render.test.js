@@ -12,23 +12,23 @@ test('renderSummary: коротко, сколько и из чего', () => {
         money: { fact: 14400000, achievement: 0.6333, blend: 0.9635 },
         quality: { multiplier: 1.1667, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
     });
-    assert.match(html, /К выплате сейчас 149 861 ₽<\/b> = 1 550 ч × 82,87 ₽ × 1,1667/);
+    assert.match(html, /К выплате сейчас 149 861 ₽<\/b>: 1 550 ч × 82,87 ₽ × 1,1667 = 149 861 ₽/);
     const exact = renderSummary({
         hasTargets: true, rate: 75, level: 1, amountComputed: 89623,
         output: { fact: 1173.04, commercialHours: 1173.04, internalHours: 0, unmarkedHours: 232, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, achievement: 1, rateApplied: 75, scaledCapped: true, forecastAmount: null, remainingSoldHours: 53, remainingSoldOrders: [1] },
-        money: { achievement: null }, quality: { multiplier: 1.0187, metrics: [] },
+        money: { achievement: null }, quality: { multiplier: 1.0187, metrics: [] }, amountBase: 89623, unmarked: { hours: 232, share: 0.5, amount: 8700 },
     });
-    assert.match(exact, /1 173,04 ч × 75 ₽ × 1,0187/);
-    assert.match(exact, /Часы табеля без заказа, 232 ч, в выпуск не входят/);
+    assert.match(exact, /1 173,04 ч × 75 ₽ × 1,0187 = 89 623 ₽/);
+    assert.match(exact, /Плюс часы без заказа \(быт, сток, съёмки\): 232 ч × 50% ставки = 8 700 ₽/);
     assert.match(exact, /проданное почти сделано/);
     assert.doesNotMatch(exact, /Из них/);
     const split = renderSummary({
         hasTargets: true, rate: 75, level: 1, amountComputed: 1,
         output: { fact: 1173, commercialHours: 1100, internalHours: 73, unmarkedHours: 12, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, achievement: 1, rateApplied: 75, forecastAmount: null, remainingSoldHours: 0 },
-        money: { achievement: null }, quality: { multiplier: 1, metrics: [] },
+        money: { achievement: null }, quality: { multiplier: 1, metrics: [] }, unmarked: { hours: 12, share: 0.5, amount: 450 },
     });
     assert.match(split, /по заказам 1 100 ч и внутренние работы \(сток, образцы, утверждено\) 73 ч/);
-    assert.match(split, /без заказа, 12 ч, в выпуск не входят/);
+    assert.match(split, /Плюс часы без заказа/);
     assert.match(html, /между medium и aspiration/);
     assert.match(html, /производительность 1,05/);
     assert.match(html, /Прогноз к концу квартала 160 000 ₽/);
@@ -124,7 +124,7 @@ test('renderBonusCard: формула, итог, детали под карто�
     }, { expanded: true });
     assert.match(html, /Лёша/);
     assert.match(html, /153 073 ₽/);
-    assert.match(html, /1 550 ч × 82,87 ₽ × 1,19/);
+    assert.match(html, /1 550 ч × 82,87 ₽ × 1,1917 = 153 073 ₽/);
     assert.match(html, /bn-card-details/);
     assert.match(html, /Закрыть квартал/);
     assert.match(html, /Производительность/);

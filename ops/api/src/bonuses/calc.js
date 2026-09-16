@@ -13,6 +13,11 @@ export const DEFAULT_QUALITY_WEIGHTS = { productivity: 0.5, on_time_share: 0.3, 
 // Уровень квартала = max(A_output, 0.7 × A_output + 0.3 × A_cash).
 export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 
+// Часы табеля без заказа (быт, сток, съёмки) оплачиваются отдельной строкой по
+// доле от ставки квартала: чтобы такие задачи делались, но был стимул разносить
+// часы по проектам. В уровень и производительность они не входят.
+export const DEFAULT_UNMARKED_RATE_SHARE = 0.5;
+
 export const DEFAULT_QUALITY_THRESHOLDS = {
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
   on_time_share: { min: 0.85, target: 1.0, max: 1.0 },
@@ -396,7 +401,12 @@ export function computeProductionPeriod(input) {
   });
   multiplier = roundTo(multiplier, 4);
 
-  const amount = Math.round(outputFact * rateApplied * multiplier);
+  const baseAmount = Math.round(outputFact * rateApplied * multiplier);
+  const unmarkedShare = scheme.quality_json?.unmarked_rate_share === undefined || scheme.quality_json?.unmarked_rate_share === null
+    ? DEFAULT_UNMARKED_RATE_SHARE
+    : num(scheme.quality_json.unmarked_rate_share);
+  const unmarkedAmount = Math.round(unmarkedHours * rateApplied * unmarkedShare);
+  const amount = baseAmount + unmarkedAmount;
 
   // Прогноз выпуска по доле прошедших рабочих дней.
   const share = status === 'open' ? elapsedWorkingShare(period, todayYmd, holidays) : 1;
@@ -430,6 +440,8 @@ export function computeProductionPeriod(input) {
     },
     money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4), blend },
     quality: { multiplier, metrics: qualityMetrics },
+    unmarked: { hours: roundTo(unmarkedHours, 2), share: unmarkedShare, amount: unmarkedAmount },
+    amountBase: baseAmount,
     amountComputed: amount, warnings, orders: detail,
   };
 }
