@@ -156,10 +156,10 @@ test('computeProductionPeriod: склад, предупреждения, гра�
   assert.equal(result.output.unmarkedHours, 3);
   // часы без заказа и внутренние работы: половинная ставка, отдельные строки
   assert.equal(result.receipt.unmarked.hours, 3);
-  assert.equal(result.receipt.unmarked.rate, result.rates.half);
+  assert.equal(result.receipt.unmarked.rate, result.rates.flat);
   assert.equal(
     result.amountComputed,
-    result.receipt.within.amount + result.receipt.over.amount + result.receipt.internal.amount + result.receipt.unmarked.amount,
+    result.receipt.orders.amount + result.receipt.internal.amount + result.receipt.unmarked.amount,
   );
 });
 
@@ -315,8 +315,8 @@ test('computeTeamStats: люди, состав, прогноз', () => {
   assert.equal(stats.outlook.deltaPersonDays, Math.round((Math.round(2 * 9 * 63 * 1.25) - 150) / 9));
 });
 
-// --- четыре правила выплаты ---
-const simpleScheme = { id: 7, employee_id: 5, rates_json: { rate: 100 }, quality_json: {}, ladder_json: { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 } };
+// --- ставка по ступеням ---
+const simpleScheme = { id: 7, employee_id: 5, rates_json: { rate: 225 }, quality_json: {}, ladder_json: { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 } };
 const moneyTiers = { min: 14500000, target: 16500000, max: 17000000 };
 
 function run(extra = {}) {
@@ -325,45 +325,69 @@ function run(extra = {}) {
   ];
   const timeEntries = extra.timeEntries || [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1899, order_id: 1 }];
   return computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: simpleScheme, targets, orders, timeEntries,
+    period: '2026-Q3', today: '2026-10-20', status: 'open', scheme: extra.scheme || simpleScheme, targets, orders, timeEntries,
     settings: {}, stockApprovals: extra.stockApprovals || new Set(), soldHours: extra.soldHours ?? 1283,
-    teamMoney: extra.teamMoney === undefined ? { fact: 10813376, thresholds: moneyTiers } : extra.teamMoney,
+    teamMoney: extra.teamMoney === undefined ? { fact: 16000000, thresholds: moneyTiers } : extra.teamMoney,
   });
 }
 
-test('деньги ниже base: ставка половинная, надбавки за перевыполнение нет', () => {
+test('ставки ступеней: 75 / 150 / 225 / 270 от ставки на medium 225', () => {
   const result = run();
+  assert.deepEqual(result.rates.steps, { below: 75, base: 150, medium: 225, aspiration: 270 });
+  assert.equal(result.rates.flat, 50);
+});
+
+test('ступень по часам: ниже base, base, medium, aspiration', () => {
+  const hours = (h) => ({
+    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: h, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
+    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: h, order_id: 1 }],
+  });
+  assert.equal(run(hours(1000)).tierByHours, 'below');      // < 1331
+  assert.equal(run(hours(1400)).tierByHours, 'base');       // 1331..1512
+  assert.equal(run(hours(1600)).tierByHours, 'medium');     // 1512..1693
+  assert.equal(run(hours(1899)).tierByHours, 'aspiration'); // >= 1693
+  assert.equal(run(hours(1600)).rates.orders, 225);
+  assert.equal(run(hours(1600)).amountComputed, 1600 * 225);
+});
+
+test('деньги ниже base опускают ступень на одну вниз', () => {
+  const result = run({ teamMoney: { fact: 10813376, thresholds: moneyTiers } });
   assert.equal(result.money.belowBase, true);
-  assert.deepEqual(result.rates, { base: 100, orders: 50, over: 50, half: 50 });
-  assert.equal(result.receipt.within.hours, 1512);
-  assert.equal(result.receipt.over.hours, 387);
-  assert.equal(result.amountComputed, 1899 * 50);
+  assert.equal(result.tierByHours, 'aspiration');
+  assert.equal(result.tier, 'medium');
+  assert.equal(result.rates.orders, 225);
+  assert.equal(result.amountComputed, 1899 * 225);
+  const low = run({
+    teamMoney: { fact: 1000000, thresholds: moneyTiers },
+    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
+    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }],
+  });
+  assert.equal(low.tierByHours, 'below');
+  assert.equal(low.tier, 'below'); // ниже base ступень уже не опускается
+  assert.equal(low.amountComputed, 1000 * 75);
 });
 
-test('деньги от base: план по 100 ₽, часы сверх плана по 150 ₽', () => {
-  const result = run({ teamMoney: { fact: 15000000, thresholds: moneyTiers } });
-  assert.equal(result.money.belowBase, false);
-  assert.deepEqual(result.rates, { base: 100, orders: 100, over: 150, half: 50 });
-  assert.equal(result.receipt.within.amount, 1512 * 100);
-  assert.equal(result.receipt.over.amount, 387 * 150);
-  assert.equal(result.amountComputed, 1512 * 100 + 387 * 150);
-});
-
-test('внутренние работы и часы без заказа по половинной ставке', () => {
+test('внутренние работы и часы без заказа всегда по 50 ₽', () => {
   const orders = [
-    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1600, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
     { id: 2, status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 80, completed_at: '2026-08-01T00:00:00.000Z' },
   ];
   const timeEntries = [
-    { id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 },
+    { id: 1, employee_id: 5, date: '2026-08-01', hours: 1600, order_id: 1 },
     { id: 2, employee_id: 5, date: '2026-08-02', hours: 40, order_id: null },
   ];
-  const result = run({ orders, timeEntries, stockApprovals: new Set(['2']), teamMoney: { fact: 16600000, thresholds: moneyTiers } });
-  assert.equal(result.receipt.within.amount, 1000 * 100);
-  assert.equal(result.receipt.over.hours, 0);
+  const result = run({ orders, timeEntries, stockApprovals: new Set(['2']) });
+  assert.equal(result.receipt.orders.amount, 1600 * 225);
   assert.equal(result.receipt.internal.amount, 80 * 50);
   assert.equal(result.receipt.unmarked.amount, 40 * 50);
-  assert.equal(result.amountComputed, 100000 + 4000 + 2000);
+  assert.equal(result.amountComputed, 360000 + 4000 + 2000);
+});
+
+test('год на medium даёт около 100 тысяч в месяц', () => {
+  const quarters = [864, 1296, 1512, 1728]; // сезонный план 2026
+  const year = quarters.reduce((acc, h) => acc + h, 0) * 225;
+  assert.equal(year, 1215000);
+  assert.ok(Math.abs(year / 12 - 101250) < 1);
 });
 
 test('производительность и срок только информация, в сумму не входят', () => {
@@ -372,33 +396,17 @@ test('производительность и срок только информ
   assert.equal(slow.amountComputed, fast.amountComputed);
   const prod = fast.quality.metrics.find((m) => m.key === 'productivity');
   assert.ok(prod.fact > 1.8 && prod.weight === 0 && prod.informational === true);
-  assert.equal(fast.quality.multiplier, 1);
 });
 
 test('пустой табель не режет выплату, но предупреждает', () => {
   const result = run({ timeEntries: [] });
-  assert.equal(result.amountComputed, 1899 * 50);
+  assert.equal(result.amountComputed, 1899 * 270);
   assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
-  assert.equal(result.quality.metrics.find((m) => m.key === 'productivity').available, false);
 });
 
-test('уровень считается от настоящего плана, без пересчёта от проданного', () => {
-  const result = run({ soldHours: 900 });
-  assert.equal(result.output.soldHours, 900);
-  assert.ok(result.output.achievement > 1.5); // 1899 ч больше aspiration 1693
-  assert.ok(!result.warnings.some((w) => w.code === 'sold_below_plan'));
-  const low = run({
-    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
-    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }],
-    soldHours: 900,
-  });
-  assert.equal(low.output.achievement, 0.25); // 1000 ч ниже base 1330
-  assert.equal(low.amountComputed, 1000 * 50);
-});
-
-test('без плана по деньгам платим полную ставку и предупреждаем', () => {
+test('без плана по деньгам ступень не опускается', () => {
   const result = run({ teamMoney: null });
   assert.equal(result.money.known, false);
-  assert.equal(result.rates.orders, 100);
+  assert.equal(result.tier, result.tierByHours);
   assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
 });
