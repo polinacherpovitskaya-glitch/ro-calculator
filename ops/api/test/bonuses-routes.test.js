@@ -209,7 +209,7 @@ test('закрытие без целей периода → 400', async (t) => {
   assert.equal(res.status, 400);
 });
 
-test('план и факт по деньгам отдела влияют на уровень производства', async (t) => {
+test('план и факт по деньгам отдела: ворота ставки производства', async (t) => {
   const { port, cookie } = await setup(t);
   const employeeId = Date.now();
   const base = employeeId * 10;
@@ -235,12 +235,11 @@ test('план и факт по деньгам отдела влияют на у
   res = await requestJson(port, 'GET', '/api/bonuses/periods/2026-Q3', undefined, cookie);
   const body = (await res.json()).data;
   entry = body.entries.find((e) => e.schemeId === scheme.id);
-  assert.equal(entry.money.achievement, 1.5);
-  // Заказы других тестов копятся в общей базе, поэтому уровень по часам не фиксируем,
-  // проверяем только правило: деньги поднимают уровень до max(часы, смесь).
-  const expectedLevel = Math.max(entry.output.achievement, 0.7 * entry.output.achievement + 0.3 * 1.5);
-  assert.ok(Math.abs(entry.level - expectedLevel) < 0.001);
-  assert.ok(entry.level >= entry.output.achievement);
+  // Деньги выше base: полная ставка и надбавка за часы сверх плана.
+  assert.equal(entry.money.known, true);
+  assert.equal(entry.money.belowBase, false);
+  assert.equal(entry.rates.orders, 75);
+  assert.equal(entry.rates.over, Math.round(75 * 1.5));
   assert.equal(body.team.commercial.cashAchievement, 1.5);
 
   res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', { facts: { cash_in: { value: -5 } } }, cookie);
