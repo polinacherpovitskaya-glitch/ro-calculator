@@ -64,14 +64,6 @@ test('achievement: target = max → попадание в цель даёт ро
 });
 
 
-function r2(x) { return Math.round(x * 100) / 100; }
-function assertReceipt(result) {
-  const expectedRate = Math.round(result.rate * r2(result.level) * r2(result.quality.multiplier));
-  assert.equal(result.hourRate, expectedRate);
-  assert.ok(Number.isInteger(result.hourRate));
-  const sum = result.receipt.commercial.amount + result.receipt.internal.amount + result.receipt.unmarked.amount;
-  assert.equal(result.amountComputed, sum);
-}
 
 const scheme = {
   id: 7, employee_id: 5,
@@ -79,6 +71,7 @@ const scheme = {
   quality_json: { weights: { productivity: 0.5, on_time_share: 0.3, rework_share: 0.2 } },
   ladder_json: { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 },
 };
+const productivityOnly = { weights: { productivity: 1, on_time_share: 0, rework_share: 0 } };
 const targets = {
   output_hours: { min: 1330, target: 1512, max: 1693 },
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
@@ -105,112 +98,6 @@ function specFixture() {
   return { orders, timeEntries };
 }
 
-test('computeProductionPeriod: веса 0.5/0.3/0.2 дают 153 073 ₽ без плана по деньгам', () => {
-  const { orders, timeEntries } = specFixture();
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(),
-  });
-  assert.equal(result.output.fact, 1550);
-  assert.ok(Math.abs(result.output.achievement - 1.105) < 0.001);
-  assert.equal(result.output.rateApplied, r2(75 * r2(result.level)));
-  assert.ok(Math.abs(result.quality.multiplier - 1.1917) < 0.001);
-  assertReceipt(result);
-  
-  assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
-});
-
-test('computeProductionPeriod: веса по умолчанию = только производительность; срок и переделки информация', () => {
-  const { orders, timeEntries } = specFixture();
-  const defaultScheme = { ...scheme, quality_json: {} };
-  const defaultTargets = { output_hours: targets.output_hours };
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: defaultScheme, targets: defaultTargets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(),
-  });
-  const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
-  const rework = result.quality.metrics.find((m) => m.key === 'rework_share');
-  assert.equal(onTime.weight, 0);
-  assert.equal(onTime.informational, true);
-  assert.ok(Math.abs(onTime.achievement - 0.6667) < 0.001);
-  assert.ok(Math.abs(rework.achievement - 0.6) < 0.001);
-  assert.ok(Math.abs(result.quality.multiplier - 1.1667) < 0.001);
-  // чек: ставка за час = 82.87 × 1.1667, заказы 1550 ч
-  assertReceipt(result);
-  assert.deepEqual(result.rateParts, { rate: 75, level: r2(result.level), productivity: r2(result.quality.multiplier) });
-  assert.equal(result.receipt.commercial.hours, 1550);
-  assert.equal(result.receipt.commercial.amount, 1550 * result.hourRate);
-  const perfect = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: defaultScheme, targets: defaultTargets,
-    orders: orders.filter((o) => o.id !== 10 && o.id !== 99).map((o) => ({ ...o })), timeEntries: [timeEntries[0]],
-    settings: {}, stockApprovals: new Set(),
-  });
-  const pOnTime = perfect.quality.metrics.find((m) => m.key === 'on_time_share');
-  const pRework = perfect.quality.metrics.find((m) => m.key === 'rework_share');
-  assert.equal(pOnTime.achievement, 1);
-  assert.equal(pRework.achievement, 1);
-});
-
-test('деньги ниже часов не тянут уровень вниз', () => {
-  const { orders, timeEntries } = specFixture();
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(),
-    teamMoney: { fact: 14400000, thresholds: { min: 14000000, target: 15500000, max: 17000000 } },
-  });
-  assert.deepEqual(DEFAULT_LEVEL_WEIGHTS, { output: 0.7, money: 0.3 });
-  assert.ok(Math.abs(result.money.achievement - 0.6333) < 0.001);
-  assert.ok(Math.abs(result.money.blend - 0.9635) < 0.001);
-  assert.ok(Math.abs(result.level - 1.105) < 0.001);
-  assert.equal(result.output.rateApplied, r2(75 * r2(result.level)));
-  assertReceipt(result);
-  assert.ok(!result.warnings.some((w) => w.code === 'no_money_plan'));
-});
-
-test('деньги выше часов поднимают уровень', () => {
-  const { orders, timeEntries } = specFixture();
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(),
-    teamMoney: { fact: 17000000, thresholds: { min: 14000000, target: 15500000, max: 17000000 } },
-  });
-  assert.ok(Math.abs(result.level - 1.2235) < 0.001);
-  assert.equal(result.output.rateApplied, r2(75 * r2(result.level)));
-  assertReceipt(result);
-});
-
-test('уровни от проданного: продано меньше плана', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 900, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 900, order_id: 1 }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: productivityOnly }, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(), soldHours: 900,
-  });
-  assert.deepEqual(result.output.thresholdsEffective, { min: 792, target: 900, max: 1008 });
-  assert.deepEqual(result.output.thresholds, targets.output_hours);
-  assert.equal(result.output.soldHours, 900);
-  assert.ok(Math.abs(result.output.achievement - 1) < 0.001);
-  assert.ok(result.warnings.some((w) => w.code === 'sold_below_plan'));
-  assert.equal(result.amountComputed, Math.round(900 * 75 * 1 * 1.0));
-});
-
-test('уровни от проданного: выше проданного, но ниже плана → не выше medium', () => {
-  // Продано 1044 из плана 1512, сделано 1173 (как в Q3 2026): по пересчитанным
-  // планкам это выше aspiration, но реального плана нет → уровень 1.0, ставка 75.
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1173, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1173, order_id: 1 }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: productivityOnly }, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(), soldHours: 1044,
-  });
-  assert.deepEqual(result.output.thresholdsEffective, { min: 918, target: 1044, max: 1169 });
-  assert.equal(result.output.achievement, 1);
-  assert.equal(result.output.scaledCapped, true);
-  assert.equal(result.output.remainingSoldHours, 0);
-  assert.equal(result.output.rateApplied, 75);
-  assert.equal(result.amountComputed, Math.round(1173 * 75 * 1));
-});
-
 test('remainingSoldHours: проданное с дедлайном в квартале, ещё не сделанное', () => {
   const orders = [
     { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
@@ -228,17 +115,6 @@ test('remainingSoldHours: проданное с дедлайном в кварт
   });
   assert.equal(result.output.remainingSoldHours, 180);
   assert.deepEqual(result.output.remainingSoldOrders, [2]);
-});
-
-test('уровни от проданного: сделано больше реального плана → считается от плана', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1600, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1600, order_id: 1 }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: productivityOnly }, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(), soldHours: 1044,
-  });
-  assert.ok(Math.abs(result.output.achievement - (1 + 0.5 * (1600 - 1512) / (1693 - 1512))) < 0.001);
-  assert.equal(result.output.scaledCapped, false);
 });
 
 test('soldHoursForPeriod: дедлайн в периоде, живые, не черновики без счёта', () => {
@@ -276,25 +152,13 @@ test('computeProductionPeriod: склад, предупреждения, гра�
   assert.equal(result.output.commercialHours, 1010);
   assert.equal(result.output.internalHours, 40);
   assert.equal(result.output.unmarkedHours, 3);
-  // часы без заказа: половина ставки, отдельной строкой, не в уровне
-  assert.equal(result.unmarked.hours, 3);
-  assert.equal(result.unmarked.share, 0.5);
-  assert.equal(result.unmarked.amount, 3 * Math.round(result.hourRate * 0.5));
-  assert.equal(result.amountComputed, result.amountBase + result.unmarked.amount);
-  const noPay = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: { ...scheme.quality_json, unmarked_rate_share: 0 } }, targets, orders, timeEntries,
-    settings: {}, stockApprovals: new Set(['2']),
-  });
-  assert.equal(noPay.unmarked.amount, 0);
-  assert.equal(noPay.amountComputed, noPay.amountBase);
-  assert.equal(result.orders.find((o) => o.id === 3).included, false);
-  assert.equal(result.orders.find((o) => o.id === 4), undefined);
-  assert.equal(result.orders.find((o) => o.id === 7), undefined);
-  assert.equal(result.warnings.find((w) => w.code === 'unmarked_hours').hours, 3);
-  assert.deepEqual(result.warnings.find((w) => w.code === 'no_hours').orderIds, [5]);
-  assert.deepEqual(result.warnings.find((w) => w.code === 'no_deadline').orderIds, [6]);
-  const onTime = result.quality.metrics.find((m) => m.key === 'on_time_share');
-  assert.equal(onTime.fact, 1);
+  // часы без заказа и внутренние работы: половинная ставка, отдельные строки
+  assert.equal(result.receipt.unmarked.hours, 3);
+  assert.equal(result.receipt.unmarked.rate, result.rates.half);
+  assert.equal(
+    result.amountComputed,
+    result.receipt.within.amount + result.receipt.over.amount + result.receipt.internal.amount + result.receipt.unmarked.amount,
+  );
 });
 
 test('on_time_share: заказы с оценочной датой завершения не участвуют', () => {
@@ -317,45 +181,7 @@ test('on_time_share: заказы с оценочной датой заверш�
   });
   const neutral = onlyEstimated.quality.metrics.find((m) => m.key === 'on_time_share');
   assert.equal(neutral.available, false);
-  assert.equal(neutral.achievement, 1); // нейтрально
-});
-
-test('computeProductionPeriod: пустой табель → A_prod 0.5 и предупреждение', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1512, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries: [], settings: {}, stockApprovals: new Set(),
-  });
-  const prod = result.quality.metrics.find((m) => m.key === 'productivity');
-  assert.equal(prod.available, false);
-  assert.equal(prod.achievement, 0.5);
-  assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
-  assert.ok(result.warnings.some((w) => w.code === 'no_period_hours'));
-  // A_out = 1, rate 75; в срок 100% при 0.7/0.85/0.95 → потолок качества 1.5; quality = 0.5*0.5 + 0.3*1.5 + 0.2*1 = 0.9
-  assert.equal(result.amountComputed, 1512 * Math.round(75 * 0.9));
-});
-
-const productivityOnly = { weights: { productivity: 1, on_time_share: 0, rework_share: 0 } };
-
-test('computeProductionPeriod: ниже base платится четверть ставки', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: productivityOnly }, targets, orders,
-    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }], settings: {}, stockApprovals: new Set(),
-  });
-  assert.equal(result.output.achievement, 0.25);
-  assert.equal(result.output.rateApplied, 18.75);
-  assert.equal(result.hourRate, 19); // 100 ₽ × 0,25 × 1,00 = 18,75 → 19 ₽
-  assert.equal(result.amountComputed, 1000 * 19);
-});
-
-test('computeProductionPeriod: выше aspiration ставка продолжает расти', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1874, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, quality_json: productivityOnly }, targets, orders,
-    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1874, order_id: 1 }], settings: {}, stockApprovals: new Set(),
-  });
-  assert.ok(Math.abs(result.output.achievement - 2) < 0.001);
-  assert.equal(result.output.rateApplied, 150);
+  assert.equal(neutral.fact, null);
 });
 
 test('computeProductionPeriod: прогноз по доле рабочих дней', () => {
@@ -487,14 +313,90 @@ test('computeTeamStats: люди, состав, прогноз', () => {
   assert.equal(stats.outlook.deltaPersonDays, Math.round((Math.round(2 * 9 * 63 * 1.25) - 150) / 9));
 });
 
-test('ставка за час целая: 100 ₽ × 1,00 × производительность 1,0007 = 100 ₽', () => {
-  const orders = [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1173, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }];
-  const timeEntries = [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1173 / 1.0007, order_id: 1 }];
-  const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: { ...scheme, rates_json: { rate: 100 }, quality_json: { weights: { productivity: 1, on_time_share: 0, rework_share: 0 } } },
-    targets, orders, timeEntries, settings: {}, stockApprovals: new Set(), soldHours: 1044,
+// --- четыре правила выплаты ---
+const simpleScheme = { id: 7, employee_id: 5, rates_json: { rate: 100 }, quality_json: {}, ladder_json: { below_min: 0.25, min: 0.5, target: 1, max: 1.5, cap: 2 } };
+const moneyTiers = { min: 14500000, target: 16500000, max: 17000000 };
+
+function run(extra = {}) {
+  const orders = extra.orders || [
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1899, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
+  ];
+  const timeEntries = extra.timeEntries || [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1899, order_id: 1 }];
+  return computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme: simpleScheme, targets, orders, timeEntries,
+    settings: {}, stockApprovals: extra.stockApprovals || new Set(), soldHours: extra.soldHours ?? 1283,
+    teamMoney: extra.teamMoney === undefined ? { fact: 10813376, thresholds: moneyTiers } : extra.teamMoney,
   });
-  assert.equal(result.hourRate, 100);
-  assert.deepEqual(result.rateParts, { rate: 100, level: 1, productivity: 1 });
-  assert.equal(result.amountComputed, 1173 * 100);
+}
+
+test('деньги ниже base: ставка половинная, надбавки за перевыполнение нет', () => {
+  const result = run();
+  assert.equal(result.money.belowBase, true);
+  assert.deepEqual(result.rates, { base: 100, orders: 50, over: 50, half: 50 });
+  assert.equal(result.receipt.within.hours, 1512);
+  assert.equal(result.receipt.over.hours, 387);
+  assert.equal(result.amountComputed, 1899 * 50);
+});
+
+test('деньги от base: план по 100 ₽, часы сверх плана по 150 ₽', () => {
+  const result = run({ teamMoney: { fact: 15000000, thresholds: moneyTiers } });
+  assert.equal(result.money.belowBase, false);
+  assert.deepEqual(result.rates, { base: 100, orders: 100, over: 150, half: 50 });
+  assert.equal(result.receipt.within.amount, 1512 * 100);
+  assert.equal(result.receipt.over.amount, 387 * 150);
+  assert.equal(result.amountComputed, 1512 * 100 + 387 * 150);
+});
+
+test('внутренние работы и часы без заказа по половинной ставке', () => {
+  const orders = [
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' },
+    { id: 2, status: 'completed', production_purpose: 'stock_sample', total_hours_plan: 80, completed_at: '2026-08-01T00:00:00.000Z' },
+  ];
+  const timeEntries = [
+    { id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-08-02', hours: 40, order_id: null },
+  ];
+  const result = run({ orders, timeEntries, stockApprovals: new Set(['2']), teamMoney: { fact: 16600000, thresholds: moneyTiers } });
+  assert.equal(result.receipt.within.amount, 1000 * 100);
+  assert.equal(result.receipt.over.hours, 0);
+  assert.equal(result.receipt.internal.amount, 80 * 50);
+  assert.equal(result.receipt.unmarked.amount, 40 * 50);
+  assert.equal(result.amountComputed, 100000 + 4000 + 2000);
+});
+
+test('производительность и срок только информация, в сумму не входят', () => {
+  const slow = run({ timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 3000, order_id: 1 }] });
+  const fast = run({ timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }] });
+  assert.equal(slow.amountComputed, fast.amountComputed);
+  const prod = fast.quality.metrics.find((m) => m.key === 'productivity');
+  assert.ok(prod.fact > 1.8 && prod.weight === 0 && prod.informational === true);
+  assert.equal(fast.quality.multiplier, 1);
+});
+
+test('пустой табель не режет выплату, но предупреждает', () => {
+  const result = run({ timeEntries: [] });
+  assert.equal(result.amountComputed, 1899 * 50);
+  assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
+  assert.equal(result.quality.metrics.find((m) => m.key === 'productivity').available, false);
+});
+
+test('уровень считается от настоящего плана, без пересчёта от проданного', () => {
+  const result = run({ soldHours: 900 });
+  assert.equal(result.output.soldHours, 900);
+  assert.ok(result.output.achievement > 1.5); // 1899 ч больше aspiration 1693
+  assert.ok(!result.warnings.some((w) => w.code === 'sold_below_plan'));
+  const low = run({
+    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
+    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }],
+    soldHours: 900,
+  });
+  assert.equal(low.output.achievement, 0.25); // 1000 ч ниже base 1330
+  assert.equal(low.amountComputed, 1000 * 50);
+});
+
+test('без плана по деньгам платим полную ставку и предупреждаем', () => {
+  const result = run({ teamMoney: null });
+  assert.equal(result.money.known, false);
+  assert.equal(result.rates.orders, 100);
+  assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
 });
