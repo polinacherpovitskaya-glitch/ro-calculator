@@ -19,8 +19,9 @@ export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 // ставки схемы (`rates_json.rate` = ставка на medium): ниже base треть, base
 // две трети, medium единица, aspiration и выше 1,2. При ставке 225 ₽ это
 // 75 / 150 / 225 / 270 ₽/ч. Внутренние работы и часы без заказа всегда по
-// `rates_json.half` (50 ₽). Ступень квартала — наименьшая из двух: по часам
-// цеха и по деньгам компании, обе должны быть взяты.
+// `rates_json.half` (50 ₽). Ступень квартала задают ДЕНЬГИ компании: заработали
+// — ставка выше, не заработали — ниже, но никогда не ноль. Часы цеха задают
+// объём: сколько нормо-часов сделали, столько и оплачивается по этой ставке.
 export const TIER_RATE_SHARES = { below: 1 / 3, base: 2 / 3, medium: 1, aspiration: 1.2 };
 export const DEFAULT_FLAT_RATE = 50;
 export const TIER_ORDER = ['below', 'base', 'medium', 'aspiration'];
@@ -406,11 +407,11 @@ export function computeProductionPeriod(input) {
     return 'aspiration';
   };
   const rateOfTier = (tier) => Math.round(rate * TIER_RATE_SHARES[tier]);
-  // Ступень квартала = наименьшая из двух: по часам цеха и по деньгам компании.
-  const lowerTier = (a, b) => (b === null || b === undefined ? a : TIER_ORDER[Math.min(TIER_ORDER.indexOf(a), TIER_ORDER.indexOf(b))]);
+  // Ставку задают деньги компании. Если плана или факта по деньгам нет,
+  // откатываемся на ступень по часам, чтобы не платить по минимуму вслепую.
   const tierByHours = tierOf(outputAch);
   const tierByMoney = tierOfMoney();
-  const tier = lowerTier(tierByHours, tierByMoney);
+  const tier = tierByMoney || tierByHours;
   const rateOrders = rateOfTier(tier);
   const flatRate = Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE);
 
@@ -428,7 +429,7 @@ export function computeProductionPeriod(input) {
     const forecastCommercial = commercialOutputHours / share;
     forecast = roundTo(outputFact / share, 0);
     forecastAchievement = planThresholds ? roundTo(achievement(forecast, planThresholds, 'higher', ladder), 4) : null;
-    const fTier = lowerTier(tierOf(forecastAchievement), tierByMoney);
+    const fTier = tierByMoney || tierOf(forecastAchievement);
     forecastAmount = Math.round(forecastCommercial * rateOfTier(fTier))
       + Math.round((internalOutputHours / share) * flatRate) + Math.round((unmarkedHours / share) * flatRate);
   }

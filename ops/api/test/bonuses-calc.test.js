@@ -337,7 +337,7 @@ test('ставки ступеней: 75 / 150 / 225 / 270 от ставки на
   assert.equal(result.rates.flat, 50);
 });
 
-test('ступень по часам: ниже base, base, medium, aspiration', () => {
+test('ступень по часам показывается справочно', () => {
   const hours = (h) => ({
     orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: h, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
     timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: h, order_id: 1 }],
@@ -346,12 +346,12 @@ test('ступень по часам: ниже base, base, medium, aspiration', 
   assert.equal(run(hours(1400)).tierByHours, 'base');       // 1331..1512
   assert.equal(run(hours(1600)).tierByHours, 'medium');     // 1512..1693
   assert.equal(run(hours(1899)).tierByHours, 'aspiration'); // >= 1693
-  assert.equal(run(hours(1600)).rates.orders, 225);
-  assert.equal(run(hours(1600)).amountComputed, 1600 * 225);
+  assert.equal(run(hours(1600)).rates.orders, 270); // деньги на aspiration
+  assert.equal(run(hours(1600)).amountComputed, 1600 * 270);
 });
 
-test('ступень = наименьшая из двух: по часам и по деньгам', () => {
-  // часы aspiration, деньги ниже base → платим по «ниже base»
+test('ставку задают деньги, часы задают объём', () => {
+  // деньги ниже base: 75 ₽ за каждый сделанный час, сколько бы их ни было
   const below = run({ teamMoney: { fact: 10813376, thresholds: moneyTiers } });
   assert.equal(below.tierByHours, 'aspiration');
   assert.equal(below.tierByMoney, 'below');
@@ -359,22 +359,23 @@ test('ступень = наименьшая из двух: по часам и п
   assert.equal(below.rates.orders, 75);
   assert.equal(below.amountComputed, 1899 * 75);
 
-  // деньги взяли base, часы выше → платим по base
   const base = run({ teamMoney: { fact: 15000000, thresholds: moneyTiers } });
-  assert.equal(base.tierByMoney, 'base');
   assert.equal(base.tier, 'base');
   assert.equal(base.amountComputed, 1899 * 150);
 
-  // деньги на aspiration, но часы ниже → платим по часам
+  const medium = run({ teamMoney: { fact: 16600000, thresholds: moneyTiers } });
+  assert.equal(medium.tier, 'medium');
+  assert.equal(medium.amountComputed, 1899 * 225);
+
+  // деньги на aspiration, а часов мало: ставка высокая, объём маленький
   const hoursLow = run({
     teamMoney: { fact: 17200000, thresholds: moneyTiers },
     orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1400, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
     timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1400, order_id: 1 }],
   });
-  assert.equal(hoursLow.tierByMoney, 'aspiration');
+  assert.equal(hoursLow.tier, 'aspiration');
   assert.equal(hoursLow.tierByHours, 'base');
-  assert.equal(hoursLow.tier, 'base');
-  assert.equal(hoursLow.amountComputed, 1400 * 150);
+  assert.equal(hoursLow.amountComputed, 1400 * 270);
 });
 
 test('внутренние работы и часы без заказа всегда по 50 ₽', () => {
@@ -387,10 +388,10 @@ test('внутренние работы и часы без заказа всег
     { id: 2, employee_id: 5, date: '2026-08-02', hours: 40, order_id: null },
   ];
   const result = run({ orders, timeEntries, stockApprovals: new Set(['2']) });
-  assert.equal(result.receipt.orders.amount, 1600 * 225);
+  assert.equal(result.receipt.orders.amount, 1600 * 270); // деньги на aspiration
   assert.equal(result.receipt.internal.amount, 80 * 50);
   assert.equal(result.receipt.unmarked.amount, 40 * 50);
-  assert.equal(result.amountComputed, 360000 + 4000 + 2000);
+  assert.equal(result.amountComputed, 1600 * 270 + 4000 + 2000);
 });
 
 test('год на medium даёт около 100 тысяч в месяц', () => {
@@ -414,7 +415,7 @@ test('пустой табель не режет выплату, но преду�
   assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
 });
 
-test('без плана по деньгам ступень считается только по часам', () => {
+test('без плана по деньгам откатываемся на ступень по часам', () => {
   const result = run({ teamMoney: null });
   assert.equal(result.money.known, false);
   assert.equal(result.tierByMoney, null);
