@@ -65,6 +65,23 @@ function isValidYmd(value) {
   return Number.isFinite(parsed.getTime()) && ymd(parsed) === value;
 }
 
+// Квартал считается со сдвигом на неделю: деньги приходят не в срок, и заказы
+// закрываются первыми числами следующего месяца. III квартал = 8 июля – 7 октября.
+export const QUARTER_SHIFT_DAYS = 7;
+
+function shiftYmd(value, days) {
+  const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// Границы периода для часов и заказов, со сдвигом.
+export function periodWindow(period, shiftDays = QUARTER_SHIFT_DAYS) {
+  const { year, q, from, to } = periodBounds(period);
+  return { year, q, from: shiftYmd(from, shiftDays), to: shiftYmd(to, shiftDays) };
+}
+
 export function holidaySet(settings) {
   const raw = String(settings?.production_holidays || '').trim();
   if (!raw) return new Set();
@@ -84,7 +101,7 @@ export function workingDays(from, to, holidays = new Set()) {
 }
 
 export function elapsedWorkingShare(period, todayYmd, holidays = new Set()) {
-  const { from, to } = periodBounds(period);
+  const { from, to } = periodWindow(period);
   const today = String(todayYmd).slice(0, 10);
   if (today < from) return 0;
   if (today > to) return 1;
@@ -186,7 +203,7 @@ function sumHours(entries) {
 // Проданные часы квартала: коммерческие заказы с дедлайном в периоде,
 // живые, не черновики без счёта. Завершённые входят.
 export function soldHoursForPeriod(orders, period) {
-  const { from, to } = periodBounds(period);
+  const { from, to } = periodWindow(period);
   let total = 0;
   for (const order of orders) {
     if (!isAlive(order) || !isCommercialOrder(order) || isUnpaidDraft(order)) continue;
@@ -202,7 +219,7 @@ export function computeProductionPeriod(input) {
     period, today, status = 'open', scheme, targets, orders, timeEntries, settings, stockApprovals,
     soldHours = null, teamMoney = null, employees = [],
   } = input;
-  const { from, to } = periodBounds(period);
+  const { from, to } = periodWindow(period);
   const holidays = holidaySet(settings);
   const ladder = scheme.ladder_json || DEFAULT_LADDER;
   const rate = num(scheme.rates_json?.rate);
@@ -476,7 +493,7 @@ export function suggestProductionTargets({ period, settings }) {
 
 // Блок «Люди»: по сотрудникам, состав, прогноз до конца квартала.
 export function computeTeamStats({ period, today, orders, timeEntries, employees, settings, shopProductivity = 1, tiers = null }) {
-  const { from, to } = periodBounds(period);
+  const { from, to } = periodWindow(period);
   const holidays = holidaySet(settings);
   const hoursPerDay = num(settings?.planning_hours_per_day) || 9;
   const todayYmd = String(today || '').slice(0, 10);
