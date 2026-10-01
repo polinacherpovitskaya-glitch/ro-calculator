@@ -327,7 +327,7 @@ function run(extra = {}) {
   return computeProductionPeriod({
     period: '2026-Q3', today: '2026-10-20', status: 'open', scheme: extra.scheme || simpleScheme, targets, orders, timeEntries,
     settings: {}, stockApprovals: extra.stockApprovals || new Set(), soldHours: extra.soldHours ?? 1283,
-    teamMoney: extra.teamMoney === undefined ? { fact: 16000000, thresholds: moneyTiers } : extra.teamMoney,
+    teamMoney: extra.teamMoney === undefined ? { fact: 17200000, thresholds: moneyTiers } : extra.teamMoney,
   });
 }
 
@@ -350,21 +350,31 @@ test('ступень по часам: ниже base, base, medium, aspiration', 
   assert.equal(run(hours(1600)).amountComputed, 1600 * 225);
 });
 
-test('деньги ниже base опускают ступень на одну вниз', () => {
-  const result = run({ teamMoney: { fact: 10813376, thresholds: moneyTiers } });
-  assert.equal(result.money.belowBase, true);
-  assert.equal(result.tierByHours, 'aspiration');
-  assert.equal(result.tier, 'medium');
-  assert.equal(result.rates.orders, 225);
-  assert.equal(result.amountComputed, 1899 * 225);
-  const low = run({
-    teamMoney: { fact: 1000000, thresholds: moneyTiers },
-    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1000, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
-    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1000, order_id: 1 }],
+test('ступень = наименьшая из двух: по часам и по деньгам', () => {
+  // часы aspiration, деньги ниже base → платим по «ниже base»
+  const below = run({ teamMoney: { fact: 10813376, thresholds: moneyTiers } });
+  assert.equal(below.tierByHours, 'aspiration');
+  assert.equal(below.tierByMoney, 'below');
+  assert.equal(below.tier, 'below');
+  assert.equal(below.rates.orders, 75);
+  assert.equal(below.amountComputed, 1899 * 75);
+
+  // деньги взяли base, часы выше → платим по base
+  const base = run({ teamMoney: { fact: 15000000, thresholds: moneyTiers } });
+  assert.equal(base.tierByMoney, 'base');
+  assert.equal(base.tier, 'base');
+  assert.equal(base.amountComputed, 1899 * 150);
+
+  // деньги на aspiration, но часы ниже → платим по часам
+  const hoursLow = run({
+    teamMoney: { fact: 17200000, thresholds: moneyTiers },
+    orders: [{ id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 1400, deadline: '2026-09-20', completed_at: '2026-09-10T00:00:00.000Z' }],
+    timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 1400, order_id: 1 }],
   });
-  assert.equal(low.tierByHours, 'below');
-  assert.equal(low.tier, 'below'); // ниже base ступень уже не опускается
-  assert.equal(low.amountComputed, 1000 * 75);
+  assert.equal(hoursLow.tierByMoney, 'aspiration');
+  assert.equal(hoursLow.tierByHours, 'base');
+  assert.equal(hoursLow.tier, 'base');
+  assert.equal(hoursLow.amountComputed, 1400 * 150);
 });
 
 test('внутренние работы и часы без заказа всегда по 50 ₽', () => {
@@ -400,13 +410,14 @@ test('производительность и срок только информ
 
 test('пустой табель не режет выплату, но предупреждает', () => {
   const result = run({ timeEntries: [] });
-  assert.equal(result.amountComputed, 1899 * 270);
+  assert.equal(result.amountComputed, 1899 * 270); // деньги на aspiration → ступень по часам
   assert.ok(result.warnings.some((w) => w.code === 'no_timesheet'));
 });
 
-test('без плана по деньгам ступень не опускается', () => {
+test('без плана по деньгам ступень считается только по часам', () => {
   const result = run({ teamMoney: null });
   assert.equal(result.money.known, false);
+  assert.equal(result.tierByMoney, null);
   assert.equal(result.tier, result.tierByHours);
   assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
 });
