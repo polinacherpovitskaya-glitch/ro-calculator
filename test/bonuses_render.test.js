@@ -5,85 +5,6 @@ const {
     renderBonusCard, renderWarnings, renderTeamBlock, renderPeopleBlock, renderSummary, renderReceipt, renderLevelLadder,
 } = require('../js/bonuses.js');
 
-test('renderLevelLadder: планки, текущий уровень и почему', () => {
-    const scaled = renderLevelLadder({
-        hasTargets: true, rate: 100,
-        output: { fact: 1173, soldHours: 1163, achievement: 1, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1024, target: 1163, max: 1302 } },
-    });
-    assert.match(scaled, /bn-step bn-step-on"><div class="n">medium<\/div><div class="h">от 1 163 ч<\/div><div class="r">100 ₽\/ч/);
-    assert.match(scaled, /base<\/div><div class="h">от 1 024 ч<\/div><div class="r">50 ₽\/ч/);
-    assert.match(scaled, /bn-step-locked"><div class="n">aspiration/);
-    assert.match(scaled, /Продано 1 163 ч, это 77% плана 1 512 ч/);
-    assert.match(scaled, /сделано 1 173 ч = 101% проданного, поэтому <b>medium<\/b>/);
-    assert.match(scaled, /Aspiration откроется, когда продадут и сделают больше 1 693 ч/);
-    const plain = renderLevelLadder({
-        hasTargets: true, rate: 100,
-        output: { fact: 1200, soldHours: 1600, achievement: 0.25, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 } },
-    });
-    assert.match(plain, /Сделано 1 200 ч, поэтому <b>ниже base<\/b>/);
-    assert.match(plain, /четверть ставки, 25 ₽\/ч/);
-});
-
-test('renderReceipt: из чего складывается сумма', () => {
-    const html = renderReceipt({
-        hasTargets: true, rate: 100, level: 1, amountComputed: 103788, hourRate: 105, rateParts: { rate: 100, level: 1, productivity: 1.05 },
-        quality: { multiplier: 1.05, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
-        output: { rateApplied: 100 },
-        receipt: { commercial: { hours: 753, amount: 79065 }, internal: { hours: 80, amount: 8400 }, unmarked: { hours: 328, rate: 50, amount: 16400 }, upside: { hours: 701, amount: 73605 } },
-    });
-    assert.match(html, /100 ₽ × уровень 1,00 × производительность 1,05/);
-    assert.match(html, /<b>105 ₽\/ч<\/b>/);
-    assert.match(html, /Заказы клиентов<\/td><td>753 ч × 105 ₽<\/td><td class="num">79 065 ₽/);
-    assert.match(html, /Внутренние работы, утверждено<\/td><td>80 ч × 105 ₽<\/td><td class="num">8 400 ₽/);
-    assert.match(html, /Часы без заказа, половина ставки<\/td><td>328 ч × 50 ₽<\/td><td class="num">16 400 ₽/);
-    assert.match(html, /Итого к выплате<\/td><td><\/td><td class="num"><b>103 788 ₽/);
-    assert.match(html, /Продано, но ещё не сделано<\/td><td>701 ч × 105 ₽<\/td><td class="num">\+ 73 605 ₽ если доделать/);
-});
-
-test('renderSummary: коротко, сколько и из чего', () => {
-    const html = renderSummary({
-        hasTargets: true, rate: 75, level: 1.105, amountComputed: 149861,
-        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 82.87, forecastAmount: 160000, remainingSoldHours: 0 },
-        money: { fact: 14400000, achievement: 0.6333, blend: 0.9635 },
-        quality: { multiplier: 1.1667, metrics: [{ key: 'productivity', fact: 1.05, available: true, weight: 1 }] },
-    });
-    assert.match(html, /К выплате сейчас 149 861 ₽<\/b>: 1 550 ч × 82,87 ₽ × 1,1667 = 149 861 ₽/);
-    const exact = renderSummary({
-        hasTargets: true, rate: 75, level: 1, amountComputed: 89623,
-        output: { fact: 1173.04, commercialHours: 1173.04, internalHours: 0, unmarkedHours: 232, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, achievement: 1, rateApplied: 75, scaledCapped: true, forecastAmount: null, remainingSoldHours: 53, remainingSoldOrders: [1] },
-        money: { achievement: null }, quality: { multiplier: 1.0187, metrics: [] }, amountBase: 89623, unmarked: { hours: 232, share: 0.5, amount: 8700 },
-    });
-    assert.match(exact, /1 173,04 ч × 75 ₽ × 1,0187 = 89 623 ₽/);
-    assert.match(exact, /Плюс часы без заказа \(быт, сток, съёмки\): 232 ч × 50% ставки = 8 700 ₽/);
-    assert.match(exact, /проданное почти сделано/);
-    assert.doesNotMatch(exact, /Из них/);
-    const split = renderSummary({
-        hasTargets: true, rate: 75, level: 1, amountComputed: 1,
-        output: { fact: 1173, commercialHours: 1100, internalHours: 73, unmarkedHours: 12, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, achievement: 1, rateApplied: 75, forecastAmount: null, remainingSoldHours: 0 },
-        money: { achievement: null }, quality: { multiplier: 1, metrics: [] }, unmarked: { hours: 12, share: 0.5, amount: 450 },
-    });
-    assert.match(split, /по заказам 1 100 ч и внутренние работы \(сток, образцы, утверждено\) 73 ч/);
-    assert.match(split, /Плюс часы без заказа/);
-    assert.match(html, /между medium и aspiration/);
-    assert.match(html, /производительность 1,05/);
-    assert.match(html, /Прогноз к концу квартала 160 000 ₽/);
-    assert.doesNotMatch(html, /защита от недопродажи/);
-    const lifted = renderSummary({
-        hasTargets: true, rate: 75, level: 1.2235, amountComputed: 1,
-        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, achievement: 1.105, rateApplied: 91.76, forecastAmount: null, remainingSoldHours: 0 },
-        money: { fact: 17000000, achievement: 1.5, blend: 1.2235 }, quality: { multiplier: 1, metrics: [] },
-    });
-    assert.match(lifted, /деньги подняли/);
-    const capped = renderSummary({
-        hasTargets: true, rate: 75, level: 1, amountComputed: 91260,
-        output: { fact: 1173, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, achievement: 1, rateApplied: 75, scaledCapped: true, forecastAmount: null, remainingSoldHours: 53, remainingSoldOrders: [1, 2, 3] },
-        money: { achievement: null }, quality: { multiplier: 1.04, metrics: [] },
-    });
-    assert.match(capped, /medium: продано 1 044 ч из плана 1 512 ч, проданное почти сделано/);
-    assert.match(capped, /Не сделано из проданного: 53 ч/);
-    assert.match(renderSummary({ hasTargets: false }), /Цели квартала ещё не заданы/);
-});
-
 test('bonusesCurrentPeriod и bonusesPeriodOptions', () => {
     assert.equal(bonusesCurrentPeriod(new Date(2026, 8, 15)), '2026-Q3');
     assert.equal(bonusesCurrentPeriod(new Date(2026, 0, 2)), '2026-Q1');
@@ -100,116 +21,6 @@ test('formatRub и formatMetricValue', () => {
     assert.equal(formatMetricValue('on_time_share', 0.9), '90%');
     assert.equal(formatMetricValue('rework_share', null), '—');
     assert.equal(formatMetricValue('cash_in', 14400000), '14,4 млн');
-});
-
-test('renderOutputRow: уровни, факт, прогноз, пересчёт от проданного', () => {
-    const html = renderOutputRow({
-        fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 1330, target: 1512, max: 1693 },
-        soldHours: 1600, achievement: 1.1123, rateApplied: 82.87, forecast: 1610, forecastAchievement: 1.27, forecastAmount: 170000,
-    }, 75);
-    assert.match(html, /bn-output/);
-    assert.match(html, /1 550 ч/);
-    assert.match(html, /base 1 330 ч/);
-    assert.match(html, /aspiration 1 693 ч/);
-    assert.match(html, /1,11/);
-    assert.match(html, /уровень по часам/);
-    assert.match(html, /прогноз 1 610 ч/);
-    const scaled = renderOutputRow({
-        fact: 900, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 792, target: 900, max: 1008 },
-        soldHours: 900, achievement: 1, rateApplied: 75, forecast: null, forecastAchievement: null, forecastAmount: null,
-    }, 75);
-    assert.match(scaled, /план 1 330 ч \/ 1 512 ч \/ 1 693 ч; продано меньше плана/);
-    assert.match(scaled, /bn-tick-sold-label[^>]*>продано 900 ч/);
-
-    assert.match(scaled, /1 693/);
-});
-
-test('renderLevelRow: формула уровня', () => {
-    const html = renderLevelRow({ rate: 75, level: 1.1123, output: { achievement: 1.1123, rateApplied: 83.42 }, money: { achievement: 0.6333, blend: 0.9686 } });
-    assert.match(html, /max\(часы 1,11; 0,7 × 1,11 \+ 0,3 × 0,63 = 0,97\) = 1,11/);
-    assert.match(html, /83,42 ₽\/ч/);
-    const noMoney = renderLevelRow({ rate: 75, level: 1.1123, output: { achievement: 1.1123, rateApplied: 83.42 }, money: { achievement: null } });
-    assert.match(noMoney, /план по деньгам не задан/);
-});
-
-test('renderQualityRow: доступный, недоступный и информационный показатель', () => {
-    const ok = renderQualityRow({ key: 'on_time_share', label: 'В срок', direction: 'higher', weight: 0.3, thresholds: { min: 0.7, target: 0.85, max: 0.95 }, fact: 0.9, achievement: 1.25, available: true });
-    assert.match(ok, /90%/);
-    assert.match(ok, /125%/);
-    assert.match(ok, /вес 30%/);
-    const none = renderQualityRow({ key: 'productivity', label: 'Производительность', direction: 'higher', weight: 1, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: null, achievement: 0.5, available: false });
-    assert.match(none, /нет данных/);
-    assert.match(none, /50%/);
-    const info = renderQualityRow({ key: 'rework_share', label: 'Переделки', direction: 'lower', weight: 0, thresholds: { min: 0.08, target: 0.05, max: 0.02 }, fact: 0.01, achievement: 1.5, available: true });
-    assert.match(info, /информация, в деньги не входит/);
-});
-
-test('renderBonusCard: формула, итог, детали под карточкой', () => {
-    const html = renderBonusCard({
-        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: 1.105,
-        output: { fact: 1550, thresholds: { min: 1330, target: 1512, max: 1693 }, thresholdsEffective: { min: 1330, target: 1512, max: 1693 }, soldHours: 1600, achievement: 1.105, rateApplied: 82.87, forecast: null, forecastAchievement: null, forecastAmount: null },
-        money: { fact: null, thresholds: null, achievement: null, blend: null },
-        quality: { multiplier: 1.1917, metrics: [
-            { key: 'productivity', label: 'Производительность', direction: 'higher', weight: 1, thresholds: { min: 0.9, target: 1, max: 1.15 }, fact: 1.05, achievement: 1.1667, available: true },
-            { key: 'on_time_share', label: 'В срок', direction: 'higher', weight: 0, thresholds: { min: 0.7, target: 0.85, max: 0.95 }, fact: 0.9, achievement: 1.25, available: true },
-        ] },
-        amountComputed: 153073, amountFinal: null, warnings: [],
-        orders: [{ id: 1, name: 'Заказ', purpose: 'commercial', hoursPlan: 10, hoursFact: 9, deadline: '2026-09-20', completedAt: '2026-09-10', estimated: false, onTime: true, approved: null, included: true }],
-        adjustments: [], targetsDrift: false, hasTargets: true,
-    }, { expanded: true });
-    assert.match(html, /Лёша/);
-    assert.match(html, /153 073 ₽/);
-    assert.match(html, /1 550 ч × 82,87 ₽ × 1,1917 = 153 073 ₽/);
-    assert.match(html, /bn-card-details/);
-    assert.match(html, /Закрыть квартал/);
-    assert.match(html, /bn-chip-green">Производительность <b>1,05<\/b>/);
-    const info = renderBonusCard({
-        schemeId: 7, employeeId: 5, employeeName: 'Лёша', resultStatus: 'open', rate: 100, level: 1,
-        output: { fact: 1000, thresholds: { min: 1331, target: 1512, max: 1693 }, achievement: 0.25, rateApplied: 25 },
-        money: { achievement: null }, quality: { multiplier: 1, metrics: [{ key: 'on_time_share', label: 'В срок', weight: 0, fact: 0.5, achievement: 0.25, available: true }] },
-        amountComputed: 1, hasTargets: true, warnings: [], orders: [], adjustments: [],
-    }, {});
-    assert.match(info, /bn-chip-grey[^>]*>В срок <b>50%<\/b> · не в деньгах/);
-    assert.doesNotMatch(html, /data-metric="on_time_share"/, 'строки с весом 0 на карточке не показываются');
-    assert.match(html, /К выплате сейчас/);
-    assert.match(html, /bn-hero/);
-    assert.match(html, /medium → aspiration/);
-    const collapsed = renderBonusCard({
-        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: 1,
-        output: { fact: 1173, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 918, target: 1044, max: 1169 }, soldHours: 1044, scaledCapped: true, achievement: 1, rateApplied: 75, forecastAmount: 105665, remainingSoldHours: 53 },
-        money: { achievement: null }, quality: { multiplier: 1.02, metrics: [{ key: 'productivity', label: 'Производительность', weight: 0.5, fact: 1.01, achievement: 1.03, available: true }] },
-        unmarked: { hours: 232, share: 0.5, amount: 8700 }, amountBase: 89623, amountComputed: 98323, amountFinal: null,
-        warnings: [{ code: 'unmarked_hours', hours: 232, count: 0, orderIds: [] }], orders: [], adjustments: [], targetsDrift: false, hasTargets: true,
-    }, { expanded: false });
-    assert.match(collapsed, /98 323 ₽/);
-    assert.match(collapsed, /прогноз на конец квартала 105 665 ₽/);
-    assert.match(collapsed, /1,00 <small>medium<\/small>/);
-    assert.match(collapsed, /продано 69% плана · сделано 112% от проданного/);
-    const mine = renderBonusCard({
-        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 100, level: 1.2,
-        output: { fact: 1600, thresholds: { min: 1331, target: 1512, max: 1693 }, thresholdsEffective: { min: 1331, target: 1512, max: 1693 }, soldHours: 1700, scaledCapped: false, achievement: 1.24, rateApplied: 124, forecastAmount: null, remainingSoldHours: 0 },
-        money: { achievement: null }, quality: { multiplier: 1, metrics: [] }, unmarked: { hours: 0, share: 0.5, amount: 0 }, amountBase: 198400, amountComputed: 198400, amountFinal: null,
-        warnings: [], orders: [{ id: 1, name: 'Заказ', purpose: 'stock_sample', hoursPlan: 10, hoursFact: 9, deadline: null, completedAt: '2026-09-10', estimated: false, onTime: null, approved: true, included: true }], adjustments: [], targetsDrift: false, hasTargets: true,
-    }, { expanded: true, readOnly: true });
-    assert.match(mine, /сделано 106% плана medium/);
-    assert.doesNotMatch(mine, /Закрыть квартал|Цели квартала|data-action="scheme"/);
-    assert.match(mine, /bn-approve[^>]*disabled/);
-    const teamRo = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: {}, cashAchievement: null } }, '2026-Q3', { readOnly: true });
-    assert.doesNotMatch(teamRo, /data-action=/);
-    assert.match(collapsed, /Предупреждений <b>1<\/b>/);
-    assert.match(collapsed, /bn-receipt/);
-    assert.doesNotMatch(collapsed, /bn-summary/, 'в свёрнутом виде текста нет');
-});
-
-test('renderBonusCard: без целей вместо суммы прочерк и подсказка', () => {
-    const html = renderBonusCard({
-        schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', rate: 75, level: null,
-        output: { fact: 0, thresholds: null, thresholdsEffective: null, soldHours: null, achievement: null, rateApplied: 0, forecast: null, forecastAchievement: null, forecastAmount: null },
-        money: { fact: null, thresholds: null, achievement: null, blend: null },
-        quality: { multiplier: 0, metrics: [] }, amountComputed: 0, amountFinal: null, warnings: [], orders: [], adjustments: [], targetsDrift: false, hasTargets: false,
-    });
-    assert.match(html, /задайте цели квартала/);
-    assert.doesNotMatch(html, /0 ₽<small>/);
 });
 
 test('renderWarnings', () => {
@@ -262,4 +73,92 @@ test('renderPeopleBlock: таблица людей, состав, прогноз
     assert.match(html, /bn-flag-slow/);
     assert.match(html, /нужно 2,7/);
     assert.match(html, /не хватает 25 человеко-дней/);
+});
+
+const ENTRY = {
+    schemeId: 7, employeeId: 5, employeeName: 'Лёша', kind: 'production', resultStatus: 'open', period: '2026-Q3',
+    rate: 100, level: 1.55, hasTargets: true, targetsDrift: false,
+    rates: { base: 100, orders: 50, over: 50, half: 50 },
+    money: { fact: 10813376, thresholds: { min: 14500000, target: 16500000, max: 17000000 }, known: true, belowBase: true },
+    output: {
+        fact: 1899, commercialHours: 1899, internalHours: 0, unmarkedHours: 232, soldHours: 1283,
+        thresholds: { min: 1331, target: 1512, max: 1693 }, achievement: 1.55,
+        remainingSoldHours: 701, remainingSoldOrders: [1], forecast: null, forecastAmount: null,
+    },
+    quality: { multiplier: 1, metrics: [
+        { key: 'productivity', label: 'Производительность', weight: 0, informational: true, fact: 1.01, available: true, direction: 'higher', thresholds: { min: 0.9, target: 1, max: 1.15 } },
+        { key: 'on_time_share', label: 'В срок', weight: 0, informational: true, fact: 0.9, available: true, direction: 'higher', thresholds: { min: 0.85, target: 1, max: 1 } },
+    ] },
+    receipt: {
+        within: { hours: 1512, rate: 50, amount: 75600 },
+        over: { hours: 387, rate: 50, amount: 19350 },
+        internal: { hours: 0, rate: 50, amount: 0 },
+        unmarked: { hours: 232, rate: 50, amount: 11600 },
+        upside: { hours: 701, rate: 50, amount: 35050 },
+    },
+    amountComputed: 106550, amountFinal: null, warnings: [{ code: 'unmarked_hours', hours: 232, count: 0, orderIds: [] }],
+    orders: [], adjustments: [],
+};
+
+test('renderReceipt: четыре строки, итог и упущенное', () => {
+    const html = renderReceipt(ENTRY);
+    assert.match(html, /Заказы в пределах плана<\/td><td>1 512 ч × 50 ₽<\/td><td class="num">75 600 ₽/);
+    assert.match(html, /Часы сверх плана<\/td><td>387 ч × 50 ₽<\/td><td class="num">19 350 ₽/);
+    assert.match(html, /Часы без заказа<\/td><td>232 ч × 50 ₽<\/td><td class="num">11 600 ₽/);
+    assert.doesNotMatch(html, /Внутренние работы/);
+    assert.match(html, /Итого к выплате<\/td><td><\/td><td class="num"><b>106 550 ₽/);
+    assert.match(html, /Продано, но ещё не сделано<\/td><td>701 ч × 50 ₽<\/td><td class="num">\+ 35 050 ₽/);
+});
+
+test('renderLevelRow: ворота по деньгам', () => {
+    assert.match(renderLevelRow(ENTRY), /bn-level-red[^>]*>Деньги компании 10,8 млн ниже base 14,5 млн: ставка 50 ₽\/ч вместо 100 ₽/);
+    const ok = renderLevelRow({ ...ENTRY, money: { ...ENTRY.money, fact: 16000000, belowBase: false }, rates: { base: 100, orders: 100, over: 150, half: 50 } });
+    assert.match(ok, /bn-level-green[^>]*>Деньги компании 16 млн, base 14,5 млн взят: ставка 100 ₽\/ч, часы сверх плана по 150 ₽/);
+    const unknown = renderLevelRow({ ...ENTRY, money: { known: false }, rates: { base: 100, orders: 100, over: 150, half: 50 } });
+    assert.match(unknown, /План по деньгам за квартал не пришёл из таблицы/);
+});
+
+test('renderLevelLadder: планки плана и где мы', () => {
+    const html = renderLevelLadder(ENTRY);
+    assert.match(html, /base<\/div><div class="h">от 1 331 ч/);
+    assert.match(html, /medium · план<\/div><div class="h">от 1 512 ч/);
+    assert.match(html, /bn-step bn-step-on"><div class="n">aspiration<\/div><div class="h">от 1 693 ч/);
+    assert.match(html, /Сделано 1 899 ч из плана 1 512 ч, это <b>aspiration<\/b>/);
+});
+
+test('renderSummary: правила одной строкой', () => {
+    const html = renderSummary(ENTRY);
+    assert.match(html, /в пределах плана 1 512 ч по 50 ₽, часы сверх плана по 50 ₽, внутренние работы и часы без заказа по 50 ₽/);
+    assert.match(html, /Производительность, срок и переделки на сумму не влияют/);
+    assert.match(renderSummary({ hasTargets: false }), /Цели квартала ещё не заданы/);
+});
+
+test('renderBonusCard: плитки, чек, лесенка, детали', () => {
+    const html = renderBonusCard(ENTRY, { expanded: true });
+    assert.match(html, /Лёша/);
+    assert.match(html, /К выплате сейчас<\/div><div class="v">106 550 ₽/);
+    assert.match(html, /План квартала<\/div><div class="v">выше aspiration/);
+    assert.match(html, /Ставка за нормо-час<\/div><div class="v">50 ₽<\/div><div class="s">деньги ниже base, половина от 100 ₽/);
+    assert.match(html, /bn-receipt/);
+    assert.match(html, /bn-chip-grey[^>]*>Производительность <b>1,01<\/b>/);
+    assert.match(html, /Качество, на сумму не влияет/);
+    assert.match(html, /Закрыть квартал/);
+    const ro = renderBonusCard(ENTRY, { expanded: false, readOnly: true });
+    assert.doesNotMatch(ro, /Закрыть квартал|Цели квартала|data-action="scheme"/);
+    assert.doesNotMatch(ro, /bn-card-details/);
+});
+
+test('renderOutputRow: полоса плана и отметка проданного', () => {
+    const html = renderOutputRow(ENTRY.output);
+    assert.match(html, /Сделано, нормо-часы/);
+    assert.match(html, /base 1 331 ч/);
+    assert.match(html, /bn-tick-sold-label[^>]*>продано 1 283 ч/);
+    assert.match(html, /1 899 ч/);
+});
+
+test('renderQualityRow: только факт, без процентов', () => {
+    const html = renderQualityRow(ENTRY.quality.metrics[1]);
+    assert.match(html, /В срок/);
+    assert.match(html, /информация, в деньги не входит/);
+    assert.match(html, /90%/);
 });

@@ -15,10 +15,14 @@ export const DEFAULT_QUALITY_WEIGHTS = { productivity: 1, on_time_share: 0, rewo
 // Уровень квартала = max(A_output, 0.7 × A_output + 0.3 × A_cash).
 export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 
-// Часы табеля без заказа (быт, сток, съёмки) оплачиваются отдельной строкой по
-// доле от ставки квартала: чтобы такие задачи делались, но был стимул разносить
-// часы по проектам. В уровень и производительность они не входят.
-export const DEFAULT_UNMARKED_RATE_SHARE = 0.5;
+// Четыре правила выплаты (решение владельца 2026-10-01):
+// 1) нормо-часы заказов в пределах плана квартала по ставке,
+// 2) часы сверх плана по полуторной ставке,
+// 3) утверждённые внутренние работы и часы без заказа по половинной ставке,
+// 4) если деньги компании ниже base, ставка половинная и надбавки за
+//    перевыполнение нет.
+export const OVER_PLAN_RATE_SHARE = 1.5;
+export const HALF_RATE_SHARE = 0.5;
 
 export const DEFAULT_QUALITY_THRESHOLDS = {
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
@@ -324,142 +328,100 @@ export function computeProductionPeriod(input) {
     }
   }
 
-  // Выпуск и уровень. Если продано меньше плана medium, уровни масштабируются
-  // от проданного: цех не может сделать больше, чем продано, и не виноват в
-  // недоборе. Но пересчёт может поднять уровень только до medium (полная
-  // ставка); выше medium уровень считается только от настоящего плана.
+  // Уровень квартала: от настоящего плана, без пересчёта от проданного. Он
+  // только показывает, где мы, и открывает повышенную ставку за часы сверх
+  // плана. Деньги компании на уровень не влияют, они работают воротами ниже.
   const planThresholds = targets?.output_hours || null;
   const sold = soldHours === null || soldHours === undefined ? null : num(soldHours);
   const outputFact = roundTo(outputHours, 2);
-  let outputThresholds = planThresholds;
-  let outputAch = planThresholds ? achievement(outputFact, planThresholds, 'higher', ladder) : null;
-  let scaledCapped = false;
-  if (planThresholds && sold !== null && num(planThresholds.target) > 0 && sold < num(planThresholds.target)) {
-    const scale = sold / num(planThresholds.target);
-    outputThresholds = {
-      min: Math.round(num(planThresholds.min) * scale),
-      target: Math.round(sold),
-      max: Math.round(num(planThresholds.max) * scale),
-    };
-    warnings.push({ code: 'sold_below_plan', count: 0, hours: roundTo(sold, 2), orderIds: [] });
-    if (outputAch !== null && outputAch < Number(ladder.target)) {
-      const scaledAch = achievement(outputFact, outputThresholds, 'higher', ladder);
-      const capped = Math.min(Number(ladder.target), scaledAch);
-      scaledCapped = scaledAch > Number(ladder.target);
-      outputAch = Math.max(outputAch, capped);
-    }
-  }
+  const outputAch = planThresholds ? achievement(outputFact, planThresholds, 'higher', ladder) : null;
 
-  // Деньги компании: только поднимают уровень.
+  // Деньги компании: ворота. Ниже base — половинная ставка и без надбавки за
+  // часы сверх плана. Компания не взяла минимум, значит и ставка минимальная.
   const moneyThresholds = teamMoney?.thresholds || null;
   const moneyFact = teamMoney?.fact === null || teamMoney?.fact === undefined ? null : num(teamMoney.fact);
-  const moneyAch = moneyThresholds && moneyFact !== null ? achievement(moneyFact, moneyThresholds, 'higher', ladder) : null;
-  let level = outputAch;
-  let blend = null;
-  if (outputAch !== null && moneyAch !== null) {
-    blend = roundTo(num(levelWeights.output) * outputAch + num(levelWeights.money) * moneyAch, 4);
-    level = Math.max(outputAch, blend);
-  } else if (outputAch !== null) {
-    warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
-  }
-  // Для денег уровень и производительность округляются до сотых, ставка за час
-  // до рубля: то, что видно на экране, и есть то, что умножается.
-  const levelMoney = level === null ? null : roundTo(roundTo(level, 4), 2);
-  const rateApplied = levelMoney === null ? 0 : roundTo(rate * levelMoney, 2);
+  const moneyKnown = !!moneyThresholds && moneyFact !== null;
+  const moneyBelowBase = moneyKnown ? moneyFact < num(moneyThresholds.min) : false;
+  if (!moneyKnown) warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
 
-  // Качество
+  // Качество: только информация, в деньги не входит.
   const qualityFacts = {};
   if (outputHours > 0 && timesheetOnIncluded === 0) {
-    qualityFacts.productivity = { fact: null, available: false, fallback: Number(ladder.min) };
+    qualityFacts.productivity = { fact: null, available: false };
     warnings.push({ code: 'no_timesheet', count: 0, hours: 0, orderIds: [] });
   } else if (timesheetOnIncluded > 0) {
     qualityFacts.productivity = { fact: roundTo(outputHours / timesheetOnIncluded, 4), available: true };
   } else {
-    qualityFacts.productivity = { fact: null, available: false, fallback: Number(ladder.min) };
+    qualityFacts.productivity = { fact: null, available: false };
   }
   if (deadlineCount > 0) {
     qualityFacts.on_time_share = { fact: roundTo(onTimeCount / deadlineCount, 4), available: true };
   } else {
-    qualityFacts.on_time_share = { fact: null, available: false, fallback: Number(ladder.target) };
+    qualityFacts.on_time_share = { fact: null, available: false };
     warnings.push({ code: 'no_deadline_orders', count: 0, hours: 0, orderIds: [] });
   }
   if (reworkHours + commercialPeriodHours > 0) {
     qualityFacts.rework_share = { fact: roundTo(reworkHours / (reworkHours + commercialPeriodHours), 4), available: true };
   } else {
-    qualityFacts.rework_share = { fact: null, available: false, fallback: Number(ladder.target) };
+    qualityFacts.rework_share = { fact: null, available: false };
     warnings.push({ code: 'no_period_hours', count: 0, hours: 0, orderIds: [] });
   }
+  const qualityMetrics = ['productivity', 'on_time_share', 'rework_share'].map((key) => ({
+    key, label: METRIC_LABELS[key], direction: QUALITY_DIRECTIONS[key], weight: 0,
+    thresholds: targets?.[key] || DEFAULT_QUALITY_THRESHOLDS[key],
+    fact: qualityFacts[key].fact, available: qualityFacts[key].available, informational: true,
+  }));
 
-  let multiplier = 0;
-  const qualityMetrics = ['productivity', 'on_time_share', 'rework_share'].map((key) => {
-    const thresholds = targets?.[key] || DEFAULT_QUALITY_THRESHOLDS[key];
-    const { fact, available, fallback } = qualityFacts[key];
-    // Для качества потолок = max (1,5): рост «выше aspiration» только у выпуска.
-    const qualityLadder = { ...ladder, cap: Number(ladder.max) };
-    const ach = available ? achievement(fact, thresholds, QUALITY_DIRECTIONS[key], qualityLadder) : fallback;
-    const weight = num(weights[key]);
-    multiplier += weight * ach;
-    return {
-      key, label: METRIC_LABELS[key], direction: QUALITY_DIRECTIONS[key], weight, thresholds, fact,
-      achievement: roundTo(ach, 4), available, informational: weight === 0,
-    };
-  });
-  multiplier = roundTo(multiplier, 4);
+  // Четыре правила: заказы в пределах плана по ставке, часы сверх плана по
+  // полуторной, внутренние работы и часы без заказа по половинной.
+  const rateOrders = Math.round(moneyBelowBase ? rate * HALF_RATE_SHARE : rate);
+  const rateOver = moneyBelowBase ? rateOrders : Math.round(rate * OVER_PLAN_RATE_SHARE);
+  const rateHalf = Math.round(rate * HALF_RATE_SHARE);
+  const planHours = planThresholds ? num(planThresholds.target) : null;
+  const withinHours = planHours === null ? commercialOutputHours : Math.min(commercialOutputHours, planHours);
+  const overHours = planHours === null ? 0 : Math.max(0, commercialOutputHours - planHours);
+  const amountWithin = Math.round(withinHours * rateOrders);
+  const amountOver = Math.round(overHours * rateOver);
+  const amountInternal = Math.round(internalOutputHours * rateHalf);
+  const amountUnmarked = Math.round(unmarkedHours * rateHalf);
+  const amount = amountWithin + amountOver + amountInternal + amountUnmarked;
 
-  const multiplierMoney = roundTo(multiplier, 2);
-  const hourRate = Math.round(rateApplied * multiplierMoney); // итоговая ставка за нормо-час, ₽
-  const commercialAmount = Math.round(commercialOutputHours * hourRate);
-  const internalAmount = Math.round(internalOutputHours * hourRate);
-  const baseAmount = commercialAmount + internalAmount;
-  const unmarkedShare = scheme.quality_json?.unmarked_rate_share === undefined || scheme.quality_json?.unmarked_rate_share === null
-    ? DEFAULT_UNMARKED_RATE_SHARE
-    : num(scheme.quality_json.unmarked_rate_share);
-  const unmarkedHourRate = Math.round(hourRate * unmarkedShare);
-  const unmarkedAmount = Math.round(unmarkedHours * unmarkedHourRate);
-  const amount = baseAmount + unmarkedAmount;
-
-  // Прогноз выпуска по доле прошедших рабочих дней.
+  // Прогноз: заказы по темпу прошедших рабочих дней, остальное как есть.
   const share = status === 'open' ? elapsedWorkingShare(period, todayYmd, holidays) : 1;
   let forecast = null;
   let forecastAchievement = null;
-  let forecastLevel = null;
   let forecastAmount = null;
-  if (status === 'open' && share > 0 && share < 1 && outputThresholds) {
-    forecast = roundTo(outputFact / share, 0);
-    let fAch = achievement(forecast, planThresholds, 'higher', ladder);
-    if (outputThresholds !== planThresholds && fAch < Number(ladder.target)) {
-      fAch = Math.max(fAch, Math.min(Number(ladder.target), achievement(forecast, outputThresholds, 'higher', ladder)));
-    }
-    forecastAchievement = roundTo(fAch, 4);
-    forecastLevel = moneyAch === null
-      ? forecastAchievement
-      : roundTo(Math.max(forecastAchievement, num(levelWeights.output) * forecastAchievement + num(levelWeights.money) * moneyAch), 4);
-    forecastAmount = Math.round(forecast * Math.round(rate * roundTo(forecastLevel, 2) * multiplierMoney));
+  if (status === 'open' && share > 0 && share < 1) {
+    const forecastCommercial = commercialOutputHours / share;
+    forecast = roundTo((outputFact) / share, 0);
+    forecastAchievement = planThresholds ? roundTo(achievement(forecast, planThresholds, 'higher', ladder), 4) : null;
+    const fWithin = planHours === null ? forecastCommercial : Math.min(forecastCommercial, planHours);
+    const fOver = planHours === null ? 0 : Math.max(0, forecastCommercial - planHours);
+    forecastAmount = Math.round(fWithin * rateOrders) + Math.round(fOver * rateOver)
+      + Math.round((internalOutputHours / share) * rateHalf) + Math.round((unmarkedHours / share) * rateHalf);
   }
 
   return {
     period, schemeId: scheme.id, employeeId: scheme.employee_id, status, rate,
-    level: level === null ? null : roundTo(level, 4),
+    level: outputAch === null ? null : roundTo(outputAch, 4),
     output: {
       fact: outputFact, commercialHours: roundTo(commercialOutputHours, 2), internalHours: roundTo(internalOutputHours, 2),
       unmarkedHours: roundTo(unmarkedHours, 2),
-      thresholds: planThresholds, thresholdsEffective: outputThresholds, soldHours: sold, scaledCapped,
+      thresholds: planThresholds, soldHours: sold,
       remainingSoldHours: roundTo(remainingSoldHours, 2), remainingSoldOrders,
-      achievement: outputAch === null ? null : roundTo(outputAch, 4), rateApplied,
-      forecast, forecastAchievement, forecastLevel, forecastAmount,
+      achievement: outputAch === null ? null : roundTo(outputAch, 4),
+      forecast, forecastAchievement, forecastAmount,
     },
-    money: { fact: moneyFact, thresholds: moneyThresholds, achievement: moneyAch === null ? null : roundTo(moneyAch, 4), blend },
-    quality: { multiplier, metrics: qualityMetrics },
-    unmarked: { hours: roundTo(unmarkedHours, 2), share: unmarkedShare, amount: unmarkedAmount },
-    hourRate,
-    rateParts: { rate, level: levelMoney, productivity: multiplierMoney },
+    money: { fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase },
+    quality: { multiplier: 1, metrics: qualityMetrics },
+    rates: { base: rate, orders: rateOrders, over: rateOver, half: rateHalf },
     receipt: {
-      commercial: { hours: roundTo(commercialOutputHours, 2), amount: commercialAmount },
-      internal: { hours: roundTo(internalOutputHours, 2), amount: internalAmount },
-      unmarked: { hours: roundTo(unmarkedHours, 2), rate: unmarkedHourRate, amount: unmarkedAmount },
-      upside: { hours: roundTo(remainingSoldHours, 2), amount: Math.round(remainingSoldHours * hourRate) },
+      within: { hours: roundTo(withinHours, 2), rate: rateOrders, amount: amountWithin },
+      over: { hours: roundTo(overHours, 2), rate: rateOver, amount: amountOver },
+      internal: { hours: roundTo(internalOutputHours, 2), rate: rateHalf, amount: amountInternal },
+      unmarked: { hours: roundTo(unmarkedHours, 2), rate: rateHalf, amount: amountUnmarked },
+      upside: { hours: roundTo(remainingSoldHours, 2), rate: rateOrders, amount: Math.round(remainingSoldHours * rateOrders) },
     },
-    amountBase: baseAmount,
     amountComputed: amount, warnings, orders: detail,
   };
 }
