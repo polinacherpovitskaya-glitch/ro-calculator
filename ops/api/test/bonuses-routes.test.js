@@ -238,8 +238,10 @@ test('план и факт по деньгам отдела: ворота ста
   // Деньги выше base: полная ставка и надбавка за часы сверх плана.
   assert.equal(entry.money.known, true);
   assert.equal(entry.money.belowBase, false);
-  assert.equal(entry.rates.orders, 75);
-  assert.equal(entry.rates.over, Math.round(75 * 1.5));
+  // ставка берётся по ступени квартала: при rate 75 это 25 / 50 / 75 / 90
+  assert.deepEqual(entry.rates.steps, { below: 25, base: 50, medium: 75, aspiration: 90 });
+  assert.equal(entry.rates.orders, entry.rates.steps[entry.tier]);
+  assert.equal(entry.tier, entry.tierByHours);
   assert.equal(body.team.commercial.cashAchievement, 1.5);
 
   res = await requestJson(port, 'PUT', '/api/bonuses/periods/2026-Q3/team/commercial', { facts: { cash_in: { value: -5 } } }, cookie);

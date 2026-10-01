@@ -15,14 +15,14 @@ export const DEFAULT_QUALITY_WEIGHTS = { productivity: 1, on_time_share: 0, rewo
 // Уровень квартала = max(A_output, 0.7 × A_output + 0.3 × A_cash).
 export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 
-// Четыре правила выплаты (решение владельца 2026-10-01):
-// 1) нормо-часы заказов в пределах плана квартала по ставке,
-// 2) часы сверх плана по полуторной ставке,
-// 3) утверждённые внутренние работы и часы без заказа по половинной ставке,
-// 4) если деньги компании ниже base, ставка половинная и надбавки за
-//    перевыполнение нет.
-export const OVER_PLAN_RATE_SHARE = 1.5;
-export const HALF_RATE_SHARE = 0.5;
+// Ставка за нормо-час зависит от ступени квартала по часам. Доли считаются от
+// ставки схемы (`rates_json.rate` = ставка на medium): ниже base треть, base
+// две трети, medium единица, aspiration и выше 1,2. При ставке 225 ₽ это
+// 75 / 150 / 225 / 270 ₽/ч. Внутренние работы и часы без заказа всегда по
+// `rates_json.half` (50 ₽). Деньги ниже base опускают ступень на одну вниз.
+export const TIER_RATE_SHARES = { below: 1 / 3, base: 2 / 3, medium: 1, aspiration: 1.2 };
+export const DEFAULT_FLAT_RATE = 50;
+export const TIER_ORDER = ['below', 'base', 'medium', 'aspiration'];
 
 export const DEFAULT_QUALITY_THRESHOLDS = {
   productivity: { min: 0.9, target: 1.0, max: 1.15 },
@@ -389,33 +389,38 @@ export function computeProductionPeriod(input) {
     fact: qualityFacts[key].fact, available: qualityFacts[key].available, informational: true,
   }));
 
-  // Четыре правила: заказы в пределах плана по ставке, часы сверх плана по
-  // полуторной, внутренние работы и часы без заказа по половинной.
-  const rateOrders = Math.round(moneyBelowBase ? rate * HALF_RATE_SHARE : rate);
-  const rateOver = moneyBelowBase ? rateOrders : Math.round(rate * OVER_PLAN_RATE_SHARE);
-  const rateHalf = Math.round(rate * HALF_RATE_SHARE);
-  const planHours = planThresholds ? num(planThresholds.target) : null;
-  const withinHours = planHours === null ? commercialOutputHours : Math.min(commercialOutputHours, planHours);
-  const overHours = planHours === null ? 0 : Math.max(0, commercialOutputHours - planHours);
-  const amountWithin = Math.round(withinHours * rateOrders);
-  const amountOver = Math.round(overHours * rateOver);
-  const amountInternal = Math.round(internalOutputHours * rateHalf);
-  const amountUnmarked = Math.round(unmarkedHours * rateHalf);
-  const amount = amountWithin + amountOver + amountInternal + amountUnmarked;
+  // Ступень квартала по часам и ставка за нормо-час.
+  const tierOf = (ach) => {
+    if (ach === null || ach === undefined) return 'base';
+    if (ach < Number(ladder.min)) return 'below';
+    if (ach < Number(ladder.target)) return 'base';
+    if (ach < Number(ladder.max)) return 'medium';
+    return 'aspiration';
+  };
+  const stepDown = (tier) => TIER_ORDER[Math.max(0, TIER_ORDER.indexOf(tier) - 1)];
+  const rateOfTier = (tier) => Math.round(rate * TIER_RATE_SHARES[tier]);
+  const tierByHours = tierOf(outputAch);
+  const tier = moneyBelowBase ? stepDown(tierByHours) : tierByHours;
+  const rateOrders = rateOfTier(tier);
+  const flatRate = Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE);
 
-  // Прогноз: заказы по темпу прошедших рабочих дней, остальное как есть.
+  const amountOrders = Math.round(commercialOutputHours * rateOrders);
+  const amountInternal = Math.round(internalOutputHours * flatRate);
+  const amountUnmarked = Math.round(unmarkedHours * flatRate);
+  const amount = amountOrders + amountInternal + amountUnmarked;
+
+  // Прогноз: заказы по темпу прошедших рабочих дней, ступень пересчитывается.
   const share = status === 'open' ? elapsedWorkingShare(period, todayYmd, holidays) : 1;
   let forecast = null;
   let forecastAchievement = null;
   let forecastAmount = null;
   if (status === 'open' && share > 0 && share < 1) {
     const forecastCommercial = commercialOutputHours / share;
-    forecast = roundTo((outputFact) / share, 0);
+    forecast = roundTo(outputFact / share, 0);
     forecastAchievement = planThresholds ? roundTo(achievement(forecast, planThresholds, 'higher', ladder), 4) : null;
-    const fWithin = planHours === null ? forecastCommercial : Math.min(forecastCommercial, planHours);
-    const fOver = planHours === null ? 0 : Math.max(0, forecastCommercial - planHours);
-    forecastAmount = Math.round(fWithin * rateOrders) + Math.round(fOver * rateOver)
-      + Math.round((internalOutputHours / share) * rateHalf) + Math.round((unmarkedHours / share) * rateHalf);
+    const fTier = moneyBelowBase ? stepDown(tierOf(forecastAchievement)) : tierOf(forecastAchievement);
+    forecastAmount = Math.round(forecastCommercial * rateOfTier(fTier))
+      + Math.round((internalOutputHours / share) * flatRate) + Math.round((unmarkedHours / share) * flatRate);
   }
 
   return {
@@ -431,12 +436,15 @@ export function computeProductionPeriod(input) {
     },
     money: { fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase },
     quality: { multiplier: 1, metrics: qualityMetrics },
-    rates: { base: rate, orders: rateOrders, over: rateOver, half: rateHalf },
+    tier, tierByHours,
+    rates: {
+      medium: rate, orders: rateOrders, flat: flatRate,
+      steps: { below: rateOfTier('below'), base: rateOfTier('base'), medium: rateOfTier('medium'), aspiration: rateOfTier('aspiration') },
+    },
     receipt: {
-      within: { hours: roundTo(withinHours, 2), rate: rateOrders, amount: amountWithin },
-      over: { hours: roundTo(overHours, 2), rate: rateOver, amount: amountOver },
-      internal: { hours: roundTo(internalOutputHours, 2), rate: rateHalf, amount: amountInternal },
-      unmarked: { hours: roundTo(unmarkedHours, 2), rate: rateHalf, amount: amountUnmarked },
+      orders: { hours: roundTo(commercialOutputHours, 2), rate: rateOrders, amount: amountOrders },
+      internal: { hours: roundTo(internalOutputHours, 2), rate: flatRate, amount: amountInternal },
+      unmarked: { hours: roundTo(unmarkedHours, 2), rate: flatRate, amount: amountUnmarked },
       upside: { hours: roundTo(remainingSoldHours, 2), rate: rateOrders, amount: Math.round(remainingSoldHours * rateOrders) },
     },
     amountComputed: amount, warnings, orders: detail,
