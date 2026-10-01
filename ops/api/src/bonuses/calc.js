@@ -19,7 +19,8 @@ export const DEFAULT_LEVEL_WEIGHTS = { output: 0.7, money: 0.3 };
 // ставки схемы (`rates_json.rate` = ставка на medium): ниже base треть, base
 // две трети, medium единица, aspiration и выше 1,2. При ставке 225 ₽ это
 // 75 / 150 / 225 / 270 ₽/ч. Внутренние работы и часы без заказа всегда по
-// `rates_json.half` (50 ₽). Деньги ниже base опускают ступень на одну вниз.
+// `rates_json.half` (50 ₽). Ступень квартала — наименьшая из двух: по часам
+// цеха и по деньгам компании, обе должны быть взяты.
 export const TIER_RATE_SHARES = { below: 1 / 3, base: 2 / 3, medium: 1, aspiration: 1.2 };
 export const DEFAULT_FLAT_RATE = 50;
 export const TIER_ORDER = ['below', 'base', 'medium', 'aspiration'];
@@ -359,6 +360,13 @@ export function computeProductionPeriod(input) {
   const moneyFact = teamMoney?.fact === null || teamMoney?.fact === undefined ? null : num(teamMoney.fact);
   const moneyKnown = !!moneyThresholds && moneyFact !== null;
   const moneyBelowBase = moneyKnown ? moneyFact < num(moneyThresholds.min) : false;
+  const tierOfMoney = () => {
+    if (!moneyKnown) return null;
+    if (moneyFact < num(moneyThresholds.min)) return 'below';
+    if (moneyFact < num(moneyThresholds.target)) return 'base';
+    if (moneyFact < num(moneyThresholds.max)) return 'medium';
+    return 'aspiration';
+  };
   if (!moneyKnown) warnings.push({ code: 'no_money_plan', count: 0, hours: 0, orderIds: [] });
 
   // Качество: только информация, в деньги не входит.
@@ -397,10 +405,12 @@ export function computeProductionPeriod(input) {
     if (ach < Number(ladder.max)) return 'medium';
     return 'aspiration';
   };
-  const stepDown = (tier) => TIER_ORDER[Math.max(0, TIER_ORDER.indexOf(tier) - 1)];
   const rateOfTier = (tier) => Math.round(rate * TIER_RATE_SHARES[tier]);
+  // Ступень квартала = наименьшая из двух: по часам цеха и по деньгам компании.
+  const lowerTier = (a, b) => (b === null || b === undefined ? a : TIER_ORDER[Math.min(TIER_ORDER.indexOf(a), TIER_ORDER.indexOf(b))]);
   const tierByHours = tierOf(outputAch);
-  const tier = moneyBelowBase ? stepDown(tierByHours) : tierByHours;
+  const tierByMoney = tierOfMoney();
+  const tier = lowerTier(tierByHours, tierByMoney);
   const rateOrders = rateOfTier(tier);
   const flatRate = Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE);
 
@@ -418,7 +428,7 @@ export function computeProductionPeriod(input) {
     const forecastCommercial = commercialOutputHours / share;
     forecast = roundTo(outputFact / share, 0);
     forecastAchievement = planThresholds ? roundTo(achievement(forecast, planThresholds, 'higher', ladder), 4) : null;
-    const fTier = moneyBelowBase ? stepDown(tierOf(forecastAchievement)) : tierOf(forecastAchievement);
+    const fTier = lowerTier(tierOf(forecastAchievement), tierByMoney);
     forecastAmount = Math.round(forecastCommercial * rateOfTier(fTier))
       + Math.round((internalOutputHours / share) * flatRate) + Math.round((unmarkedHours / share) * flatRate);
   }
@@ -436,7 +446,7 @@ export function computeProductionPeriod(input) {
     },
     money: { fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase },
     quality: { multiplier: 1, metrics: qualityMetrics },
-    tier, tierByHours,
+    tier, tierByHours, tierByMoney,
     rates: {
       medium: rate, orders: rateOrders, flat: flatRate,
       steps: { below: rateOfTier('below'), base: rateOfTier('base'), medium: rateOfTier('medium'), aspiration: rateOfTier('aspiration') },

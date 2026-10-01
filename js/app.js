@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v471';
+const APP_VERSION = 'v472';
 
 const App = {
     currentPage: 'orders',
