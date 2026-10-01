@@ -59,6 +59,7 @@ const BONUSES_CSS = `
 .bn-step .n{font-weight:700;font-size:16px;text-transform:uppercase;letter-spacing:.03em}
 .bn-step .h{font-size:15px;margin-top:2px;font-variant-numeric:tabular-nums}
 .bn-step .r{font-size:18px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.bn-step .a{font-size:15px;margin-top:4px;font-variant-numeric:tabular-nums;opacity:.85}
 .bn-step-on{background:#1f6feb;border-color:#1f6feb;color:#fff}
 .bn-step-locked{opacity:.55;border-style:dashed}
 .bn-ladder-why{font-size:16px;line-height:1.45;margin:4px 0 8px;max-width:90ch}
@@ -371,13 +372,21 @@ function renderLevelLadder(entry) {
         { key: 'medium', name: 'medium', money: thr && thr.target, rate: st.medium },
         { key: 'aspiration', name: 'aspiration', money: thr && thr.max, rate: st.aspiration },
     ];
+    const byTier = Object.fromEntries((entry.scenarios || []).map((x) => [x.tier, x]));
     const cells = steps.map((s2) => {
         const on = current === s2.key ? ' bn-step-on' : '';
         const label = s2.money ? `от ${formatMoneyShort(s2.money)}` : (thr ? `меньше ${formatMoneyShort(thr.min)}` : '—');
-        return `<div class="bn-step${on}"><div class="n">${s2.name}</div><div class="h">${bonusesEscape(label)}</div><div class="r">${bonusesNum(s2.rate)} ₽/ч</div></div>`;
+        const sc = byTier[s2.key];
+        const amount = sc ? `<div class="a">${formatRub(sc.amount)}</div>` : '';
+        return `<div class="bn-step${on}"><div class="n">${s2.name}</div><div class="h">${bonusesEscape(label)}</div><div class="r">${bonusesNum(s2.rate)} ₽/ч</div>${amount}</div>`;
     }).join('');
     const plan = o.thresholds || {};
-    const why = `Цех сделал ${formatHours(o.fact)} из плана ${formatHours(plan.target)} — это объём, он оплачивается по ставке ступени.`;
+    const nowAmount = byTier[current] ? byTier[current].amount : null;
+    const next = current === 'below' ? 'base' : (current === 'base' ? 'medium' : (current === 'medium' ? 'aspiration' : null));
+    const upside = next && byTier[next] && byTier[current]
+        ? ` Если доберём деньги до ${next} (ещё ${formatMoneyShort(byTier[next].moneyNeeded)}), за те же часы выйдет ${formatRub(byTier[next].amount)}, это +${formatRub(byTier[next].amount - byTier[current].amount)}.`
+        : '';
+    const why = `Суммы в ступенях посчитаны на сегодняшние ${formatHours(o.fact)} заказов${nowAmount !== null ? `, сейчас это ${formatRub(nowAmount)}` : ''}.${upside}`;
     return `<div class="bn-ladder bn-ladder-4">${cells}</div><div class="bn-ladder-why">${why}</div>`;
 }
 
