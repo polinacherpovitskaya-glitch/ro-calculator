@@ -1,0 +1,68 @@
+name: Timetrack date repair
+
+# Puts time entries back on the day their own report names, and optionally
+# removes rows confirmed as repeated submissions. Manual only: it writes to
+# production timesheet data that feeds payroll.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run печатает план и ничего не меняет; apply применяет его'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      delete_ids:
+        description: 'Id записей на удаление через запятую (только при mode=apply)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timetrack-date-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify repair logic
+        run: node tests/timetrack-date-repair-smoke.mjs
+
+      - name: Run repair
+        env:
+          OPS_API_URL: https://api.recycleobject.ru
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          DELETE_IDS: ${{ inputs.delete_ids }}
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+
+          args=()
+          if [ "$MODE" = "apply" ]; then
+            args+=(--apply-dates)
+            if [ -n "${DELETE_IDS:-}" ]; then
+              args+=("--delete-ids=${DELETE_IDS}")
+            fi
+          elif [ -n "${DELETE_IDS:-}" ]; then
+            echo "delete_ids игнорируется в режиме dry-run" >&2
+          fi
+
+          node scripts/repair-timetrack-collapsed-dates.mjs "${args[@]:-}"

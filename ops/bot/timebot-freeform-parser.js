@@ -8,7 +8,19 @@ const DEFAULT_STAGE_LABELS = {
 
 const HOURS_SUFFIX_RE = /\s*[—–-]\s*([\d]+(?:[.,]\d+)?)\s*(?:ч|ч\.|час(?:а|ов)?)\s*$/i;
 const DATE_PREFIX_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*[—–-]\s*/;
-const DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:\s*$/;
+// A day heading is a date on its own line. The trailing colon is optional
+// ("8.09" as well as "9.09:"), and after a colon the day may carry a note of
+// its own ("12.06: праздничный день"). A heading the parser failed to
+// recognise used to reject the whole report.
+const DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:?\s*$/;
+const LABELLED_DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:\s*\S/;
+
+// A line that reports hours is an entry, whatever it starts with — that is
+// what keeps "16.07 — Проект / Сборка — 0.5ч" from being read as a heading.
+function matchDateHeading(line) {
+    if (HOURS_SUFFIX_RE.test(line)) return null;
+    return line.match(DATE_HEADING_RE) || line.match(LABELLED_DATE_HEADING_RE);
+}
 
 function normalizeText(value) {
     return String(value || '')
@@ -156,7 +168,7 @@ function parseFreeformBatchReport(text, options = {}) {
     let activeDate = null;
 
     lines.forEach((line, index) => {
-        const headingMatch = line.match(DATE_HEADING_RE);
+        const headingMatch = matchDateHeading(line);
         if (headingMatch) {
             const resolvedDate = resolveDate(headingMatch[1], headingMatch[2], headingMatch[3], options);
             if (resolvedDate.error) {
