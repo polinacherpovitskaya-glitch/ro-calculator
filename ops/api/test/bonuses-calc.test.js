@@ -20,12 +20,12 @@ test('holidaySet и workingDays', () => {
   assert.equal(workingDays('2026-07-01', '2026-09-30', new Set()), 66);
 });
 
-test('elapsedWorkingShare', () => {
+test('elapsedWorkingShare: окно квартала со сдвигом +7 дней', () => {
   const none = new Set();
-  assert.equal(elapsedWorkingShare('2026-Q3', '2026-06-30', none), 0);
-  assert.equal(elapsedWorkingShare('2026-Q3', '2026-10-05', none), 1);
+  assert.equal(elapsedWorkingShare('2026-Q3', '2026-07-05', none), 0); // до 8 июля это ещё II квартал
+  assert.equal(elapsedWorkingShare('2026-Q3', '2026-10-10', none), 1);
   const share = elapsedWorkingShare('2026-Q3', '2026-09-09', none);
-  assert.equal(share, workingDays('2026-07-01', '2026-09-09', none) / workingDays('2026-07-01', '2026-09-30', none));
+  assert.equal(share, workingDays('2026-07-08', '2026-09-09', none) / workingDays('2026-07-08', '2026-10-07', none));
 });
 
 test('achievement: больше лучше, линейно между уровнями, выше aspiration рост до потолка', () => {
@@ -126,8 +126,10 @@ test('soldHoursForPeriod: дедлайн в периоде, живые, не ч�
     { id: 5, status: 'cancelled', production_purpose: 'commercial', total_hours_plan: 500, deadline: '2026-08-01' },
     { id: 6, status: 'in_production', production_purpose: 'stock_sample', total_hours_plan: 40, deadline: '2026-08-01' },
     { id: 7, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 70, deadline: '2026-10-01' },
+    { id: 8, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 11, deadline: '2026-07-02' },
   ];
-  assert.equal(soldHoursForPeriod(orders, '2026-Q3'), 330);
+  // окно 08.07–07.10: заказ с дедлайном 01.10 входит, с 02.07 — нет
+  assert.equal(soldHoursForPeriod(orders, '2026-Q3'), 400);
 });
 
 test('computeProductionPeriod: склад, предупреждения, границы периода', () => {
@@ -191,7 +193,7 @@ test('computeProductionPeriod: прогноз по доле рабочих дн�
     timeEntries: [{ id: 1, employee_id: 5, date: '2026-08-01', hours: 800, order_id: 1 }], settings: {}, stockApprovals: new Set(),
   });
   const none = new Set();
-  const share = workingDays('2026-07-01', '2026-08-14', none) / workingDays('2026-07-01', '2026-09-30', none);
+  const share = workingDays('2026-07-08', '2026-08-14', none) / workingDays('2026-07-08', '2026-10-07', none);
   assert.ok(Math.abs(result.output.forecast - 800 / share) < 1);
   assert.ok(result.output.forecastAmount > 0);
 });
@@ -204,13 +206,13 @@ test('timesheet_gaps: дни без табеля по каждому произ�
     { id: 8, name: 'Бывший', role: 'production', is_active: false },
   ];
   const timeEntries = [
-    { id: 1, employee_id: 5, date: '2026-07-01', hours: 9, order_id: 1 },
-    { id: 2, employee_id: 5, date: '2026-07-02', hours: 9, order_id: 1 },
-    { id: 3, employee_id: 5, date: '2026-07-03', hours: 9, order_id: 1 },
-    { id: 4, employee_id: 6, date: '2026-07-01', hours: 9, order_id: null },
+    { id: 1, employee_id: 5, date: '2026-07-08', hours: 9, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-07-09', hours: 9, order_id: 1 },
+    { id: 3, employee_id: 5, date: '2026-07-10', hours: 9, order_id: 1 },
+    { id: 4, employee_id: 6, date: '2026-07-08', hours: 9, order_id: null },
   ];
   const result = computeProductionPeriod({
-    period: '2026-Q3', today: '2026-07-03', status: 'open', scheme, targets, orders: [], timeEntries,
+    period: '2026-Q3', today: '2026-07-10', status: 'open', scheme, targets, orders: [], timeEntries,
     settings: { production_holidays: '' }, stockApprovals: new Set(), employees,
   });
   const gaps = result.warnings.find((w) => w.code === 'timesheet_gaps');
@@ -275,21 +277,21 @@ test('computeTeamStats: люди, состав, прогноз', () => {
     { id: 7, name: 'Аня', role: 'sales', is_active: true },
   ];
   const orders = [
-    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-08-01', completed_at: '2026-07-03T00:00:00.000Z' },
+    { id: 1, status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-08-01', completed_at: '2026-07-10T00:00:00.000Z' },
     { id: 2, status: 'in_production', production_purpose: 'commercial', total_hours_plan: 200, deadline: '2026-09-20' },
     { id: 3, status: 'in_production', production_purpose: 'rework', total_hours_plan: 5 },
   ];
   const timeEntries = [
-    { id: 1, employee_id: 5, date: '2026-07-01', hours: 9, order_id: 1 },
-    { id: 2, employee_id: 5, date: '2026-07-02', hours: 9, order_id: 1 },
-    { id: 3, employee_id: 5, date: '2026-07-03', hours: 42, order_id: 1 },
-    { id: 4, employee_id: 6, date: '2026-07-01', hours: 20, order_id: 1 },
-    { id: 5, employee_id: 6, date: '2026-07-02', hours: 50, order_id: 2 },
-    { id: 6, employee_id: 6, date: '2026-07-03', hours: 4, order_id: null },
-    { id: 7, employee_id: 6, date: '2026-07-03', hours: 3, order_id: 3 },
+    { id: 1, employee_id: 5, date: '2026-07-08', hours: 9, order_id: 1 },
+    { id: 2, employee_id: 5, date: '2026-07-09', hours: 9, order_id: 1 },
+    { id: 3, employee_id: 5, date: '2026-07-10', hours: 42, order_id: 1 },
+    { id: 4, employee_id: 6, date: '2026-07-08', hours: 20, order_id: 1 },
+    { id: 5, employee_id: 6, date: '2026-07-09', hours: 50, order_id: 2 },
+    { id: 6, employee_id: 6, date: '2026-07-10', hours: 4, order_id: null },
+    { id: 7, employee_id: 6, date: '2026-07-10', hours: 3, order_id: 3 },
   ];
   const stats = computeTeamStats({
-    period: '2026-Q3', today: '2026-07-03', orders, timeEntries, employees,
+    period: '2026-Q3', today: '2026-07-10', orders, timeEntries, employees,
     settings: { planning_hours_per_day: 9, production_holidays: '' }, shopProductivity: 1.25, tiers: { medium: 1512, aspiration: 1693 },
   });
   const zhenya = stats.people.find((p) => p.id === 5);

@@ -50,6 +50,7 @@ const BONUSES_CSS = `
 .bn-tile .v small{font-size:15px;font-weight:500;color:#57606a;margin-left:6px}
 .bn-tile .s{font-size:14px;color:#57606a;margin-top:4px}
 .bn-chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+.bn-ladder-gated .bn-step .r{text-decoration:line-through;opacity:.6}
 .bn-ladder{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 4px}
 .bn-step{border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;background:#fff;color:#57606a}
 .bn-step .n{font-weight:700;font-size:16px;text-transform:uppercase;letter-spacing:.03em}
@@ -360,18 +361,26 @@ function renderLevelLadder(entry) {
     const rates = entry.rates || {};
     const a = o.achievement === null || o.achievement === undefined ? null : Number(o.achievement);
     const current = a === null ? null : (a < 0.5 ? 'below' : (a < 1 ? 'base' : (a < 1.5 ? 'medium' : 'aspiration')));
+    // На лесенке всегда полные ставки схемы. Если деньги ниже base, об этом
+    // говорит отдельная строка: иначе кажется, что план ни на что не влияет.
+    const full = Number(rates.base) || Number(entry.rate) || 0;
+    const fullOver = Math.round(full * 1.5);
+    const gate = (entry.money || {}).belowBase === true;
     const steps = [
-        { key: 'base', name: 'base', hours: plan.min, note: `${bonusesNum(rates.orders)} ₽/ч` },
-        { key: 'medium', name: 'medium · план', hours: plan.target, note: `дальше ${bonusesNum(rates.over)} ₽/ч` },
-        { key: 'aspiration', name: 'aspiration', hours: plan.max, note: `${bonusesNum(rates.over)} ₽/ч` },
+        { key: 'base', name: 'base', hours: plan.min, note: `${bonusesNum(full)} ₽/ч` },
+        { key: 'medium', name: 'medium · план', hours: plan.target, note: `дальше ${bonusesNum(fullOver)} ₽/ч` },
+        { key: 'aspiration', name: 'aspiration', hours: plan.max, note: `${bonusesNum(fullOver)} ₽/ч` },
     ];
     const cells = steps.map((st) => {
         const on = current === st.key ? ' bn-step-on' : '';
         return `<div class="bn-step${on}"><div class="n">${st.name}</div><div class="h">от ${bonusesEscape(formatHours(st.hours))}</div><div class="r">${st.note}</div></div>`;
     }).join('');
     const word = current === 'below' ? 'ниже base' : (current === 'medium' ? 'medium' : (current || ''));
-    const why = `Сделано ${formatHours(o.fact)} из плана ${formatHours(plan.target)}, это <b>${word}</b>. Часы сверх плана идут по ${bonusesNum(rates.over)} ₽/ч.`;
-    return `<div class="bn-ladder">${cells}</div><div class="bn-ladder-why">${why}</div>`;
+    let why = `Сделано ${formatHours(o.fact)} из плана ${formatHours(plan.target)}, это <b>${word}</b>.`;
+    why += gate
+        ? ` Но деньги компании ниже base, поэтому сейчас всё считается по ${bonusesNum(rates.orders)} ₽/ч: и план, и часы сверх плана.`
+        : ` Часы сверх плана идут по ${bonusesNum(rates.over)} ₽/ч.`;
+    return `<div class="bn-ladder${gate ? ' bn-ladder-gated' : ''}">${cells}</div><div class="bn-ladder-why">${why}</div>`;
 }
 
 function renderBonusCard(entry, options = {}) {

@@ -124,6 +124,14 @@ test('renderLevelLadder: планки плана и где мы', () => {
     assert.match(html, /medium · план<\/div><div class="h">от 1 512 ч/);
     assert.match(html, /bn-step bn-step-on"><div class="n">aspiration<\/div><div class="h">от 1 693 ч/);
     assert.match(html, /Сделано 1 899 ч из плана 1 512 ч, это <b>aspiration<\/b>/);
+    // ставки на лесенке полные, а про половину говорит отдельная строка
+    assert.match(html, /base<\/div><div class="h">от 1 331 ч<\/div><div class="r">100 ₽\/ч/);
+    assert.match(html, /дальше 150 ₽\/ч/);
+    assert.match(html, /bn-ladder-gated/);
+    assert.match(html, /деньги компании ниже base, поэтому сейчас всё считается по 50 ₽\/ч/);
+    const ok = renderLevelLadder({ ...ENTRY, money: { ...ENTRY.money, belowBase: false }, rates: { base: 100, orders: 100, over: 150, half: 50 } });
+    assert.doesNotMatch(ok, /bn-ladder-gated/);
+    assert.match(ok, /Часы сверх плана идут по 150 ₽\/ч/);
 });
 
 test('renderSummary: правила одной строкой', () => {
