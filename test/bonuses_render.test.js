@@ -96,6 +96,12 @@ const ENTRY = {
         unmarked: { hours: 232, rate: 50, amount: 11600 },
         upside: { hours: 701, rate: 75, amount: 52575 },
     },
+    scenarios: [
+        { tier: 'below', rate: 75, amount: 154025, moneyNeeded: 0 },
+        { tier: 'base', rate: 150, amount: 296450, moneyNeeded: 3686624 },
+        { tier: 'medium', rate: 225, amount: 438875, moneyNeeded: 5686624 },
+        { tier: 'aspiration', rate: 270, amount: 524330, moneyNeeded: 6186624 },
+    ],
     amountComputed: 154025, amountFinal: null, warnings: [{ code: 'unmarked_hours', hours: 232, count: 0, orderIds: [] }],
     orders: [], adjustments: [],
 };
@@ -125,7 +131,10 @@ test('renderLevelLadder: ступени по деньгам со своими с
     assert.match(html, /base<\/div><div class="h">от 14,5 млн<\/div><div class="r">150 ₽\/ч/);
     assert.match(html, /medium<\/div><div class="h">от 16,5 млн<\/div><div class="r">225 ₽\/ч/);
     assert.match(html, /aspiration<\/div><div class="h">от 17 млн<\/div><div class="r">270 ₽\/ч/);
-    assert.match(html, /Цех сделал 1 899 ч из плана 1 512 ч — это объём/);
+    assert.match(html, /ниже base<\/div><div class="h">меньше 14,5 млн<\/div><div class="r">75 ₽\/ч<\/div><div class="a">154 025 ₽/);
+    assert.match(html, /base<\/div><div class="h">от 14,5 млн<\/div><div class="r">150 ₽\/ч<\/div><div class="a">296 450 ₽/);
+    assert.match(html, /Суммы в ступенях посчитаны на сегодняшние 1 899 ч заказов, сейчас это 154 025 ₽/);
+    assert.match(html, /Если доберём деньги до base \(ещё 3,7 млн\), за те же часы выйдет 296 450 ₽, это \+142 425 ₽/);
 });
 
 test('renderSummary: правила ступеней', () => {

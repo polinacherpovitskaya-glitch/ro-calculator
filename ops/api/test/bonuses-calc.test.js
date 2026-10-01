@@ -422,3 +422,16 @@ test('без плана по деньгам откатываемся на сту
   assert.equal(result.tier, result.tierByHours);
   assert.ok(result.warnings.some((w) => w.code === 'no_money_plan'));
 });
+
+test('scenarios: сколько вышло бы на каждой ступени при сегодняшних часах', () => {
+  const result = run({ teamMoney: { fact: 12700000, thresholds: moneyTiers } });
+  const byTier = Object.fromEntries(result.scenarios.map((x) => [x.tier, x]));
+  assert.equal(byTier.below.amount, 1899 * 75);
+  assert.equal(byTier.base.amount, 1899 * 150);
+  assert.equal(byTier.medium.amount, 1899 * 225);
+  assert.equal(byTier.aspiration.amount, 1899 * 270);
+  assert.equal(byTier.base.moneyNeeded, 14500000 - 12700000);
+  assert.equal(byTier.medium.moneyNeeded, 16500000 - 12700000);
+  assert.equal(byTier.below.moneyNeeded, 0);
+  assert.equal(result.amountComputed, byTier.below.amount);
+});

@@ -416,6 +416,17 @@ export function computeProductionPeriod(input) {
   const flatRate = Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE);
 
   const amountOrders = Math.round(commercialOutputHours * rateOrders);
+  // Сколько вышло бы на каждой ступени при сегодняшних часах: чтобы было видно,
+  // что даёт доход до base и до medium.
+  const scenarios = TIER_ORDER.map((t) => {
+    const r2 = rateOfTier(t);
+    const amount = Math.round(commercialOutputHours * r2) + Math.round(internalOutputHours * (Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE)))
+      + Math.round(unmarkedHours * (Math.round(num(scheme.rates_json?.half) || DEFAULT_FLAT_RATE)));
+    const need = moneyThresholds
+      ? Math.max(0, num(t === 'below' ? 0 : (t === 'base' ? moneyThresholds.min : (t === 'medium' ? moneyThresholds.target : moneyThresholds.max))) - num(moneyFact || 0))
+      : null;
+    return { tier: t, rate: r2, amount, moneyNeeded: need };
+  });
   const amountInternal = Math.round(internalOutputHours * flatRate);
   const amountUnmarked = Math.round(unmarkedHours * flatRate);
   const amount = amountOrders + amountInternal + amountUnmarked;
@@ -447,7 +458,7 @@ export function computeProductionPeriod(input) {
     },
     money: { fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase },
     quality: { multiplier: 1, metrics: qualityMetrics },
-    tier, tierByHours, tierByMoney,
+    tier, tierByHours, tierByMoney, scenarios,
     rates: {
       medium: rate, orders: rateOrders, flat: flatRate,
       steps: { below: rateOfTier('below'), base: rateOfTier('base'), medium: rateOfTier('medium'), aspiration: rateOfTier('aspiration') },
