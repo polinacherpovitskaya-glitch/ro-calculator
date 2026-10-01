@@ -218,24 +218,21 @@ function renderOutputRow(output) {
     </div>`;
 }
 
-// Ворота по деньгам: одна строка, почему ставка такая.
+// Одна строка: какая ступень по деньгам и какая из этого ставка.
 function renderLevelRow(entry) {
     const m = entry.money || {};
     const r = entry.rates || {};
-    const steps = r.steps || {};
     const name = (t) => (t === 'below' ? 'ниже base' : t);
     if (!m.known) {
-        return `<div class="bn-level bn-level-grey">План по деньгам за квартал не пришёл из таблицы, считаем только по часам: ставка ${bonusesNum(r.orders)} ₽/ч.</div>`;
+        return `<div class="bn-level bn-level-grey">План по деньгам за квартал не пришёл из таблицы, ставка взята по часам: ${bonusesNum(r.orders)} ₽/ч.</div>`;
     }
-    const byMoney = entry.tierByMoney;
-    const byHours = entry.tierByHours;
-    if (byMoney !== byHours && entry.tier === byMoney) {
-        return `<div class="bn-level bn-level-red">Деньги компании ${formatMoneyShort(m.fact)} — это ступень <b>${name(byMoney)}</b>, часы цеха — <b>${name(byHours)}</b>. Платим по меньшей: ${bonusesNum(r.orders)} ₽/ч вместо ${bonusesNum(steps[byHours])} ₽.</div>`;
-    }
-    if (byMoney !== byHours) {
-        return `<div class="bn-level bn-level-amber">Деньги компании ${formatMoneyShort(m.fact)} — ступень <b>${name(byMoney)}</b>, но часы цеха только <b>${name(byHours)}</b>. Платим по меньшей: ${bonusesNum(r.orders)} ₽/ч.</div>`;
-    }
-    return `<div class="bn-level bn-level-green">Часы и деньги на одной ступени <b>${name(entry.tier)}</b>: ставка ${bonusesNum(r.orders)} ₽/ч.</div>`;
+    const thr = m.thresholds || {};
+    const tier = entry.tierByMoney;
+    const next = tier === 'below' ? thr.min : (tier === 'base' ? thr.target : (tier === 'medium' ? thr.max : null));
+    const nextRate = tier === 'below' ? (r.steps || {}).base : (tier === 'base' ? (r.steps || {}).medium : (r.steps || {}).aspiration);
+    const toNext = next ? ` До следующей ступени ${formatMoneyShort(Math.max(0, Number(next) - Number(m.fact)))}, это ${bonusesNum(nextRate)} ₽/ч.` : '';
+    const cls = tier === 'below' ? 'bn-level-red' : (tier === 'base' ? 'bn-level-amber' : 'bn-level-green');
+    return `<div class="bn-level ${cls}">Деньги компании за квартал ${formatMoneyShort(m.fact)} — ступень <b>${name(tier)}</b>, значит ставка ${bonusesNum(r.orders)} ₽ за нормо-час.${toNext}</div>`;
 }
 
 function renderQualityRow(metric) {
@@ -304,7 +301,7 @@ function renderSummary(entry) {
     if (!entry.hasTargets) return '<div class="bn-summary bn-muted">Цели квартала ещё не заданы, расчёта пока нет.</div>';
     const r = entry.rates || {};
     const st = r.steps || {};
-    return `<div class="bn-summary">Правила: все нормо-часы заказов идут по одной ставке, а ставку задаёт ступень квартала: ниже base ${bonusesNum(st.below)} ₽, base ${bonusesNum(st.base)} ₽, medium ${bonusesNum(st.medium)} ₽, aspiration ${bonusesNum(st.aspiration)} ₽. Внутренние работы и часы без заказа всегда по ${bonusesNum(r.flat)} ₽. Ступень берётся наименьшая из двух: по часам цеха и по деньгам компании. Производительность, срок и переделки на сумму не влияют, их обсуждаем отдельно.</div>`;
+    return `<div class="bn-summary">Правила: ставку задают деньги компании за квартал — ниже base ${bonusesNum(st.below)} ₽, base ${bonusesNum(st.base)} ₽, medium ${bonusesNum(st.medium)} ₽, aspiration ${bonusesNum(st.aspiration)} ₽ за нормо-час. Часы задают объём: сколько нормо-часов заказов сделали, столько и оплачивается. Внутренние работы и часы без заказа всегда по ${bonusesNum(r.flat)} ₽. Производительность, срок и переделки на сумму не влияют, их обсуждаем отдельно.</div>`;
 }
 
 function bonusesChipClass(achievement, available) {
@@ -360,33 +357,27 @@ function bonusesLevelWord(entry) {
     return { word: 'выше aspiration', why: planText };
 }
 
-// Лесенка ступеней: часы и ставка каждой ступени, текущая подсвечена.
+// Лесенка по деньгам: сколько компания заработала и какая из этого ставка.
 function renderLevelLadder(entry) {
     if (!entry.hasTargets) return '';
     const o = entry.output || {};
-    const plan = o.thresholds || null;
-    if (!plan) return '';
+    const m = entry.money || {};
     const st = (entry.rates || {}).steps || {};
-    const current = entry.tierByHours || null;
-    const paying = entry.tier || current;
-    const gate = paying !== current;
+    const thr = m.thresholds || null;
+    const current = entry.tierByMoney || entry.tierByHours || null;
     const steps = [
-        { key: 'below', name: 'ниже base', hours: 0, rate: st.below },
-        { key: 'base', name: 'base', hours: plan.min, rate: st.base },
-        { key: 'medium', name: 'medium', hours: plan.target, rate: st.medium },
-        { key: 'aspiration', name: 'aspiration', hours: plan.max, rate: st.aspiration },
+        { key: 'below', name: 'ниже base', money: null, rate: st.below },
+        { key: 'base', name: 'base', money: thr && thr.min, rate: st.base },
+        { key: 'medium', name: 'medium', money: thr && thr.target, rate: st.medium },
+        { key: 'aspiration', name: 'aspiration', money: thr && thr.max, rate: st.aspiration },
     ];
     const cells = steps.map((s2) => {
         const on = current === s2.key ? ' bn-step-on' : '';
-        const pay = gate && paying === s2.key ? ' bn-step-pay' : '';
-        const hours = s2.key === 'below' ? `меньше ${formatHours(plan.min)}` : `от ${formatHours(s2.hours)}`;
-        return `<div class="bn-step${on}${pay}"><div class="n">${s2.name}</div><div class="h">${bonusesEscape(hours)}</div><div class="r">${bonusesNum(s2.rate)} ₽/ч</div></div>`;
+        const label = s2.money ? `от ${formatMoneyShort(s2.money)}` : (thr ? `меньше ${formatMoneyShort(thr.min)}` : '—');
+        return `<div class="bn-step${on}"><div class="n">${s2.name}</div><div class="h">${bonusesEscape(label)}</div><div class="r">${bonusesNum(s2.rate)} ₽/ч</div></div>`;
     }).join('');
-    const word = current === 'below' ? 'ниже base' : current;
-    let why = `Сделано ${formatHours(o.fact)} из плана ${formatHours(plan.target)} — по часам это <b>${word}</b>.`;
-    why += gate
-        ? ` По деньгам ступень ниже, поэтому платим по <b>${paying === 'below' ? 'ниже base' : paying}</b>: ${bonusesNum(st[paying])} ₽/ч.`
-        : ` Все часы заказов идут по ${bonusesNum(st[current])} ₽/ч.`;
+    const plan = o.thresholds || {};
+    const why = `Цех сделал ${formatHours(o.fact)} из плана ${formatHours(plan.target)} — это объём, он оплачивается по ставке ступени.`;
     return `<div class="bn-ladder bn-ladder-4">${cells}</div><div class="bn-ladder-why">${why}</div>`;
 }
 
@@ -406,7 +397,7 @@ function renderBonusCard(entry, options = {}) {
     const hero = `<div class="bn-hero">
         <div class="bn-tile bn-tile-pay"><div class="k">${payTitle}</div><div class="v">${entry.hasTargets ? formatRub(final ? entry.amountFinal : entry.amountComputed) : '—'}</div><div class="s">${bonusesEscape(paySub)}</div></div>
         <div class="bn-tile"><div class="k">План квартала</div><div class="v">${bonusesEscape(level.word)}</div><div class="s">${bonusesEscape(level.why)}</div></div>
-        <div class="bn-tile"><div class="k">Ставка за нормо-час</div><div class="v">${bonusesNum(rates.orders ?? entry.rate)} ₽</div><div class="s">ступень ${bonusesEscape(entry.tier === 'below' ? 'ниже base' : (entry.tier || ''))}${entry.tierByMoney && entry.tierByMoney !== entry.tierByHours ? ` · меньшая из часов (${bonusesEscape(entry.tierByHours === 'below' ? 'ниже base' : entry.tierByHours)}) и денег (${bonusesEscape(entry.tierByMoney === 'below' ? 'ниже base' : entry.tierByMoney)})` : ''} · внутренние и без заказа ${bonusesNum(rates.flat ?? 0)} ₽</div></div>
+        <div class="bn-tile"><div class="k">Ставка за нормо-час</div><div class="v">${bonusesNum(rates.orders ?? entry.rate)} ₽</div><div class="s">ступень по деньгам ${bonusesEscape(entry.tier === 'below' ? 'ниже base' : (entry.tier || ''))} · внутренние и без заказа ${bonusesNum(rates.flat ?? 0)} ₽</div></div>
     </div>`;
     const drift = entry.targetsDrift ? '<div class="bn-warnings">Сезонный план изменился после сохранения целей. Откройте «Цели квартала», чтобы пересохранить.</div>' : '';
     const noTargets = !entry.hasTargets ? '<div class="bn-warnings">Цели квартала не заданы. Нажмите «Цели квартала».</div>' : '';

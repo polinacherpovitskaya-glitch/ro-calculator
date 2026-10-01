@@ -109,34 +109,31 @@ test('renderReceipt: заказы, часы без заказа, итог и у�
     assert.match(html, /Продано, но ещё не сделано<\/td><td>701 ч × 75 ₽<\/td><td class="num">\+ 52 575 ₽/);
 });
 
-test('renderLevelRow: платим по меньшей из ступеней', () => {
-    assert.match(renderLevelRow(ENTRY), /bn-level-red[^>]*>Деньги компании 10,8 млн — это ступень <b>ниже base<\/b>, часы цеха — <b>aspiration<\/b>\. Платим по меньшей: 75 ₽\/ч вместо 270 ₽/);
-    const same = renderLevelRow({ ...ENTRY, tier: 'aspiration', tierByMoney: 'aspiration', money: { ...ENTRY.money, fact: 17200000, belowBase: false }, rates: { ...ENTRY.rates, orders: 270 } });
-    assert.match(same, /bn-level-green[^>]*>Часы и деньги на одной ступени <b>aspiration<\/b>: ставка 270 ₽\/ч/);
-    const hoursLow = renderLevelRow({ ...ENTRY, tier: 'base', tierByHours: 'base', tierByMoney: 'aspiration', money: { ...ENTRY.money, fact: 17200000, belowBase: false }, rates: { ...ENTRY.rates, orders: 150 } });
-    assert.match(hoursLow, /bn-level-amber[^>]*>.*часы цеха только <b>base<\/b>/);
+test('renderLevelRow: ставка по ступени денег и сколько до следующей', () => {
+    const html = renderLevelRow(ENTRY);
+    assert.match(html, /bn-level-red[^>]*>Деньги компании за квартал 10,8 млн — ступень <b>ниже base<\/b>, значит ставка 75 ₽ за нормо-час/);
+    assert.match(html, /До следующей ступени 3,7 млн, это 150 ₽\/ч/);
+    const top = renderLevelRow({ ...ENTRY, tier: 'aspiration', tierByMoney: 'aspiration', money: { ...ENTRY.money, fact: 17200000, belowBase: false }, rates: { ...ENTRY.rates, orders: 270 } });
+    assert.match(top, /bn-level-green[^>]*>Деньги компании за квартал 17,2 млн — ступень <b>aspiration<\/b>, значит ставка 270 ₽/);
     const unknown = renderLevelRow({ ...ENTRY, money: { known: false } });
-    assert.match(unknown, /считаем только по часам/);
+    assert.match(unknown, /ставка взята по часам/);
 });
 
-test('renderLevelLadder: четыре ступени со своими ставками', () => {
+test('renderLevelLadder: ступени по деньгам со своими ставками', () => {
     const html = renderLevelLadder(ENTRY);
-    assert.match(html, /ниже base<\/div><div class="h">меньше 1 331 ч<\/div><div class="r">75 ₽\/ч/);
-    assert.match(html, /base<\/div><div class="h">от 1 331 ч<\/div><div class="r">150 ₽\/ч/);
-    assert.match(html, /medium<\/div><div class="h">от 1 512 ч<\/div><div class="r">225 ₽\/ч/);
-    assert.match(html, /bn-step bn-step-on"><div class="n">aspiration<\/div><div class="h">от 1 693 ч<\/div><div class="r">270 ₽\/ч/);
-    assert.match(html, /bn-step-pay/);
-    assert.match(html, /по деньгам ступень ниже, поэтому платим по <b>ниже base<\/b>: 75 ₽\/ч/i);
-    const ok = renderLevelLadder({ ...ENTRY, money: { ...ENTRY.money, belowBase: false }, tier: 'aspiration', tierByMoney: 'aspiration' });
-    assert.doesNotMatch(ok, /bn-step-pay/);
-    assert.match(ok, /Все часы заказов идут по 270 ₽\/ч/);
+    assert.match(html, /bn-step bn-step-on"><div class="n">ниже base<\/div><div class="h">меньше 14,5 млн<\/div><div class="r">75 ₽\/ч/);
+    assert.match(html, /base<\/div><div class="h">от 14,5 млн<\/div><div class="r">150 ₽\/ч/);
+    assert.match(html, /medium<\/div><div class="h">от 16,5 млн<\/div><div class="r">225 ₽\/ч/);
+    assert.match(html, /aspiration<\/div><div class="h">от 17 млн<\/div><div class="r">270 ₽\/ч/);
+    assert.match(html, /Цех сделал 1 899 ч из плана 1 512 ч — это объём/);
 });
 
 test('renderSummary: правила ступеней', () => {
     const html = renderSummary(ENTRY);
     assert.match(html, /ниже base 75 ₽, base 150 ₽, medium 225 ₽, aspiration 270 ₽/);
     assert.match(html, /Внутренние работы и часы без заказа всегда по 50 ₽/);
-    assert.match(html, /наименьшая из двух: по часам цеха и по деньгам компании/);
+    assert.match(html, /ставку задают деньги компании за квартал/);
+    assert.match(html, /Часы задают объём/);
     assert.match(renderSummary({ hasTargets: false }), /Цели квартала ещё не заданы/);
 });
 
@@ -145,7 +142,7 @@ test('renderBonusCard: плитки, чек, лесенка, детали', () =
     assert.match(html, /Лёша/);
     assert.match(html, /К выплате сейчас<\/div><div class="v">154 025 ₽/);
     assert.match(html, /План квартала<\/div><div class="v">выше aspiration/);
-    assert.match(html, /Ставка за нормо-час<\/div><div class="v">75 ₽<\/div><div class="s">ступень ниже base · меньшая из часов \(aspiration\) и денег \(ниже base\)/);
+    assert.match(html, /Ставка за нормо-час<\/div><div class="v">75 ₽<\/div><div class="s">ступень по деньгам ниже base/);
     assert.match(html, /bn-receipt/);
     assert.match(html, /bn-chip-grey[^>]*>Производительность <b>1,01<\/b>/);
     assert.match(html, /Качество, на сумму не влияет/);
