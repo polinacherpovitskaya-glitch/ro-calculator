@@ -217,10 +217,35 @@ export function soldHoursForPeriod(orders, period) {
   return roundTo(total, 2);
 }
 
+// Подрядные проекты (без собственного производства, направление «Подряд» в
+// Финтабло): доля чистой прибыли проекта при закрытии, когда клиент заплатил
+// всё. Чистая прибыль = оплачено − прямые расходы − налоги (12%) −
+// благотворительность (1%) − проценты коммерции (8% по максимуму). Деньги этих
+// проектов не входят в денежный уровень ставки за часы.
+export const DEFAULT_OUTSOURCED = { rate: 0.03, tax: 0.12, charity: 0.01, commerce: 0.08 };
+
+export function outsourcedLine(projects, rates = {}) {
+  const r = { ...DEFAULT_OUTSOURCED, ...(rates || {}) };
+  const rows = (projects || []).map((p) => {
+    const closed = !!p.closed;
+    const base = closed ? num(p.received) : num(p.amount);
+    const net = base - num(p.costs) - base * (num(r.tax) + num(r.charity) + num(r.commerce));
+    return {
+      dealId: p.dealId, name: String(p.name || ''), amount: num(p.amount), received: num(p.received), costs: num(p.costs),
+      net: Math.round(net), bonus: Math.max(0, Math.round(net * num(r.rate))), closed,
+    };
+  });
+  return {
+    rate: num(r.rate), tax: num(r.tax), charity: num(r.charity), commerce: num(r.commerce), projects: rows,
+    amount: rows.filter((x) => x.closed).reduce((acc, x) => acc + x.bonus, 0),
+    expected: rows.filter((x) => !x.closed).reduce((acc, x) => acc + x.bonus, 0),
+  };
+}
+
 export function computeProductionPeriod(input) {
   const {
     period, today, status = 'open', scheme, targets, orders, timeEntries, settings, stockApprovals,
-    soldHours = null, teamMoney = null, employees = [],
+    soldHours = null, teamMoney = null, employees = [], outsourced = [],
   } = input;
   const { from, to } = periodWindow(period);
   const holidays = holidaySet(settings);
@@ -430,7 +455,8 @@ export function computeProductionPeriod(input) {
   });
   const amountInternal = Math.round(internalOutputHours * flatRate);
   const amountUnmarked = Math.round(unmarkedHours * flatRate);
-  const amount = amountOrders + amountInternal + amountUnmarked;
+  const outsourcedResult = outsourcedLine(outsourced, scheme.rates_json?.outsourced);
+  const amount = amountOrders + amountInternal + amountUnmarked + outsourcedResult.amount;
 
   // Прогноз: заказы по темпу прошедших рабочих дней, ступень пересчитывается.
   const share = status === 'open' ? elapsedWorkingShare(period, todayYmd, holidays) : 1;
@@ -443,7 +469,8 @@ export function computeProductionPeriod(input) {
     forecastAchievement = planThresholds ? roundTo(achievement(forecast, planThresholds, 'higher', ladder), 4) : null;
     const fTier = tierByMoney || tierOf(forecastAchievement);
     forecastAmount = Math.round(forecastCommercial * rateOfTier(fTier))
-      + Math.round((internalOutputHours / share) * flatRate) + Math.round((unmarkedHours / share) * flatRate);
+      + Math.round((internalOutputHours / share) * flatRate) + Math.round((unmarkedHours / share) * flatRate)
+      + outsourcedResult.amount;
   }
 
   return {
@@ -457,7 +484,10 @@ export function computeProductionPeriod(input) {
       achievement: outputAch === null ? null : roundTo(outputAch, 4),
       forecast, forecastAchievement, forecastAmount,
     },
-    money: { fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase },
+    money: {
+      fact: moneyFact, thresholds: moneyThresholds, known: moneyKnown, belowBase: moneyBelowBase,
+      companyFact: teamMoney?.companyFact === null || teamMoney?.companyFact === undefined ? moneyFact : num(teamMoney.companyFact),
+    },
     quality: { multiplier: 1, metrics: qualityMetrics },
     tier, tierByHours, tierByMoney, scenarios,
     rates: {
@@ -469,6 +499,7 @@ export function computeProductionPeriod(input) {
       internal: { hours: roundTo(internalOutputHours, 2), rate: flatRate, amount: amountInternal },
       unmarked: { hours: roundTo(unmarkedHours, 2), rate: flatRate, amount: amountUnmarked },
       upside: { hours: roundTo(remainingSoldHours, 2), rate: rateOrders, amount: Math.round(remainingSoldHours * rateOrders) },
+      outsourced: outsourcedResult,
     },
     amountComputed: amount, warnings, orders: detail,
   };

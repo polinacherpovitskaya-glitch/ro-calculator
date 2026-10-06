@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds, moneyQuarterWindow,
-  excludedCategoryIds, splitNames, DEFAULT_DIRECTION_NAME,
+  excludedCategoryIds, splitNames, DEFAULT_DIRECTION_NAME, expandSubs, outsourcedProjects, outsourcedByPeriod,
 } from '../scripts/bonuses-plan-fact-sync.mjs';
 
 const CSV = `2025,,,,,
@@ -131,4 +131,64 @@ test('buildPayload', () => {
     targets: { cash_in: { min: 14000000, target: 15500000, max: 17000000 } },
     fact: { value: 13824924, source: 'fintablo', note: 'Финтабло, синк 2026-09-15' },
   } } });
+});
+
+test('разнесённые операции считаются по частям', () => {
+  const rows = expandSubs([
+    { id: 1, group: 'income', date: '10.08.2026', value: 300, subs: [
+      { id: 11, value: 200, directionId: 7, dealId: 5 }, { id: 12, value: 100, directionId: 8, dealId: null },
+    ] },
+    { id: 2, group: 'income', date: '11.08.2026', value: 50, directionId: 7 },
+  ]);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => [r.id, r.date, r.group]), [[11, '10.08.2026', 'income'], [12, '10.08.2026', 'income'], [2, '11.08.2026', 'income']]);
+  assert.deepEqual(sumIncomeByQuarter([
+    { id: 1, group: 'income', date: '10.08.2026', value: 300, subs: [{ id: 11, value: 200, directionId: 7 }, { id: 12, value: 100, directionId: 8 }] },
+  ], new Set(['7'])), { '2026-Q3': 200 });
+});
+
+test('поступления ниже EBITDA (возврат налогового резерва, вклады) не деньги квартала', () => {
+  const skipped = excludedCategoryIds([
+    { id: 1, name: 'Корпоративный заказ оплата/ предоплата', pnlType: null },
+    { id: 2, name: 'Возврат излишка налогового резерва', pnlType: 'income-under-ebitda' },
+    { id: 3, name: 'Прочие поступл. от фин. операций', pnlType: null },
+  ]);
+  assert.deepEqual([...skipped].sort(), ['2', '3']);
+});
+
+test('подряд: деньги производства без подрядных сделок, проекты с расходами и закрытием', () => {
+  const directions = [
+    { id: 31970, name: 'Recycle Object', parentId: null },
+    { id: 33182, name: 'Recycle Object', parentId: 31970 },
+    { id: 181617, name: 'Подряд', parentId: 31970 },
+  ];
+  const all = directionTreeIds(directions, 31970);
+  const outsource = directionTreeIds(directions, 181617);
+  const deals = [{ id: 1743680, name: 'Сибур шашки', amount: 27264700, directionId: 181617 }, { id: 5, name: 'Купер', amount: 2000, directionId: 33182 }];
+  const categories = [{ id: 10, pnlType: 'direct-variable' }, { id: 20, pnlType: 'outcome-under-ebitda' }, { id: 30, pnlType: null }];
+  const tx = [
+    { id: 1, group: 'income', date: '20.11.2026', value: 27264700, directionId: 33182, dealId: 1743680, categoryId: 30 }, // направление не перенесли, но сделка подрядная
+    { id: 2, group: 'income', date: '20.10.2026', value: 2000, directionId: 33182, dealId: 5, categoryId: 30 },
+    { id: 3, group: 'outcome', date: '24.08.2026', value: 2643375, directionId: 181617, dealId: 1743680, categoryId: 10 },
+    { id: 4, group: 'outcome', date: '20.11.2026', value: 3271764, directionId: 181617, dealId: 1743680, categoryId: 20 }, // налог в фонд — не расход проекта
+    { id: 5, group: 'outcome', date: '29.09.2026', value: 1680890, subs: [{ id: 51, value: 1680890, dealId: 1743680, categoryId: 10, directionId: 181617 }] },
+  ];
+  assert.deepEqual(sumIncomeByQuarter(tx, all), { '2026-Q4': 27266700 });
+  const production = sumIncomeByQuarter(tx, all, { excludedDirectionIds: outsource, excludedDealIds: new Set(['1743680']) });
+  assert.deepEqual(production, { '2026-Q4': 2000 });
+  const [p] = outsourcedProjects({ transactions: tx, deals, categories, directionIds: outsource });
+  assert.equal(p.name, 'Сибур шашки');
+  assert.equal(p.costs, 4324265);
+  assert.equal(p.received, 27264700);
+  assert.equal(p.closed, true);
+  assert.equal(p.closedPeriod, '2026-Q4');
+  const open = outsourcedProjects({ transactions: tx.filter((t) => t.id !== 1), deals, categories, directionIds: outsource });
+  assert.equal(open[0].closed, false);
+  const byPeriod = outsourcedByPeriod([...open, { ...p, name: 'закрыт' }], '2026-Q4', ['2026-Q3']);
+  assert.deepEqual(Object.keys(byPeriod).sort(), ['2026-Q3', '2026-Q4']);
+  assert.equal(byPeriod['2026-Q3'].length, 0); // пустой список перезаписывает старое
+  assert.equal(byPeriod['2026-Q4'].length, 2);
+  const payload = buildPayload({ targetsByPeriod: {}, factsByPeriod: { '2026-Q4': 27266700 }, productionByPeriod: { '2026-Q4': 2000 }, outsourcedByPeriod: byPeriod, note: 'n' });
+  assert.equal(payload.periods['2026-Q4'].factProduction.value, 2000);
+  assert.equal(payload.periods['2026-Q4'].outsourced.projects.length, 2);
 });

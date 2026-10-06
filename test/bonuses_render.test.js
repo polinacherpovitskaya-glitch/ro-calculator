@@ -175,3 +175,29 @@ test('renderQualityRow: только факт, без процентов', () =>
     assert.match(html, /информация, в деньги не входит/);
     assert.match(html, /90%/);
 });
+
+test('renderReceipt: подрядные проекты — закрытый в итоге, открытый в ожидании', () => {
+    const entry = { ...ENTRY, amountComputed: 154025 + 516445, receipt: { ...ENTRY.receipt, outsourced: {
+        rate: 0.03, amount: 516445, expected: 100000, projects: [
+            { name: 'Сибур шашки', amount: 27264700, received: 27264700, costs: 4324265, net: 17214848, bonus: 516445, closed: true },
+            { name: 'Сибуршоп', amount: 1042193, received: 0, costs: 24125, net: 3333333, bonus: 100000, closed: false },
+        ] } } };
+    const html = renderReceipt(entry);
+    assert.match(html, /Подряд: Сибур шашки<\/td><td>3% от чистой прибыли 17 214 848 ₽<\/td><td class="num">516 445 ₽/);
+    assert.match(html, /Итого к выплате<\/td><td><\/td><td class="num"><b>670 470 ₽/);
+    assert.match(html, /Подряд: Сибуршоп<\/td><td>3% от чистой прибыли ≈ 3 333 333 ₽, оплачено 0 ₽ из 1 042 193 ₽<\/td><td class="num">\+ 100 000 ₽ при закрытии/);
+});
+
+test('renderTeamBlock: деньги для ставки Лёши без подряда', () => {
+    const html = renderTeamBlock({ commercial: {
+        targets: { cash_in: { min: 17500000, target: 18500000, max: 19500000 } },
+        facts: {
+            cash_in: { value: 44000000, source: 'fintablo', updated_at: '2026-11-25T04:15:00.000Z' },
+            cash_in_production: { value: 16735300, source: 'fintablo', updated_at: '2026-11-25T04:15:00.000Z' },
+        },
+        cashAchievement: 0.5,
+    } }, '2026-Q4');
+    assert.match(html, /для ставки Лёши 16,7 млн, подряд 27,3 млн не считается/);
+    const same = renderTeamBlock({ commercial: { targets: { cash_in: { min: 1, target: 2, max: 3 } }, facts: { cash_in: { value: 2, source: 'fintablo' }, cash_in_production: { value: 2, source: 'fintablo' } }, cashAchievement: 1 } }, '2026-Q4');
+    assert.doesNotMatch(same, /для ставки Лёши/);
+});

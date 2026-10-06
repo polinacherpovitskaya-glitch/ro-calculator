@@ -24,26 +24,14 @@ router.post('/sync/team-money', requireRole('admin', 'bot'), asyncHandler(async 
       return error(res, 400, 'INVALID_PERIOD', `Период ${period} задаётся как 2026-Q3`);
     }
     if (entry?.targets && !validTargets(res, entry.targets, false)) return;
-    if (entry?.fact) {
-      const value = Number(entry.fact.value);
+    for (const fact of [entry?.fact, entry?.factProduction].filter(Boolean)) {
+      const value = Number(fact.value);
       if (!Number.isFinite(value) || value < 0) return error(res, 400, 'INVALID_FACT', `Факт ${period} должен быть числом не меньше нуля`);
-      if (!['fintablo', 'manual'].includes(String(entry.fact.source || 'fintablo'))) return error(res, 400, 'INVALID_SOURCE', 'Источник факта: fintablo или manual');
+      if (!['fintablo', 'manual'].includes(String(fact.source || 'fintablo'))) return error(res, 400, 'INVALID_SOURCE', 'Источник факта: fintablo или manual');
     }
+    if (entry?.outsourced && !Array.isArray(entry.outsourced.projects)) return error(res, 400, 'INVALID_OUTSOURCED', 'outsourced.projects должен быть массивом');
   }
-  const written = { targets: [], facts: [] };
-  for (const [period, entry] of Object.entries(periods)) {
-    if (entry?.targets) {
-      await store.upsertTeamTargets('commercial', period, entry.targets);
-      written.targets.push(period);
-    }
-    if (entry?.fact) {
-      await store.setTeamFact('commercial', period, 'cash_in', {
-        value: Number(entry.fact.value), source: String(entry.fact.source || 'fintablo'), note: entry.fact.note,
-      }, req.user.email);
-      written.facts.push(period);
-    }
-  }
-  res.json({ data: written });
+  res.json({ data: await applyMoneySync(periods, req.user.email) });
 }));
 
 // Личный просмотр: сотрудник видит только свою схему, без действий.
@@ -73,7 +61,7 @@ router.get('/me/periods/:period', asyncHandler(async (req, res) => {
   const scheme = await mySchemeOr404(req, res);
   if (!scheme) return;
   const [legacy, approvals, team] = await Promise.all([loadLegacyBonusData(getPool()), store.listStockApprovals(period), loadTeamMoney(period)]);
-  const entry = await computeEntry(scheme, period, legacy, approvals, team.teamMoney);
+  const entry = await computeEntry(scheme, period, legacy, approvals, team.teamMoney, team.outsourced);
   const year = Number(period.slice(0, 4));
   const mine = (await yearEntries(year)).find((e) => e.schemeId === scheme.id) || null;
   const cashAchievement = team.teamMoney ? achievement(team.teamMoney.fact, team.teamMoney.thresholds, 'higher', DEFAULT_LADDER) : null;
@@ -96,6 +84,17 @@ async function applyMoneySync(periods, by) {
         value: Number(entry.fact.value), source: String(entry.fact.source || 'fintablo'), note: entry.fact.note,
       }, by);
       written.facts.push(period);
+    }
+    if (entry?.factProduction) {
+      await store.setTeamFact('commercial', period, 'cash_in_production', {
+        value: Number(entry.factProduction.value), source: String(entry.factProduction.source || 'fintablo'), note: entry.factProduction.note,
+      }, by);
+    }
+    if (entry?.outsourced) {
+      const projects = entry.outsourced.projects || [];
+      await store.setTeamFact('commercial', period, 'outsourced_projects', {
+        value: projects.length, source: 'fintablo', note: JSON.stringify(projects),
+      }, by);
     }
   }
   return written;
@@ -173,14 +172,31 @@ function validTargets(res, targets, requireOutput) {
   return true;
 }
 
+function parseOutsourced(fact) {
+  try {
+    const list = JSON.parse(fact?.note || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+// Деньги квартала. Ставку Лёши задают деньги без подрядных проектов
+// (cash_in_production); если синк их ещё не писал, берём все деньги компании.
 async function loadTeamMoney(period) {
   const [targets, facts] = await Promise.all([store.getTeamTargets('commercial', period), store.getTeamFacts('commercial', period)]);
   const thresholds = targets?.cash_in || null;
   const fact = facts.cash_in ? facts.cash_in.value : null;
-  return { targets, facts, teamMoney: thresholds && fact !== null ? { fact, thresholds } : null };
+  const production = facts.cash_in_production ? facts.cash_in_production.value : null;
+  const outsourced = parseOutsourced(facts.outsourced_projects);
+  const moneyFact = production !== null ? production : fact;
+  return {
+    targets, facts, outsourced,
+    teamMoney: thresholds && moneyFact !== null ? { fact: moneyFact, companyFact: fact, thresholds } : null,
+  };
 }
 
-async function computeEntry(scheme, period, legacy, approvals, teamMoney) {
+async function computeEntry(scheme, period, legacy, approvals, teamMoney, outsourced = []) {
   const targets = await store.getTargets(scheme.id, period);
   const names = new Map(legacy.employees.map((e) => [String(e.id), String(e.name || '')]));
   const existing = await store.getResult(scheme.id, period);
@@ -201,7 +217,7 @@ async function computeEntry(scheme, period, legacy, approvals, teamMoney) {
   const result = computeProductionPeriod({
     period, today: todayYmd(), status: 'open', scheme, targets, orders: legacy.orders,
     timeEntries: legacy.timeEntries, settings: legacy.settings, stockApprovals: approvals,
-    soldHours: soldHoursForPeriod(legacy.orders, period), teamMoney, employees: legacy.employees,
+    soldHours: soldHoursForPeriod(legacy.orders, period), teamMoney, employees: legacy.employees, outsourced,
   });
   return { ...result, ...common };
 }
@@ -283,7 +299,7 @@ router.get('/periods/:period', asyncHandler(async (req, res) => {
   const entries = [];
   const history = [];
   for (const scheme of schemes.filter((s) => s.kind === 'production')) {
-    entries.push(await computeEntry(scheme, period, legacy, approvals, team.teamMoney));
+    entries.push(await computeEntry(scheme, period, legacy, approvals, team.teamMoney, team.outsourced));
     for (const row of (await store.listResults(scheme.id)).filter((r) => r.status !== 'open')) {
       history.push({
         schemeId: scheme.id, period: row.period, status: row.status, amountComputed: Number(row.amount_computed),
@@ -331,6 +347,7 @@ router.post('/periods/:period/close/:schemeId', asyncHandler(async (req, res) =>
     period, today: todayYmd(), status: 'closed', scheme, targets, orders: legacy.orders,
     timeEntries: legacy.timeEntries, settings: legacy.settings, stockApprovals: approvals,
     soldHours: soldHoursForPeriod(legacy.orders, period), teamMoney: team.teamMoney, employees: legacy.employees,
+    outsourced: team.outsourced,
   });
   const row = await store.saveResult({
     scheme_id: scheme.id, period, status: 'closed', computed_json: computed,
@@ -378,7 +395,7 @@ async function yearEntries(year) {
       const [targets, approvals, team] = await Promise.all([
         store.getTargets(scheme.id, period), store.listStockApprovals(period), loadTeamMoney(period),
       ]);
-      const entry = await computeEntry(scheme, period, legacy, approvals, team.teamMoney);
+      const entry = await computeEntry(scheme, period, legacy, approvals, team.teamMoney, team.outsourced);
       quarters.push({
         period,
         thresholds: targets?.output_hours || null,
