@@ -67,9 +67,10 @@ function isValidYmd(value) {
   return Number.isFinite(parsed.getTime()) && ymd(parsed) === value;
 }
 
-// Квартал считается со сдвигом на неделю: деньги приходят не в срок, и заказы
-// закрываются первыми числами следующего месяца. III квартал = 8 июля – 7 октября.
-export const QUARTER_SHIFT_DAYS = 7;
+// Квартал закрывается 5-го числа следующего месяца, как его закрывает
+// коммерческий директор: деньги приходят не в срок, и заказы закрываются
+// первыми числами. III квартал = 6 июля – 5 октября. Тот же сдвиг у денег.
+export const QUARTER_SHIFT_DAYS = 5;
 
 function shiftYmd(value, days) {
   const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);

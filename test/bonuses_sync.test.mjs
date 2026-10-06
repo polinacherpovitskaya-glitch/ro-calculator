@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds, moneyQuarterWindow } from '../scripts/bonuses-plan-fact-sync.mjs';
+import {
+  parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, sumIncomeByQuarter, buildPayload, directionTreeIds, moneyQuarterWindow,
+  excludedCategoryIds, splitNames, DEFAULT_DIRECTION_NAME,
+} from '../scripts/bonuses-plan-fact-sync.mjs';
 
 const CSV = `2025,,,,,
 ,,,,,
@@ -49,12 +52,13 @@ test('parsePlanCsv + tiersToPeriods: план 2026 из таблицы, опеч
 
 test('quarterOfDate и sumIncomeByQuarter: только поступления направления, без плановых и без двойного счёта', () => {
   assert.equal(quarterOfDate('2026-09-15'), '2026-Q3');
-  assert.equal(quarterOfDate('2026-10-05'), '2026-Q3'); // до 7 октября ещё III квартал
-  assert.equal(quarterOfDate('2026-10-08'), '2026-Q4');
-  assert.equal(quarterOfDate('2026-07-03'), '2026-Q2'); // до 7 июля ещё II квартал
+  assert.equal(quarterOfDate('2026-10-05'), '2026-Q3'); // квартал закрывается 5-го числа
+  assert.equal(quarterOfDate('2026-10-06'), '2026-Q4');
+  assert.equal(quarterOfDate('2026-07-05'), '2026-Q2');
+  assert.equal(quarterOfDate('2026-07-06'), '2026-Q3');
   assert.equal(quarterOfDate('2026-01-02'), '2025-Q4');
-  assert.deepEqual(moneyQuarterWindow('2026-Q3'), { from: '2026-07-08', to: '2026-10-07' });
-  assert.deepEqual(moneyQuarterWindow('2026-Q4'), { from: '2026-10-08', to: '2027-01-07' });
+  assert.deepEqual(moneyQuarterWindow('2026-Q3'), { from: '2026-07-06', to: '2026-10-05' });
+  assert.deepEqual(moneyQuarterWindow('2026-Q4'), { from: '2026-10-06', to: '2027-01-05' });
   const tx = [
     { id: '1', group: 'income', directionId: 7, date: '10.07.2026', value: 1000000 },
     { id: '2', group: 'income', directionId: 7, date: '20.08.2026', value: 500000.5 },
@@ -86,6 +90,35 @@ test('directionTreeIds: направление с поднаправлениям
     { id: '3', group: 'income', directionId: 33182, date: '15.09.2026', value: 999, parentId: 0 },
   ];
   assert.deepEqual(sumIncomeByQuarter(tx, directionTreeIds(directions, 31970)), { '2026-Q3': 1818.2 });
+});
+
+test('выручка квартала: корпоратив, интернет-магазин и Озон, без музеев и возвратов банка', () => {
+  assert.deepEqual(splitNames(DEFAULT_DIRECTION_NAME), ['Recycle Object', 'Маркетплейсы']);
+  assert.deepEqual(splitNames(' Recycle Object ,, '), ['Recycle Object']);
+  const directions = [
+    { id: 31970, name: 'Recycle Object', parentId: null },
+    { id: 33181, name: 'Интерент магазин Recycle Object', parentId: 31970 },
+    { id: 32024, name: 'Музейные магазины Акрил', parentId: null },
+    { id: 132317, name: 'Маркетплейсы', parentId: null },
+  ];
+  const ids = new Set([...directionTreeIds(directions, 31970), ...directionTreeIds(directions, 132317)]);
+  const skipped = excludedCategoryIds([
+    { id: 380577, name: 'Корпоративный заказ оплата/ предоплата' },
+    { id: 380548, name: 'Прочие поступл. от фин. операций' },
+  ]);
+  assert.deepEqual([...skipped], ['380548']);
+  const tx = [
+    { id: '1', group: 'income', date: '06.07.2026', value: 497127.78, directionId: 31970, categoryId: 380577 },
+    { id: '2', group: 'income', date: '05.10.2026', value: 320100, directionId: 31970, categoryId: 380577 },
+    { id: '3', group: 'income', date: '22.07.2026', value: 2905, directionId: 33181, categoryId: 1 },
+    { id: '4', group: 'income', date: '23.09.2026', value: 10612.72, directionId: 132317, categoryId: 2 },
+    { id: '5', group: 'income', date: '20.08.2026', value: 117205, directionId: 32024, categoryId: 3 },
+    { id: '6', group: 'income', date: '03.09.2026', value: 9800, directionId: 31970, categoryId: 380548 },
+    { id: '7', group: 'income', date: '06.10.2026', value: 117600, directionId: 31970, categoryId: 380577 },
+  ];
+  assert.deepEqual(sumIncomeByQuarter(tx, ids, { excludedCategoryIds: skipped }), { '2026-Q3': 830745.5, '2026-Q4': 117600 });
+  // без списка исключений возврат банка считается, как раньше
+  assert.equal(sumIncomeByQuarter(tx, ids)['2026-Q3'], 840545.5);
 });
 
 test('buildPayload', () => {

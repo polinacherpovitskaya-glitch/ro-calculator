@@ -753,7 +753,7 @@ const Bonuses = {
         const box = this.dialog(`<h2 class="bn-h2">Деньги квартала ${this.period}</h2>
             <div class="bn-targets-grid"><div>План, ₽</div><div>base</div><div>medium</div><div>aspiration</div>
             <div></div><input id="bn-team-min" type="number" value="${t.min ?? ''}"><input id="bn-team-target" type="number" value="${t.target ?? ''}"><input id="bn-team-max" type="number" value="${t.max ?? ''}"></div>
-            <label>Факт: поступления Recycle Object по Финтабло, ₽</label><input id="bn-team-fact" type="number" value="${f.value ?? ''}">
+            <label>Факт: корпоратив + интернет-магазин + Озон по Финтабло, квартал до 5-го числа, ₽</label><input id="bn-team-fact" type="number" value="${f.value ?? ''}">
             <label>Комментарий (откуда цифра, дата)</label><input id="bn-team-note" type="text" value="${bonusesEscape(f.note || '')}">
             <div class="bn-actions"><button class="bn-btn primary" id="bn-team-save">Сохранить</button><button class="bn-btn" data-dialog-close>Отмена</button></div>`);
         box.querySelector('#bn-team-save').addEventListener('click', async () => {

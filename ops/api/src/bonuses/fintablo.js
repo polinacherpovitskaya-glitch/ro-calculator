@@ -1,14 +1,21 @@
 // План и факт по деньгам для страницы «Бонусы».
 //
 // План: три уровня (base / medium / aspiration) по кварталам из Google-таблицы
-// владельца (публичный CSV-экспорт). Факт: «Поступления» по направлению
-// Recycle Object (с поднаправлениями) из Финтабло, квартал со сдвигом на
-// неделю. Используется и маршрутом POST /api/bonuses/sync/run (кнопка на
-// странице), и воркфлоу scripts/bonuses-plan-fact-sync.mjs (по расписанию).
+// владельца (публичный CSV-экспорт). Факт: «Поступления» из Финтабло по
+// направлениям Recycle Object (корпоративные заказы, интернет-магазин,
+// воркшопы) и Маркетплейсы (Озон), квартал закрывается 5-го числа. Так же
+// считает квартал коммерческий директор. Используется и маршрутом
+// POST /api/bonuses/sync/run (кнопка на странице), и воркфлоу
+// scripts/bonuses-plan-fact-sync.mjs (по расписанию).
+
+import { QUARTER_SHIFT_DAYS } from './calc.js';
 
 const FINTABLO_BASE_URL = 'https://api.fintablo.ru/v1';
 export const DEFAULT_SHEET_ID = '1dnhNPr-iHW82c7gsBKr9lLyF9tzKyb509nDawj5xmow';
-export const DEFAULT_DIRECTION_NAME = 'Recycle Object';
+// Несколько направлений через запятую (так же читается FINTABLO_DIRECTION).
+export const DEFAULT_DIRECTION_NAME = 'Recycle Object, Маркетплейсы';
+// Статьи поступлений, которые не выручка: возвраты банка за подписки и т.п.
+export const EXCLUDED_CATEGORY_NAMES = ['Прочие поступл. от фин. операций'];
 const TIER_LABELS = {
   base: ['base', 'crisis/base', 'crisis', 'min'],
   medium: ['medium', 'mid', 'target'],
@@ -96,10 +103,9 @@ export function tiersToPeriods(year, tiers) {
   return out;
 }
 
-// Квартал по деньгам считается со сдвигом на неделю: деньги приходят не в срок,
-// поэтому III квартал это 8 июля – 7 октября. Сдвиг только для денег, часы
-// производства остаются по календарному кварталу.
-export const MONEY_QUARTER_SHIFT_DAYS = 7;
+// Квартал по деньгам закрывается 5-го числа, как у часов (calc.js):
+// III квартал это 6 июля – 5 октября.
+export const MONEY_QUARTER_SHIFT_DAYS = QUARTER_SHIFT_DAYS;
 
 export function quarterOfDate(ymd, shiftDays = MONEY_QUARTER_SHIFT_DAYS) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
@@ -147,16 +153,19 @@ function isRealParent(value) {
   return s !== '' && s !== '0' && s !== 'null';
 }
 
-// Поступления (group = income) направления по кварталам. Родительские операции,
-// разнесённые на части (parentId у детей), не считаются второй раз.
-export function sumIncomeByQuarter(transactions, directionIds) {
+// Поступления (group = income) направлений по кварталам. Родительские операции,
+// разнесённые на части (parentId у детей), не считаются второй раз. Статьи из
+// excludedCategoryIds (не выручка) пропускаются.
+export function sumIncomeByQuarter(transactions, directionIds, { excludedCategoryIds = new Set() } = {}) {
   const wanted = directionIds instanceof Set ? directionIds : new Set([String(directionIds)]);
+  const excluded = new Set([...excludedCategoryIds].map(String));
   const parents = new Set(transactions.filter((t) => isRealParent(t?.parentId)).map((t) => String(t.parentId).trim()));
   const sums = {};
   for (const t of transactions) {
     if (String(t?.group || '').trim() !== 'income') continue;
     if (t?.isPlan) continue;
     if (!wanted.has(String(t?.directionId ?? '').trim())) continue;
+    if (excluded.has(String(t?.categoryId ?? '').trim())) continue;
     if (parents.has(String(t?.id || '').trim())) continue;
     const period = quarterOfDate(parseFintabloDate(t?.date));
     if (!period) continue;
@@ -218,24 +227,47 @@ export async function fetchPlan({ sheetId = DEFAULT_SHEET_ID, gid = '0', year })
   return tiersToPeriods(year, tiers);
 }
 
+export function splitNames(raw) {
+  return String(raw || '').split(',').map((name) => name.trim()).filter(Boolean);
+}
+
+function findByName(items, name) {
+  const wanted = String(name).trim().toLowerCase();
+  return items.find((d) => String(d?.name || '').trim().toLowerCase() === wanted)
+    || items.find((d) => String(d?.name || '').trim().toLowerCase().includes(wanted));
+}
+
+export function excludedCategoryIds(categories, names = EXCLUDED_CATEGORY_NAMES) {
+  const wanted = new Set(names.map((name) => String(name).trim().toLowerCase()));
+  return new Set(categories
+    .filter((c) => wanted.has(String(c?.name || '').trim().toLowerCase()))
+    .map((c) => String(c.id)));
+}
+
 export async function fetchFacts({ token, directionName = DEFAULT_DIRECTION_NAME, year, today }) {
-  const directions = await loadPaged(token, '/direction', {});
-  const wanted = String(directionName).trim().toLowerCase();
-  const direction = directions.find((d) => String(d?.name || '').trim().toLowerCase() === wanted)
-    || directions.find((d) => String(d?.name || '').trim().toLowerCase().includes(wanted));
-  if (!direction) {
-    throw new Error(`Направление «${directionName}» не найдено в Финтабло. Есть: ${directions.map((d) => d?.name).join(', ')}`);
-  }
+  const [directions, categories] = await Promise.all([
+    loadPaged(token, '/direction', {}),
+    loadPaged(token, '/category', {}),
+  ]);
+  const roots = splitNames(directionName).map((name) => {
+    const direction = findByName(directions, name);
+    if (!direction) {
+      throw new Error(`Направление «${name}» не найдено в Финтабло. Есть: ${directions.map((d) => d?.name).join(', ')}`);
+    }
+    return direction;
+  });
   const transactions = await loadPaged(token, '/transaction', {
     isPlan: 0,
     dateFrom: toFintabloDate(moneyQuarterWindow(`${year}-Q1`).from),
     dateTo: toFintabloDate(today),
   });
-  const ids = directionTreeIds(directions, direction.id);
+  const ids = new Set(roots.flatMap((root) => [...directionTreeIds(directions, root.id)]));
   const names = directions.filter((d) => ids.has(String(d.id))).map((d) => d.name);
+  const skipped = excludedCategoryIds(categories);
   return {
-    directionId: direction.id, directionName: direction.name, directionIds: [...ids], directionNames: names,
-    sums: sumIncomeByQuarter(transactions, ids), count: transactions.length,
+    directionId: roots.map((d) => d.id).join(','), directionName: roots.map((d) => d.name).join(' + '),
+    directionIds: [...ids], directionNames: names,
+    sums: sumIncomeByQuarter(transactions, ids, { excludedCategoryIds: skipped }), count: transactions.length,
   };
 }
 
@@ -248,8 +280,8 @@ export async function runMoneySync({ token, year, today, sheetId, gid, direction
   if (token) {
     facts = await fetchFacts({ token, directionName, year, today });
     factsByPeriod = facts.sums;
-    note = `Финтабло, поступления «${facts.directionName}», квартал со сдвигом +7 дней, синк ${today}`;
-    log(`FinTablo: ${facts.count} операций с начала года, направление ${facts.directionName} (#${facts.directionId}) с поднаправлениями: ${facts.directionNames.join(', ')}`);
+    note = `Финтабло, поступления «${facts.directionName}» без прочих фин. поступлений, квартал до ${MONEY_QUARTER_SHIFT_DAYS}-го числа, синк ${today}`;
+    log(`FinTablo: ${facts.count} операций с начала года, направления ${facts.directionName} (#${facts.directionId}) с поднаправлениями: ${facts.directionNames.join(', ')}`);
     log(`Факт по кварталам: ${JSON.stringify(facts.sums)}`);
   } else {
     log('FINTABLO_API_KEY не задан: факт не синкается, только план');

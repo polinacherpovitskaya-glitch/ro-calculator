@@ -8,7 +8,7 @@
 //   OPS_BOT_TOKEN       обязателен для записи (роль bot или admin)
 //   FINTABLO_API_KEY    если пуст, факт не синкается, только план
 //   BONUS_PLAN_SHEET_ID / BONUS_PLAN_SHEET_GID   таблица плана
-//   FINTABLO_DIRECTION  имя направления в Финтабло (default "Recycle Object")
+//   FINTABLO_DIRECTION  направления в Финтабло через запятую (default "Recycle Object, Маркетплейсы")
 // Флаги: --dry-run (ничего не пишет, печатает payload), --year 2026
 
 import { pathToFileURL } from 'node:url';
@@ -16,7 +16,7 @@ import { runMoneySync, DEFAULT_SHEET_ID, DEFAULT_DIRECTION_NAME } from '../ops/a
 
 export {
     parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, moneyQuarterWindow, MONEY_QUARTER_SHIFT_DAYS,
-    directionTreeIds, sumIncomeByQuarter, buildPayload,
+    directionTreeIds, sumIncomeByQuarter, buildPayload, excludedCategoryIds, splitNames, DEFAULT_DIRECTION_NAME,
 } from '../ops/api/src/bonuses/fintablo.js';
 
 async function postSync(apiUrl, token, payload) {
