@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   periodBounds, holidaySet, workingDays, elapsedWorkingShare, achievement, DEFAULT_LADDER, DEFAULT_LEVEL_WEIGHTS,
   computeProductionPeriod, suggestProductionTargets, orderCompletionDate, computeYear, computeTeamStats, soldHoursForPeriod,
-  periodWindow,
+  periodWindow, outsourcedLine,
 } from '../src/bonuses/calc.js';
 
 test('periodBounds: 2026-Q3 → 01.07–30.09', () => {
@@ -334,6 +334,7 @@ function run(extra = {}) {
     period: '2026-Q3', today: '2026-10-20', status: 'open', scheme: extra.scheme || simpleScheme, targets, orders, timeEntries,
     settings: {}, stockApprovals: extra.stockApprovals || new Set(), soldHours: extra.soldHours ?? 1283,
     teamMoney: extra.teamMoney === undefined ? { fact: 17200000, thresholds: moneyTiers } : extra.teamMoney,
+    outsourced: extra.outsourced || [],
   });
 }
 
@@ -440,4 +441,38 @@ test('scenarios: сколько вышло бы на каждой ступени
   assert.equal(byTier.medium.moneyNeeded, 16500000 - 12700000);
   assert.equal(byTier.below.moneyNeeded, 0);
   assert.equal(result.amountComputed, byTier.below.amount);
+});
+
+// --- подрядные проекты ---
+const sibur = { dealId: 1743680, name: 'Сибур шашки', amount: 27264700, received: 27264700, costs: 4324265, closed: true };
+
+test('подряд: 3% от чистой прибыли (−12% налоги, −1% благотворительность, −8% коммерция)', () => {
+  const line = outsourcedLine([sibur]);
+  assert.equal(line.projects[0].net, 17214848);
+  assert.equal(line.projects[0].bonus, 516445);
+  assert.equal(line.amount, 516445);
+  assert.equal(line.expected, 0);
+  const open = outsourcedLine([{ ...sibur, received: 5000000, closed: false }]);
+  assert.equal(open.amount, 0); // не закрыт — не платим
+  assert.equal(open.expected, 516445); // ожидание считается от суммы сделки
+  assert.equal(outsourcedLine([sibur], { rate: 0.05 }).amount, Math.round(17214848 * 0.05));
+});
+
+test('подряд: закрытый проект добавляется к сумме квартала, открытый только в ожидании', () => {
+  const base = run();
+  const closed = run({ outsourced: [sibur] });
+  assert.equal(closed.amountComputed, base.amountComputed + 516445);
+  assert.equal(closed.receipt.outsourced.amount, 516445);
+  const pending = run({ outsourced: [{ ...sibur, received: 0, closed: false }] });
+  assert.equal(pending.amountComputed, base.amountComputed);
+  assert.equal(pending.receipt.outsourced.expected, 516445);
+});
+
+test('ставку задают деньги без подряда, деньги компании показываются рядом', () => {
+  // все деньги 44 млн (с Сибуром) — aspiration, но без подряда 16,8 млн — medium
+  const result = run({ teamMoney: { fact: 16800000, companyFact: 44064700, thresholds: moneyTiers } });
+  assert.equal(result.tierByMoney, 'medium');
+  assert.equal(result.money.fact, 16800000);
+  assert.equal(result.money.companyFact, 44064700);
+  assert.equal(run().money.companyFact, 17200000); // без отдельного факта — те же деньги
 });

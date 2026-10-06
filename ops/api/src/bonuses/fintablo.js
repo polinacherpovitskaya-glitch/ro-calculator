@@ -16,6 +16,12 @@ export const DEFAULT_SHEET_ID = '1dnhNPr-iHW82c7gsBKr9lLyF9tzKyb509nDawj5xmow';
 export const DEFAULT_DIRECTION_NAME = 'Recycle Object, Маркетплейсы';
 // Статьи поступлений, которые не выручка: возвраты банка за подписки и т.п.
 export const EXCLUDED_CATEGORY_NAMES = ['Прочие поступл. от фин. операций'];
+// Поднаправление проектов без собственного производства. Их деньги входят в
+// деньги компании, но не в денежный уровень ставки за часы.
+export const DEFAULT_OUTSOURCE_DIRECTION_NAME = 'Подряд';
+// Разделы ОПиУ, которые не считаются расходами проекта: налоги считаются
+// отдельно долей от оплаты, дивиденды и премии идут ниже прибыли.
+const NON_PROJECT_PNL_TYPES = new Set(['outcome-under-ebitda', 'income-under-ebitda', 'under-profit']);
 const TIER_LABELS = {
   base: ['base', 'crisis/base', 'crisis', 'min'],
   medium: ['medium', 'mid', 'target'],
@@ -153,19 +159,46 @@ function isRealParent(value) {
   return s !== '' && s !== '0' && s !== 'null';
 }
 
+function asIdSet(values) {
+  return new Set([...(values || [])].map((v) => String(v)));
+}
+
+// Разнесённая операция приходит из списка с частями внутри `subs`: у частей
+// своя статья, направление и сделка, поэтому считаем части, а не родителя.
+export function expandSubs(transactions) {
+  const out = [];
+  for (const t of transactions || []) {
+    const subs = Array.isArray(t?.subs) ? t.subs : [];
+    if (!subs.length) {
+      out.push(t);
+      continue;
+    }
+    for (const sub of subs) out.push({ ...sub, date: t.date, group: t.group, isPlan: t.isPlan, parentId: t.id });
+  }
+  return out;
+}
+
 // Поступления (group = income) направлений по кварталам. Родительские операции,
 // разнесённые на части (parentId у детей), не считаются второй раз. Статьи из
-// excludedCategoryIds (не выручка) пропускаются.
-export function sumIncomeByQuarter(transactions, directionIds, { excludedCategoryIds = new Set() } = {}) {
+// excludedCategoryIds (не выручка) пропускаются; excludedDirectionIds и
+// excludedDealIds убирают подрядные проекты из денег производства.
+export function sumIncomeByQuarter(transactions, directionIds, {
+  excludedCategoryIds = new Set(), excludedDirectionIds = new Set(), excludedDealIds = new Set(),
+} = {}) {
   const wanted = directionIds instanceof Set ? directionIds : new Set([String(directionIds)]);
-  const excluded = new Set([...excludedCategoryIds].map(String));
-  const parents = new Set(transactions.filter((t) => isRealParent(t?.parentId)).map((t) => String(t.parentId).trim()));
+  const excluded = asIdSet(excludedCategoryIds);
+  const skipDirections = asIdSet(excludedDirectionIds);
+  const skipDeals = asIdSet(excludedDealIds);
+  const rows = expandSubs(transactions);
+  const parents = new Set(rows.filter((t) => isRealParent(t?.parentId)).map((t) => String(t.parentId).trim()));
   const sums = {};
-  for (const t of transactions) {
+  for (const t of rows) {
     if (String(t?.group || '').trim() !== 'income') continue;
     if (t?.isPlan) continue;
     if (!wanted.has(String(t?.directionId ?? '').trim())) continue;
     if (excluded.has(String(t?.categoryId ?? '').trim())) continue;
+    if (skipDirections.has(String(t?.directionId ?? '').trim())) continue;
+    if (skipDeals.has(String(t?.dealId ?? '').trim())) continue;
     if (parents.has(String(t?.id || '').trim())) continue;
     const period = quarterOfDate(parseFintabloDate(t?.date));
     if (!period) continue;
@@ -175,13 +208,69 @@ export function sumIncomeByQuarter(transactions, directionIds, { excludedCategor
   return sums;
 }
 
-export function buildPayload({ targetsByPeriod, factsByPeriod, note }) {
+// Подрядные проекты: сделки направления «Подряд». По каждой: сумма сделки,
+// сколько клиент заплатил, прямые расходы (всё, что привязано к сделке, кроме
+// налогового раздела и распределения прибыли) и квартал закрытия (квартал
+// последней оплаты, когда оплачено полностью).
+export function outsourcedProjects({ transactions, deals, categories, directionIds }) {
+  const dirs = asIdSet(directionIds);
+  const skipCategories = new Set((categories || [])
+    .filter((c) => NON_PROJECT_PNL_TYPES.has(String(c?.pnlType || '')))
+    .map((c) => String(c.id)));
+  const projects = new Map();
+  for (const deal of deals || []) {
+    if (!dirs.has(String(deal?.directionId ?? ''))) continue;
+    projects.set(String(deal.id), {
+      dealId: deal.id, name: String(deal.name || '').trim(), amount: Math.abs(Number(deal.amount || 0)),
+      received: 0, costs: 0, lastPaymentDate: null,
+    });
+  }
+  for (const t of expandSubs(transactions)) {
+    if (t?.isPlan) continue;
+    const project = projects.get(String(t?.dealId ?? ''));
+    if (!project) continue;
+    const value = Math.abs(Number(t?.value || 0));
+    const group = String(t?.group || '').trim();
+    if (group === 'income') {
+      project.received += value;
+      const date = parseFintabloDate(t?.date);
+      if (date && (!project.lastPaymentDate || date > project.lastPaymentDate)) project.lastPaymentDate = date;
+    } else if (group === 'outcome' && !skipCategories.has(String(t?.categoryId ?? ''))) {
+      project.costs += value;
+    }
+  }
+  const round2 = (v) => Math.round(v * 100) / 100;
+  return [...projects.values()].map((p) => {
+    const received = round2(p.received);
+    const closed = p.amount > 0 && received >= p.amount - 1;
+    return { ...p, received, costs: round2(p.costs), closed, closedPeriod: closed ? quarterOfDate(p.lastPaymentDate) : null };
+  });
+}
+
+// Закрытые проекты идут в квартал закрытия, открытые показываются в текущем.
+export function outsourcedByPeriod(projects, currentPeriod, periods = []) {
+  const out = Object.fromEntries([...new Set([...periods, currentPeriod].filter(Boolean))].map((p) => [p, []]));
+  for (const project of projects || []) {
+    const period = project.closed ? project.closedPeriod : currentPeriod;
+    if (!period) continue;
+    (out[period] ||= []).push(project);
+  }
+  return out;
+}
+
+export function buildPayload({ targetsByPeriod, factsByPeriod, productionByPeriod = {}, outsourcedByPeriod: outsourced = {}, note }) {
   const periods = {};
   for (const [period, thresholds] of Object.entries(targetsByPeriod || {})) {
     periods[period] = { ...(periods[period] || {}), targets: { cash_in: thresholds } };
   }
   for (const [period, value] of Object.entries(factsByPeriod || {})) {
     periods[period] = { ...(periods[period] || {}), fact: { value, source: 'fintablo', note } };
+  }
+  for (const [period, value] of Object.entries(productionByPeriod || {})) {
+    periods[period] = { ...(periods[period] || {}), factProduction: { value, source: 'fintablo', note } };
+  }
+  for (const [period, projects] of Object.entries(outsourced || {})) {
+    periods[period] = { ...(periods[period] || {}), outsourced: { projects } };
   }
   return { periods };
 }
@@ -237,17 +326,22 @@ function findByName(items, name) {
     || items.find((d) => String(d?.name || '').trim().toLowerCase().includes(wanted));
 }
 
+// Не выручка: статьи из списка по имени и все поступления раздела «ниже
+// EBITDA» (вклады собственника, проценты по вкладам, возврат налогового резерва).
 export function excludedCategoryIds(categories, names = EXCLUDED_CATEGORY_NAMES) {
   const wanted = new Set(names.map((name) => String(name).trim().toLowerCase()));
   return new Set(categories
-    .filter((c) => wanted.has(String(c?.name || '').trim().toLowerCase()))
+    .filter((c) => wanted.has(String(c?.name || '').trim().toLowerCase()) || String(c?.pnlType || '') === 'income-under-ebitda')
     .map((c) => String(c.id)));
 }
 
-export async function fetchFacts({ token, directionName = DEFAULT_DIRECTION_NAME, year, today }) {
-  const [directions, categories] = await Promise.all([
+export async function fetchFacts({
+  token, directionName = DEFAULT_DIRECTION_NAME, outsourceDirectionName = DEFAULT_OUTSOURCE_DIRECTION_NAME, year, today,
+}) {
+  const [directions, categories, deals] = await Promise.all([
     loadPaged(token, '/direction', {}),
     loadPaged(token, '/category', {}),
+    loadPaged(token, '/deal', {}),
   ]);
   const roots = splitNames(directionName).map((name) => {
     const direction = findByName(directions, name);
@@ -264,10 +358,19 @@ export async function fetchFacts({ token, directionName = DEFAULT_DIRECTION_NAME
   const ids = new Set(roots.flatMap((root) => [...directionTreeIds(directions, root.id)]));
   const names = directions.filter((d) => ids.has(String(d.id))).map((d) => d.name);
   const skipped = excludedCategoryIds(categories);
+  const outsourceRoot = outsourceDirectionName ? findByName(directions, outsourceDirectionName) : null;
+  const outsourceIds = outsourceRoot ? directionTreeIds(directions, outsourceRoot.id) : new Set();
+  const outsourceDealIds = new Set(deals.filter((d) => outsourceIds.has(String(d?.directionId ?? ''))).map((d) => String(d.id)));
   return {
     directionId: roots.map((d) => d.id).join(','), directionName: roots.map((d) => d.name).join(' + '),
     directionIds: [...ids], directionNames: names,
-    sums: sumIncomeByQuarter(transactions, ids, { excludedCategoryIds: skipped }), count: transactions.length,
+    sums: sumIncomeByQuarter(transactions, ids, { excludedCategoryIds: skipped }),
+    productionSums: sumIncomeByQuarter(transactions, ids, {
+      excludedCategoryIds: skipped, excludedDirectionIds: outsourceIds, excludedDealIds: outsourceDealIds,
+    }),
+    outsourced: outsourcedProjects({ transactions, deals, categories, directionIds: outsourceIds }),
+    outsourceDirectionName: outsourceRoot?.name || null,
+    count: transactions.length,
   };
 }
 
@@ -275,16 +378,24 @@ export async function fetchFacts({ token, directionName = DEFAULT_DIRECTION_NAME
 export async function runMoneySync({ token, year, today, sheetId, gid, directionName, log = () => {} }) {
   const targetsByPeriod = await fetchPlan({ sheetId, gid, year });
   let factsByPeriod = {};
+  let productionByPeriod = {};
+  let outsourced = {};
   let note = '';
   let facts = null;
   if (token) {
     facts = await fetchFacts({ token, directionName, year, today });
     factsByPeriod = facts.sums;
+    const periods = Object.keys(facts.sums);
+    productionByPeriod = Object.fromEntries(periods.map((p) => [p, facts.productionSums[p] || 0]));
+    const current = quarterOfDate(today);
+    outsourced = outsourcedByPeriod(facts.outsourced, String(current || '').startsWith(String(year)) ? current : null, periods);
     note = `Финтабло, поступления «${facts.directionName}» без прочих фин. поступлений, квартал до ${MONEY_QUARTER_SHIFT_DAYS}-го числа, синк ${today}`;
     log(`FinTablo: ${facts.count} операций с начала года, направления ${facts.directionName} (#${facts.directionId}) с поднаправлениями: ${facts.directionNames.join(', ')}`);
     log(`Факт по кварталам: ${JSON.stringify(facts.sums)}`);
+    log(`Без подряда («${facts.outsourceDirectionName || 'нет направления'}»): ${JSON.stringify(facts.productionSums)}`);
+    log(`Подрядные проекты: ${facts.outsourced.map((p) => `${p.name} ${p.received}/${p.amount}${p.closed ? ` закрыт ${p.closedPeriod}` : ''}`).join('; ') || 'нет'}`);
   } else {
     log('FINTABLO_API_KEY не задан: факт не синкается, только план');
   }
-  return { payload: buildPayload({ targetsByPeriod, factsByPeriod, note }), facts, targetsByPeriod };
+  return { payload: buildPayload({ targetsByPeriod, factsByPeriod, productionByPeriod, outsourcedByPeriod: outsourced, note }), facts, targetsByPeriod };
 }

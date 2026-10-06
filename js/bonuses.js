@@ -128,6 +128,11 @@ function bonusesNum(value, digits = 0) {
     return Number(value || 0).toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(/ /g, ' ');
 }
 
+function bonusesPercent(share) {
+    const v = Math.round(Number(share || 0) * 1000) / 10;
+    return `${bonusesNum(v, Number.isInteger(v) ? 0 : 1)}%`;
+}
+
 function formatRub(value) {
     return `${bonusesNum(Math.round(Number(value) || 0))} ₽`;
 }
@@ -302,7 +307,7 @@ function renderSummary(entry) {
     if (!entry.hasTargets) return '<div class="bn-summary bn-muted">Цели квартала ещё не заданы, расчёта пока нет.</div>';
     const r = entry.rates || {};
     const st = r.steps || {};
-    return `<div class="bn-summary">Правила: ставку задают деньги компании за квартал — ниже base ${bonusesNum(st.below)} ₽, base ${bonusesNum(st.base)} ₽, medium ${bonusesNum(st.medium)} ₽, aspiration ${bonusesNum(st.aspiration)} ₽ за нормо-час. Часы задают объём: сколько нормо-часов заказов сделали, столько и оплачивается. Внутренние работы и часы без заказа всегда по ${bonusesNum(r.flat)} ₽. Производительность, срок и переделки на сумму не влияют, их обсуждаем отдельно.</div>`;
+    return `<div class="bn-summary">Правила: ставку задают деньги компании за квартал — ниже base ${bonusesNum(st.below)} ₽, base ${bonusesNum(st.base)} ₽, medium ${bonusesNum(st.medium)} ₽, aspiration ${bonusesNum(st.aspiration)} ₽ за нормо-час. Часы задают объём: сколько нормо-часов заказов сделали, столько и оплачивается. Внутренние работы и часы без заказа всегда по ${bonusesNum(r.flat)} ₽. Проекты без нашего производства («Подряд» в Финтабло) не поднимают ставку за часы: за них ${bonusesPercent(entry.receipt?.outsourced?.rate ?? 0.03)} от чистой прибыли проекта, когда клиент заплатил всё. Производительность, срок и переделки на сумму не влияют, их обсуждаем отдельно.</div>`;
 }
 
 function bonusesChipClass(achievement, available) {
@@ -338,9 +343,17 @@ function renderReceipt(entry) {
     line('Заказы клиентов', r.orders);
     line('Внутренние работы, утверждено', r.internal);
     line('Часы без заказа', r.unmarked);
+    const out = r.outsourced || {};
+    const pct = bonusesPercent(out.rate);
+    for (const p of (out.projects || []).filter((x) => x.closed)) {
+        lines.push(`<tr><td>Подряд: ${bonusesEscape(p.name)}</td><td>${pct} от чистой прибыли ${formatRub(p.net)}</td><td class="num">${formatRub(p.bonus)}</td></tr>`);
+    }
     lines.push(`<tr class="bn-receipt-total"><td>Итого к выплате</td><td></td><td class="num"><b>${formatRub(entry.amountComputed)}</b></td></tr>`);
     if ((r.upside?.hours || 0) > 0) {
         lines.push(`<tr class="bn-receipt-upside"><td>Продано, но ещё не сделано</td><td>${exactNum(r.upside.hours, 2)} ч × ${bonusesNum(r.upside.rate)} ₽</td><td class="num">+ ${formatRub(r.upside.amount)} если доделать до конца квартала</td></tr>`);
+    }
+    for (const p of (out.projects || []).filter((x) => !x.closed)) {
+        lines.push(`<tr class="bn-receipt-upside"><td>Подряд: ${bonusesEscape(p.name)}</td><td>${pct} от чистой прибыли ≈ ${formatRub(p.net)}, оплачено ${formatRub(p.received)} из ${formatRub(p.amount)}</td><td class="num">+ ${formatRub(p.bonus)} при закрытии</td></tr>`);
     }
     return `<table class="bn-receipt">${lines.join('')}</table>`;
 }
@@ -460,8 +473,13 @@ function renderTeamBlock(team, period, options = {}) {
     const ach = c.cashAchievement;
     const sourceLabel = fact?.source === 'fintablo' ? 'из Финтабло автоматически' : 'введено вручную';
     const done = fact && Number(thresholds.target) > 0 ? Math.round((fact.value / Number(thresholds.target)) * 100) : null;
+    const production = c.facts?.cash_in_production || null;
+    const outsourcedMoney = fact && production ? Number(fact.value) - Number(production.value) : 0;
+    const productionNote = outsourcedMoney > 0
+        ? ` · для ставки Лёши ${formatMoneyShort(production.value)}, подряд ${formatMoneyShort(outsourcedMoney)} не считается`
+        : '';
     const factHtml = fact
-        ? `<div class="bn-fact">${formatMoneyShort(fact.value)}<span>${done !== null ? `${done}% от medium ${formatMoneyShort(thresholds.target)} · ` : ''}${fact.source === 'fintablo' ? 'Финтабло' : 'вручную'} ${bonusesEscape(String(fact.updated_at || '').slice(5, 10).split('-').reverse().join('.'))}</span></div>`
+        ? `<div class="bn-fact">${formatMoneyShort(fact.value)}<span>${done !== null ? `${done}% от medium ${formatMoneyShort(thresholds.target)} · ` : ''}${fact.source === 'fintablo' ? 'Финтабло' : 'вручную'} ${bonusesEscape(String(fact.updated_at || '').slice(5, 10).split('-').reverse().join('.'))}${productionNote}</span></div>`
         : '<div class="bn-fact bn-muted">факт ещё не пришёл из Финтабло</div>';
     return `<div class="bn-team"><div class="bn-team-head"><div class="bn-team-title">Деньги квартала ${bonusesEscape(period)} · план из таблицы, факт из Финтабло</div>${button}</div>
         <div class="bn-row" style="border-top:0">

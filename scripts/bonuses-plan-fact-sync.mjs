@@ -17,6 +17,7 @@ import { runMoneySync, DEFAULT_SHEET_ID, DEFAULT_DIRECTION_NAME } from '../ops/a
 export {
     parseMoney, parseCsv, parsePlanCsv, tiersToPeriods, quarterOfDate, moneyQuarterWindow, MONEY_QUARTER_SHIFT_DAYS,
     directionTreeIds, sumIncomeByQuarter, buildPayload, excludedCategoryIds, splitNames, DEFAULT_DIRECTION_NAME,
+    expandSubs, outsourcedProjects, outsourcedByPeriod,
 } from '../ops/api/src/bonuses/fintablo.js';
 
 async function postSync(apiUrl, token, payload) {
