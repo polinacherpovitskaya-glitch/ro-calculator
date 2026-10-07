@@ -607,6 +607,62 @@ async function main() {
     assert.equal(context.__savedInlineMold.depth_mm, 4);
     assert.equal(context.__savedInlineMold.status, 'retired', 'the inline catalog checkbox must retire a disabled blank');
 
+    // 2026-09-29: шт/ч Картхолдера стал 1 вместо 18, и калькулятор насчитал
+    // 5 418 ₽ себестоимости за штуку. Опечатку в скорости надо переспрашивать.
+    assert.equal(vm.runInContext(`Molds._getPphSanityWarning(18, 18)`, context), '');
+    assert.equal(vm.runInContext(`Molds._getPphSanityWarning(20, 17.5)`, context), '');
+    assert.equal(vm.runInContext(`Molds._getPphSanityWarning(18, 1)`, context), '', 'fixing a broken speed back to normal must not nag');
+    assert.equal(vm.runInContext(`Molds._getPphSanityWarning(1, 1)`, context), '', 'an unchanged speed must not nag on unrelated edits');
+    assert.match(vm.runInContext(`Molds._getPphSanityWarning(1, 17.5)`, context), /Шт\/ч = 1/);
+    assert.match(vm.runInContext(`Molds._getPphSanityWarning(3, 0)`, context), /Шт\/ч = 3/, 'a new blank slower than 5 pcs/h is suspicious');
+    assert.match(vm.runInContext(`Molds._getPphSanityWarning(180, 18)`, context), /с 18 на 180/);
+    assert.match(vm.runInContext(`Molds._getPphSanityWarning(5, 18)`, context), /с 18 на 5/);
+
+    const cardholder = {
+        id: 79,
+        name: 'Картхолдер тест',
+        status: 'draft',
+        pph_min: 15,
+        pph_max: 20,
+        pph_actual: null,
+        weight_grams: 30,
+        complexity: 'complex',
+        mold_count: 1,
+        hw_name: '',
+        hw_price_per_unit: 0,
+        hw_delivery_total: 0,
+        hw_speed: null,
+        use_manual_prices: false,
+        custom_prices: {},
+        custom_margins: {},
+        disable_historical_blank_price_recovery: true,
+    };
+    vm.runInContext(`Molds.allMolds = [${JSON.stringify(cardholder)}];`, context);
+    context.__confirmMessages = [];
+    context.confirm = (message) => { context.__confirmMessages.push(message); return false; };
+    context.__savedInlineMold = null;
+    context.document.getElementById('mold-inline-pph-79').value = '1';
+    context.document.getElementById('mold-inline-weight-79').value = '30';
+    context.document.getElementById('mold-inline-complexity-79').value = 'complex';
+    context.document.getElementById('mold-inline-nfc-79').checked = false;
+    context.document.getElementById('mold-inline-enabled-79').checked = false;
+    await vm.runInContext(`Molds.saveInlineMold(79)`, context);
+    assert.equal(context.__confirmMessages.length, 1, 'inline save must ask before storing 1 pcs/h for a 15–20 pcs/h blank');
+    assert.equal(context.__savedInlineMold, null, 'declining the speed warning must not save the blank');
+
+    context.confirm = (message) => { context.__confirmMessages.push(message); return true; };
+    await vm.runInContext(`Molds.saveInlineMold(79)`, context);
+    assert.equal(context.__savedInlineMold.pph_actual, 1, 'a confirmed speed is saved as typed');
+
+    context.__confirmMessages = [];
+    context.__savedInlineMold = null;
+    vm.runInContext(`Molds.allMolds = [${JSON.stringify({ ...cardholder, pph_actual: 1 })}];`, context);
+    context.document.getElementById('mold-inline-pph-79').value = '18';
+    await vm.runInContext(`Molds.saveInlineMold(79)`, context);
+    assert.equal(context.__confirmMessages.length, 0, 'restoring a sane speed must save without a warning');
+    assert.equal(context.__savedInlineMold.pph_actual, 18);
+    delete context.confirm;
+
     // calc2 must not persist the old photo when the user presses Save while the
     // asynchronous storage upload is still running.
     [
@@ -644,6 +700,20 @@ async function main() {
     vm.runInContext(`__finishPhotoUpload()`, context);
     await saveAfterUpload;
     assert.equal(context.__savedFormMold.photo_url, 'https://example.com/new-photo.jpg');
+
+    context.__confirmMessages = [];
+    context.confirm = (message) => { context.__confirmMessages.push(message); return false; };
+    context.__savedFormMold = null;
+    vm.runInContext(`
+        Molds.allMolds = [{ id: 880, name: 'Фото после загрузки', status: 'active', pph_min: 18, pph_max: 18, pph_actual: 18, weight_grams: 30 }];
+        Molds.editingId = 880;
+    `, context);
+    context.document.getElementById('mold-pph-actual').value = '1';
+    await vm.runInContext(`Molds.saveMold()`, context);
+    assert.equal(context.__confirmMessages.length, 1, 'card save must ask before dropping 18 pcs/h to 1');
+    assert.match(context.__confirmMessages[0], /Шт\/ч = 1/);
+    assert.equal(context.__savedFormMold, null, 'declining the speed warning must not save the card');
+    delete context.confirm;
 
     vm.runInContext(`
         Molds.allMolds = [
