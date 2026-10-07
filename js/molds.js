@@ -18,6 +18,12 @@ const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс мол�
 
 const MOLD_TIERS = [10, 50, 100, 300, 500, 1000, 3000];
 
+// Опечатка в шт/ч молча раздувает себестоимость во всех заказах с бланком:
+// Картхолдер 18 → 1 шт/ч дал 5 418 ₽ за штуку вместо 460 ₽ (2026-09-29).
+// Бланки льются от ~10 шт/ч, поэтому меньше 5 или скачок в 3+ раза переспрашиваем.
+const MOLD_PPH_SANITY_FLOOR = 5;
+const MOLD_PPH_SANITY_RATIO = 3;
+
 function formatDimensionValue(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '';
@@ -806,11 +812,34 @@ const Molds = {
         return match ? this._getWarehouseHwSnapshot(match.id, '') : null;
     },
 
+    _getPphSanityWarning(nextPph, previousPph) {
+        const next = Number(nextPph) || 0;
+        const previous = Math.round((Number(previousPph) || 0) * 10) / 10;
+        if (!(next > 0) || next === previous) return '';
+        const impact = 'От этой скорости считаются себестоимость и цена бланка во всех заказах.';
+        if (next < MOLD_PPH_SANITY_FLOOR) {
+            return `Шт/ч = ${next} — это очень медленно, бланки обычно льются от 10 шт/ч. ${impact} Сохранить?`;
+        }
+        if (previous >= MOLD_PPH_SANITY_FLOOR && Math.max(next / previous, previous / next) >= MOLD_PPH_SANITY_RATIO) {
+            return `Шт/ч меняется с ${previous} на ${next}. ${impact} Сохранить?`;
+        }
+        return '';
+    },
+
+    _confirmPiecesPerHour(nextPph, previousPph) {
+        const warning = this._getPphSanityWarning(nextPph, previousPph);
+        if (!warning || typeof confirm !== 'function') return true;
+        if (confirm(warning)) return true;
+        App.toast('Не сохранено: проверьте шт/ч');
+        return false;
+    },
+
     async saveInlineMold(id) {
         const mold = this.allMolds.find(x => x.id === id);
         if (!mold) return;
 
         const pphRaw = document.getElementById(`mold-inline-pph-${id}`)?.value;
+        if (!mold.composite_summary && !this._confirmPiecesPerHour(pphRaw, getMoldOwnPiecesPerHour(mold))) return;
         const weightRaw = document.getElementById(`mold-inline-weight-${id}`)?.value;
         const widthRaw = document.getElementById(`mold-inline-width-${id}`)?.value;
         const heightRaw = document.getElementById(`mold-inline-height-${id}`)?.value;
@@ -1255,6 +1284,8 @@ const Molds = {
         const useManualPrices = Object.keys(customPrices).length > 0;
 
         const pphValue = compositeSummary?.piecesPerHour || parseFloat(document.getElementById('mold-pph-actual').value) || 0;
+        const previousMold = this.editingId ? this.allMolds.find(m => m.id === this.editingId) : null;
+        if (!compositeSummary && !this._confirmPiecesPerHour(pphValue, previousMold ? getMoldOwnPiecesPerHour(previousMold) : 0)) return;
         if (this._hwSource === 'warehouse' && !Number(this._hwWarehouseItemId || 0)) {
             App.toast('Выберите позицию со склада для встроенной фурнитуры');
             return;
