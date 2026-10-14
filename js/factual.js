@@ -1451,6 +1451,8 @@ async _loadFactSummaries() {
                         weight_grams: ri.weight_grams,
                         extra_molds: ri.extra_molds || 0,
                         base_mold_in_stock: ri.base_mold_in_stock || false,
+                        custom_composite: ri.custom_composite || false,
+                        custom_parts: ri.custom_parts || [],
                         complex_design: ri.complex_design || false,
                         is_blank_mold: ri.is_blank_mold || false,
                         is_nfc: ri.is_nfc || false,

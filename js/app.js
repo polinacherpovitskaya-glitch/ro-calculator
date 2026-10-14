@@ -1829,6 +1829,7 @@ const Calculator = {
             item.item_number = item.item_number || idx + 1;
             if (!Array.isArray(item.printings)) item.printings = [];
             if (!Array.isArray(item.colors)) item.colors = [];
+            item.custom_parts = normalizeCustomParts(item);
             this.renderItemBlock(idx);
         });
         if (this.hardwareItems.some(hw => hw.source === 'warehouse')) await this._ensureWhPickerData();
@@ -2013,6 +2014,9 @@ const Calculator = {
             weight_grams: 0,
             extra_molds: 0,
             base_mold_in_stock: false,
+            // Составной кастом: части со своими формами (getCustomCompositeSummary)
+            custom_composite: false,
+            custom_parts: [],
             complex_design: false,
             is_blank_mold: false,
             is_nfc: false,
@@ -2063,6 +2067,7 @@ const Calculator = {
             || (parseFloat(item.weight_grams) || 0) > 0
             || (parseFloat(item.extra_molds) || 0) > 0
             || !!item.base_mold_in_stock
+            || !!item.custom_composite
             || !!item.complex_design
             || !!item.is_blank_mold
             || !!item.is_nfc
@@ -5721,6 +5726,8 @@ const Calculator = {
                 nfc_programming: item.nfc_programming,
                 nfc_warehouse_item_id: nfcWarehouseItemId,
                 delivery_included: item.delivery_included,
+                custom_composite: isCustomCompositeItem(item),
+                custom_parts: JSON.stringify(normalizeCustomParts(item)),
                 printings: JSON.stringify(item.printings || []),
                 cost_fot: r.costFot,
                 cost_indirect: r.costIndirect,
@@ -6290,6 +6297,8 @@ const Calculator = {
                 try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
             }
             if (!Array.isArray(item.colors)) item.colors = [];
+            item.custom_parts = normalizeCustomParts(item);
+            item.custom_composite = isCustomCompositeItem(item);
             item.color_solution_attachment = normalizeColorAttachments(item);
             // Migrate old single color_id to colors array
             if (item.colors.length === 0 && item.color_id) {

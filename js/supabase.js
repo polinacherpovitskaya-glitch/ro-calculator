@@ -3009,6 +3009,7 @@ const ORDER_ITEM_CALC_FIELDS = [
     'item_type', 'pieces_per_hour', 'weight_grams', 'extra_molds',
     'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
     'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
+    'custom_composite', 'custom_parts',
     'setup_hours_override', 'colors', 'color_count',
     'builtin_assembly_name', 'builtin_assembly_speed',
     'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',

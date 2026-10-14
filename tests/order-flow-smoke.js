@@ -8853,12 +8853,62 @@ async function smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context) {
     assert.equal(state.summary.marginPercent, 0);
 }
 
+async function smokeCustomCompositePersistence(context) {
+    const saved = clone(await vm.runInContext(`(() => {
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        const item = Calculator.items[0];
+        item.product_name = 'Составной кастом';
+        item.quantity = 500;
+        item.custom_composite = true;
+        item.custom_parts = [
+            { name: 'Корпус', pieces_per_hour: 60, weight_grams: 30, qty: 1, mold_in_stock: true },
+            { name: 'Кнопка', pieces_per_hour: 120, weight_grams: 5, qty: 2, mold_in_stock: false },
+        ];
+        return Calculator._collectItemsForSave();
+    })()`, context));
+    const row = saved.find(item => item.item_type === 'product');
+    assert.equal(row.custom_composite, true);
+    assert.equal(typeof row.custom_parts, 'string', 'parts are stored as JSON like printings/colors');
+    assert.deepEqual(JSON.parse(row.custom_parts).map(part => part.name), ['Корпус', 'Кнопка']);
+
+    const meaningful = vm.runInContext(`Calculator._isMeaningfulProductItem({ ...Calculator.getEmptyItem(1), custom_composite: true })`, context);
+    assert.equal(meaningful, true, 'an item with only the composite toggle on is still saved');
+
+    context.__loadOrderData = {
+        order: { id: 9101, order_name: 'Composite', status: 'draft' },
+        items: clone(saved),
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+    vm.runInContext(`
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async () => ({});
+    `, context);
+    await vm.runInContext('Calculator.loadOrder(9101)', context);
+    const restored = clone(vm.runInContext('Calculator.items[0]', context));
+    assert.equal(restored.custom_composite, true);
+    assert.equal(Array.isArray(restored.custom_parts), true, 'parts are parsed back into an array');
+    assert.equal(restored.custom_parts.length, 2);
+    assert.equal(restored.custom_parts[0].mold_in_stock, true);
+    assert.equal(restored.custom_parts[1].qty, 2);
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
+    await smokeCustomCompositePersistence(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
