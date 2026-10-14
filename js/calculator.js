@@ -106,6 +106,11 @@ function getItemSetupHours(item, params) {
 
     const customMoldSetupHours = Math.max(0, calcNumber(p.setupHoursCustom, 1));
     const extraMolds = Math.max(0, calcNumber(item && item.extra_molds, 0));
+    const composite = getCustomCompositeSummary(item);
+    if (composite) {
+        // Составной кастом: час подготовки на каждую новую форму-часть.
+        return customMoldSetupHours * (composite.newMoldCount + extraMolds) + colorSetupHours * colorCount;
+    }
     const baseMoldInStock = item && (
         item.base_mold_in_stock === true
         || Number(item.base_mold_in_stock) === 1
@@ -362,6 +367,70 @@ function getBlankTemplateTotalMoldCost(source) {
     return compositeTotal > 0 ? round2(compositeTotal) : getMoldOwnTotalCost(source);
 }
 
+const CUSTOM_PARTS_ASSEMBLY_NAME = 'Сборка частей';
+
+function isCalcTrueLike(value) {
+    return value === true
+        || Number(value) === 1
+        || String(value ?? '').trim().toLowerCase() === 'true';
+}
+
+// Части составного кастома вводятся вручную: у каждой своя новая форма и
+// отдельная проливка. Незаполненные строки не выкидываем — их правит UI.
+function normalizeCustomParts(source) {
+    let parts = (source && typeof source === 'object' && !Array.isArray(source))
+        ? source.custom_parts
+        : source;
+    if (typeof parts === 'string') {
+        try { parts = JSON.parse(parts); } catch (_) { parts = []; }
+    }
+    if (!Array.isArray(parts)) return [];
+    return parts
+        .filter(part => part && typeof part === 'object')
+        .map(part => ({
+            name: String(part.name || '').trim(),
+            pieces_per_hour: Math.max(0, calcNumber(part.pieces_per_hour, 0)),
+            weight_grams: Math.max(0, calcNumber(part.weight_grams, 0)),
+            qty: Math.max(1, Math.round(calcNumber(part.qty, 1)) || 1),
+            mold_in_stock: isCalcTrueLike(part.mold_in_stock),
+        }));
+}
+
+function isCustomCompositeItem(item) {
+    return !!item && !item.is_blank_mold && isCalcTrueLike(item.custom_composite);
+}
+
+function getCustomCompositeIssue(item) {
+    if (!isCustomCompositeItem(item)) return '';
+    const parts = normalizeCustomParts(item);
+    if (parts.length < 2) return 'Нужно минимум 2 части';
+    const missingIdx = parts.findIndex(part => !(part.pieces_per_hour > 0));
+    if (missingIdx >= 0) return `Заполните шт/ч у части ${missingIdx + 1}`;
+    return '';
+}
+
+/**
+ * Составной кастом: части отливаются последовательно, каждая в своей форме.
+ * Готовое изделие требует qty/pph часов на каждой части, поэтому скорость
+ * = 1 / Σ(qty / pph) — как у составного бланка (getCompositeMoldSummary).
+ */
+function getCustomCompositeSummary(item) {
+    if (!isCustomCompositeItem(item) || getCustomCompositeIssue(item)) return null;
+    const parts = normalizeCustomParts(item);
+    const hoursPerItem = parts.reduce((sum, part) => sum + part.qty / part.pieces_per_hour, 0);
+    if (!(hoursPerItem > 0)) return null;
+    const newMoldCount = parts.filter(part => !part.mold_in_stock).length;
+    return {
+        isComposite: true,
+        parts,
+        piecesPerHour: round2(1 / hoursPerItem),
+        weightGrams: round2(parts.reduce((sum, part) => sum + part.weight_grams * part.qty, 0)),
+        piecesPerItem: parts.reduce((sum, part) => sum + part.qty, 0),
+        newMoldCount,
+        allMoldsInStock: newMoldCount === 0,
+    };
+}
+
 /**
  * Рассчитать себестоимость одной позиции заказа
  * Теперь поддерживает:
@@ -375,8 +444,12 @@ function getBlankTemplateTotalMoldCost(source) {
 function calculateItemCost(item, params) {
     const p = params;
     const qty = calcNumber(item.quantity, 0);
-    const pph = calcNumber(item.pieces_per_hour, 0);
-    const weight = calcNumber(item.weight_grams, 0);
+    const composite = getCustomCompositeSummary(item);
+    // Составной кастом с незаполненными частями не считаем по устаревшим
+    // шт/ч позиции — как обычный кастом без шт/ч.
+    if (isCustomCompositeItem(item) && !composite) return getEmptyCostResult();
+    const pph = composite ? composite.piecesPerHour : calcNumber(item.pieces_per_hour, 0);
+    const weight = composite ? composite.weightGrams : calcNumber(item.weight_grams, 0);
 
     if (qty === 0 || pph === 0) {
         return getEmptyCostResult();
@@ -404,7 +477,9 @@ function calculateItemCost(item, params) {
     // Кастомная форма → делим на тираж заказа
     const MOLD_LIFETIME = 4500;
     const extraMolds = calcNumber(item.extra_molds, 0);
-    const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
+    const paidBaseMolds = composite
+        ? composite.newMoldCount
+        : ((!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1);
     const totalPaidMolds = Math.max(0, paidBaseMolds + extraMolds);
     const blankMoldTotalCost = calcNumber(item.blank_mold_total_cost, 0);
     const costMoldAmortization = item.is_blank_mold
@@ -416,7 +491,9 @@ function calculateItemCost(item, params) {
 
     // === Срезание лейника ===
     // Косвенные расходы закладываем: срезание занимает производственные часы
-    const hoursCutting = p.cuttingSpeed > 0 ? qty / p.cuttingSpeed * p.wasteFactor : 0;
+    // Лейник срезается с каждой отлитой детали: у составного кастома их несколько.
+    const castPiecesPerItem = composite ? composite.piecesPerItem : 1;
+    const hoursCutting = p.cuttingSpeed > 0 ? qty * castPiecesPerItem / p.cuttingSpeed * p.wasteFactor : 0;
     const costCutting = hoursCutting * p.fotPerHour / qty;
     const costCuttingIndirect = hoursCutting > 0 ? p.indirectPerHour * hoursCutting / qty : 0;
 
@@ -1637,7 +1714,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const savedMoldTotal = qty * (Number(r?.costMoldAmortization) || 0);
         if (savedMoldTotal > 0) totalMolds += savedMoldTotal;
         else {
-            const paidBaseMolds = item.base_mold_in_stock ? 0 : 1;
+            const composite = getCustomCompositeSummary(item);
+            const paidBaseMolds = composite ? composite.newMoldCount : (item.base_mold_in_stock ? 0 : 1);
             const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
             totalMolds += safeMoldBaseCost * totalPaidMolds;
         }
@@ -2712,5 +2790,5 @@ function buildProductionSchedule(orders, settings) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { getProductionParams, calculateItemCost, getItemColorCount };
+    module.exports = { getProductionParams, calculateItemCost, getItemColorCount, getCustomCompositeSummary, normalizeCustomParts };
 }
