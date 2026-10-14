@@ -45,7 +45,7 @@
   - `getCustomCompositeIssue(item) → string` (`''`, `'Нужно минимум 2 части'`, `'Заполните шт/ч у части N'`)
   - `getCustomCompositeSummary(item) → null | { isComposite: true, parts, piecesPerHour, weightGrams, piecesPerItem, newMoldCount, allMoldsInStock }`
 
-- [ ] **Step 1: Написать падающий смоук**
+- [x] **Step 1: Написать падающий смоук**
 
 `tests/custom-composite-smoke.js`:
 
@@ -214,12 +214,12 @@ assert.equal(
 console.log('custom composite smoke checks passed');
 ```
 
-- [ ] **Step 2: Убедиться, что падает**
+- [x] **Step 2: Убедиться, что падает**
 
 Run: `node tests/custom-composite-smoke.js`
 Expected: FAIL — `ReferenceError: normalizeCustomParts is not defined`.
 
-- [ ] **Step 3: Добавить чистые функции**
+- [x] **Step 3: Добавить чистые функции**
 
 В `js/calculator.js` сразу после функции `getBlankTemplateTotalMoldCost`:
 
@@ -289,7 +289,7 @@ function getCustomCompositeSummary(item) {
 }
 ```
 
-- [ ] **Step 4: Запуск — `getItemSetupHours`**
+- [x] **Step 4: Запуск — `getItemSetupHours`**
 
 В `getItemSetupHours` после строки `const extraMolds = Math.max(0, calcNumber(item && item.extra_molds, 0));` вставить:
 
@@ -301,7 +301,7 @@ function getCustomCompositeSummary(item) {
     }
 ```
 
-- [ ] **Step 5: Себестоимость — `calculateItemCost`**
+- [x] **Step 5: Себестоимость — `calculateItemCost`**
 
 Заменить начало функции:
 
@@ -333,7 +333,7 @@ function calculateItemCost(item, params) {
     const hoursCutting = p.cuttingSpeed > 0 ? qty * castPiecesPerItem / p.cuttingSpeed * p.wasteFactor : 0;
 ```
 
-- [ ] **Step 6: Резервный расчёт молдов — `calculateFinDirectorData`**
+- [x] **Step 6: Резервный расчёт молдов — `calculateFinDirectorData`**
 
 В ветке `else` после `if (savedMoldTotal > 0) totalMolds += savedMoldTotal;` заменить строку `const paidBaseMolds = item.base_mold_in_stock ? 0 : 1;` на:
 
@@ -342,7 +342,7 @@ function calculateItemCost(item, params) {
             const paidBaseMolds = composite ? composite.newMoldCount : (item.base_mold_in_stock ? 0 : 1);
 ```
 
-- [ ] **Step 7: Экспорт для Node**
+- [x] **Step 7: Экспорт для Node**
 
 В конце `js/calculator.js` дополнить `module.exports`:
 
@@ -350,12 +350,12 @@ function calculateItemCost(item, params) {
     module.exports = { getProductionParams, calculateItemCost, getItemColorCount, getCustomCompositeSummary, normalizeCustomParts };
 ```
 
-- [ ] **Step 8: Прогнать смоуки**
+- [x] **Step 8: Прогнать смоуки**
 
 Run: `node tests/custom-composite-smoke.js && node tests/active-order-recalculation-smoke.js && node tests/molds-smoke.js && node tests/marketplaces-smoke.js`
 Expected: все `passed` / `OK`.
 
-- [ ] **Step 9: Добавить смоук в CI**
+- [x] **Step 9: Добавить смоук в CI**
 
 В `.github/workflows/deploy-pages.yml` после строки `node tests/active-order-recalculation-smoke.js` добавить строку с тем же отступом:
 
@@ -363,7 +363,7 @@ Expected: все `passed` / `OK`.
           node tests/custom-composite-smoke.js
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add js/calculator.js tests/custom-composite-smoke.js .github/workflows/deploy-pages.yml
@@ -386,7 +386,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: `normalizeCustomParts`, `isCustomCompositeItem` из Task 1.
 - Produces: позиция калькулятора всегда имеет `custom_composite: boolean` и `custom_parts: Array` (массив, не строка); сохранённая строка заказа содержит `custom_composite` (boolean) и `custom_parts` (JSON-строка).
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `tests/order-flow-smoke.js` добавить функцию перед `async function main()`:
 
@@ -449,12 +449,12 @@ async function smokeCustomCompositePersistence(context) {
     await smokeCustomCompositePersistence(context);
 ```
 
-- [ ] **Step 2: Убедиться, что падает**
+- [x] **Step 2: Убедиться, что падает**
 
 Run: `node tests/order-flow-smoke.js`
 Expected: FAIL на `assert.equal(row.custom_composite, true)` (поле не сохраняется).
 
-- [ ] **Step 3: Поля позиции**
+- [x] **Step 3: Поля позиции**
 
 В `js/app.js`, `getEmptyItem`, после строки `base_mold_in_stock: false,`:
 
@@ -477,7 +477,7 @@ Expected: FAIL на `assert.equal(row.custom_composite, true)` (поле не с
                 custom_parts: JSON.stringify(normalizeCustomParts(item)),
 ```
 
-- [ ] **Step 4: Загрузка заказа и черновика**
+- [x] **Step 4: Загрузка заказа и черновика**
 
 В `loadOrder` (блок `// Restore product items`) после строки `if (!Array.isArray(item.colors)) item.colors = [];`:
 
@@ -492,7 +492,7 @@ Expected: FAIL на `assert.equal(row.custom_composite, true)` (поле не с
             item.custom_parts = normalizeCustomParts(item);
 ```
 
-- [ ] **Step 5: Лёгкие поля списка заказов и факт**
+- [x] **Step 5: Лёгкие поля списка заказов и факт**
 
 `js/supabase.js`, `ORDER_ITEM_CALC_FIELDS`: заменить строку
 
@@ -514,12 +514,12 @@ Expected: FAIL на `assert.equal(row.custom_composite, true)` (поле не с
                         custom_parts: ri.custom_parts || [],
 ```
 
-- [ ] **Step 6: Прогнать тесты**
+- [x] **Step 6: Прогнать тесты**
 
 Run: `node tests/order-flow-smoke.js && node tests/factual-smoke.js && node tests/orders-performance-smoke.js && node -e "const s=require('fs').readFileSync('js/supabase.js','utf8'); if(!/'custom_composite', 'custom_parts'/.test(s)) process.exit(1); console.log('calc fields ok')"`
 Expected: `order-flow smoke checks passed`, `factual smoke checks passed`, orders-performance OK, `calc fields ok`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add js/app.js js/supabase.js js/factual.js tests/order-flow-smoke.js
@@ -548,7 +548,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `_customCompositeSummaryHtml(item) → string`
   - `_ruPlural(value, one, few, many) → string`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `tests/order-flow-smoke.js` перед `async function main()`:
 
@@ -664,12 +664,12 @@ async function smokeCustomCompositeEditing(context) {
     await smokeCustomCompositeEditing(context);
 ```
 
-- [ ] **Step 2: Убедиться, что падает**
+- [x] **Step 2: Убедиться, что падает**
 
 Run: `node tests/order-flow-smoke.js`
 Expected: FAIL — `Calculator.toggleCustomComposite is not a function`.
 
-- [ ] **Step 3: Методы редактирования**
+- [x] **Step 3: Методы редактирования**
 
 В `js/app.js` сразу после метода `onToggle(idx, field, checked) { ... },` вставить:
 
@@ -850,7 +850,7 @@ Expected: FAIL — `Calculator.toggleCustomComposite is not a function`.
     },
 ```
 
-- [ ] **Step 4: Встроить блок в `renderItemBlock`**
+- [x] **Step 4: Встроить блок в `renderItemBlock`**
 
 В начале `renderItemBlock` после `const showCustomOnly = !item.is_blank_mold;`:
 
@@ -902,7 +902,7 @@ Expected: FAIL — `Calculator.toggleCustomComposite is not a function`.
                 </div>` : ''}
 ```
 
-- [ ] **Step 5: Переключение в бланк и пересчёт**
+- [x] **Step 5: Переключение в бланк и пересчёт**
 
 В `setMoldType`, внутри `if (isBlank) {` после `this.items[idx].nfc_programming = false;`:
 
@@ -920,16 +920,16 @@ Expected: FAIL — `Calculator.toggleCustomComposite is not a function`.
             this._applyCustomCompositeToItem(item);
 ```
 
-- [ ] **Step 6: Прогнать тесты**
+- [x] **Step 6: Прогнать тесты**
 
 Run: `node tests/order-flow-smoke.js && node tests/custom-composite-smoke.js && node --check js/app.js && node --check js/calculator.js`
 Expected: `order-flow smoke checks passed`, `custom composite smoke checks passed`, без ошибок синтаксиса.
 
-- [ ] **Step 7: Визуальная проверка**
+- [x] **Step 7: Визуальная проверка**
 
 Открыть `index.html` локально (или опубликовать статический превью-артефакт с карточкой), включить «Кастомная» → «Составное изделие», ввести пример из спеки, убедиться: итог «30 изд/ч · 40 г · 3 детали на изделие · 2 новых молда», шт/ч и вес серые, на ширине ~375 px строки частей переносятся без горизонтального скролла.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add js/app.js tests/order-flow-smoke.js
@@ -946,24 +946,24 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `js/version.json`, `js/app.js` (`APP_VERSION`), `index.html` (`CURRENT_HTML_VERSION`, `#app-version`, `?v=` у `js/calculator.js`, `js/app.js`, `js/supabase.js`, `js/factual.js`)
 - Modify: `docs/plans/2026-10-14-custom-composite-parts.md` (галочки)
 
-- [ ] **Step 1: Узнать текущую версию main**
+- [x] **Step 1: Узнать текущую версию main**
 
 Run: `git fetch origin main && git show origin/main:js/version.json`
 Взять `vN`, новая версия `v(N+1)` (на момент написания `v477` → `v478`).
 
-- [ ] **Step 2: Поднять версию в 4 местах и ?v=**
+- [x] **Step 2: Поднять версию в 4 местах и ?v=**
 
 - `js/version.json`: `{"version": "v478"}`
 - `js/app.js`: `const APP_VERSION = 'v478';`
 - `index.html`: `const CURRENT_HTML_VERSION = 'v478';` и `<span id="app-version">v478</span>`
 - `index.html`: `js/supabase.js?v=478`, `js/calculator.js?v=478`, `js/app.js?v=478`, `js/factual.js?v=96`
 
-- [ ] **Step 3: Финальный прогон**
+- [x] **Step 3: Финальный прогон**
 
 Run: `node tests/version-smoke.js && node tests/custom-composite-smoke.js && node tests/order-flow-smoke.js && node tests/active-order-recalculation-smoke.js && node tests/factual-smoke.js && node tests/molds-smoke.js && node tests/marketplaces-smoke.js && node tests/orders-performance-smoke.js && for f in js/*.js; do node --check "$f" || exit 1; done`
 Expected: все `passed`/`OK`, `version smoke checks passed (v478)`.
 
-- [ ] **Step 4: Отметить план и закоммитить**
+- [x] **Step 4: Отметить план и закоммитить**
 
 ```bash
 git add js/version.json js/app.js index.html docs/plans/2026-10-14-custom-composite-parts.md
