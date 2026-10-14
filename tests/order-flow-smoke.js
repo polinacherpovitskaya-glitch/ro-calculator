@@ -8902,13 +8902,125 @@ async function smokeCustomCompositePersistence(context) {
     assert.equal(restored.custom_parts[1].qty, 2);
 }
 
+async function smokeCustomCompositeEditing(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const originals = {
+            renderItemBlock: Calculator.renderItemBlock,
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            _syncTemplateHardware: Calculator._syncTemplateHardware,
+        };
+        try {
+        Calculator.renderItemBlock = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.scheduleAutosave = () => {};
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        const item = Calculator.items[0];
+        item.product_name = 'Корпус';
+        item.quantity = 500;
+        item.pieces_per_hour = 60;
+        item.weight_grams = 30;
+
+        Calculator.toggleCustomComposite(0, true);
+        const afterEnable = JSON.parse(JSON.stringify(item));
+
+        Calculator.updateCustomPart(0, 1, 'name', 'Кнопка');
+        Calculator.updateCustomPart(0, 1, 'pieces_per_hour', '120');
+        Calculator.updateCustomPart(0, 1, 'weight_grams', '5');
+        Calculator.updateCustomPart(0, 1, 'qty', '2');
+        const afterParts = { pph: item.pieces_per_hour, weight: item.weight_grams, stock: item.base_mold_in_stock };
+
+        Calculator.updateCustomPart(0, 0, 'mold_in_stock', true);
+        Calculator.updateCustomPart(0, 1, 'mold_in_stock', true);
+        const allStock = item.base_mold_in_stock;
+
+        Calculator.removeCustomPart(0, 1);
+        const partsAfterBlockedRemove = item.custom_parts.length;
+        Calculator.addCustomPart(0);
+        const partsAfterAdd = item.custom_parts.length;
+        Calculator.removeCustomPart(0, 2);
+
+        Calculator.onCustomAssemblySpeedChange(0, '60');
+        const assembly = { name: item.builtin_assembly_name, speed: item.builtin_assembly_speed };
+
+        const html = Calculator._renderCustomCompositeBlock(0, item);
+
+        Calculator.toggleCustomComposite(0, false);
+        const afterDisable = JSON.parse(JSON.stringify(item));
+
+        Calculator.toggleCustomComposite(0, true);
+        Calculator.onCustomAssemblySpeedChange(0, '60');
+        Calculator._syncTemplateHardware = () => {};
+        Calculator.setMoldType(0, true);
+        const afterBlank = JSON.parse(JSON.stringify(item));
+
+        return { afterEnable, afterParts, allStock, partsAfterBlockedRemove, partsAfterAdd, assembly, html, afterDisable, afterBlank };
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context));
+
+    assert.equal(state.afterEnable.custom_composite, true);
+    assert.equal(state.afterEnable.custom_parts.length, 2, 'enabling creates two parts');
+    assert.deepEqual(
+        { name: state.afterEnable.custom_parts[0].name, pph: state.afterEnable.custom_parts[0].pieces_per_hour, weight: state.afterEnable.custom_parts[0].weight_grams },
+        { name: 'Корпус', pph: 60, weight: 30 },
+        'the first part is prefilled from the item',
+    );
+    assert.equal(state.afterEnable.pieces_per_hour, 0, 'an unfinished second part leaves the item uncalculated');
+
+    assert.deepEqual(state.afterParts, { pph: 30, weight: 40, stock: false });
+    assert.equal(state.allStock, true, 'all parts in stock clears the mold wait');
+    assert.equal(state.partsAfterBlockedRemove, 2, 'cannot go below two parts');
+    assert.equal(state.partsAfterAdd, 3);
+    assert.deepEqual(state.assembly, { name: 'Сборка частей', speed: 60 });
+
+    assert.match(state.html, /Составное изделие/);
+    assert.match(state.html, /Итог: 30 изд\/ч · 40 г · 3 детали на изделие · 0 новых молдов/);
+    assert.match(state.html, /value="Кнопка"/);
+
+    assert.equal(state.afterDisable.custom_composite, false);
+    assert.equal(state.afterDisable.custom_parts.length, 2, 'parts survive switching the mode off');
+    assert.equal(state.afterDisable.builtin_assembly_speed, 0, 'part assembly is dropped with the mode');
+    assert.equal(state.afterDisable.pieces_per_hour, 30, 'last computed speed stays editable');
+
+    assert.equal(state.afterBlank.custom_composite, false, 'blank mold turns composite off');
+    assert.equal(state.afterBlank.builtin_assembly_speed, 0, 'part assembly does not leak into a blank');
+
+    // Реальная карточка: оригинальный renderItemBlock сохранён в main() до стабов.
+    const cardHtml = String(await vm.runInContext(`(() => {
+        const originalHwPkg = Calculator._renderPerItemHwPkg;
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        const item = Calculator.items[0];
+        item.quantity = 500;
+        item.custom_composite = true;
+        item.custom_parts = [
+            { name: 'Корпус', pieces_per_hour: 60, weight_grams: 30, qty: 1, mold_in_stock: false },
+            { name: 'Кнопка', pieces_per_hour: 120, weight_grams: 5, qty: 2, mold_in_stock: false },
+        ];
+        Calculator._applyCustomCompositeToItem(item);
+        globalThis.__originalRenderItemBlock.call(Calculator, 0);
+        Calculator._renderPerItemHwPkg = originalHwPkg;
+        return document.getElementById('item-block-0').outerHTML;
+    })()`, context));
+    assert.match(cardHtml, /Составное изделие \(2\+ части\)/);
+    assert.match(cardHtml, /id="item-pph-0" readonly/, 'speed is derived from the parts');
+    assert.match(cardHtml, /id="item-weight-0" readonly/, 'weight is derived from the parts');
+    assert.doesNotMatch(cardHtml, /item-stock-mold-0/, 'per-part stock replaces the item stock toggle');
+    assert.match(cardHtml, /2 части/, 'collapsed summary shows the part count');
+    assert.match(cardHtml, /2 новых молда/);
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
     stubRuntime(context);
+    vm.runInContext('globalThis.__originalRenderItemBlock = Calculator.renderItemBlock;', context);
 
     await smokeCalculatorPersistence(context);
     await smokeCustomCompositePersistence(context);
+    await smokeCustomCompositeEditing(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
