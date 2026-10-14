@@ -4161,8 +4161,11 @@ const Calculator = {
             this.items[idx].builtin_hw_price = 0;
             this.items[idx].builtin_hw_delivery_total = 0;
             this.items[idx].builtin_hw_speed = 0;
-            this.items[idx].builtin_assembly_name = '';
-            this.items[idx].builtin_assembly_speed = 0;
+            // У составного кастома «встроенная сборка» — это сборка частей.
+            if (!isCustomCompositeItem(this.items[idx])) {
+                this.items[idx].builtin_assembly_name = '';
+                this.items[idx].builtin_assembly_speed = 0;
+            }
             const hwBadge = document.getElementById('item-hw-badge-' + idx);
             if (hwBadge) hwBadge.style.display = 'none';
             const assemblyBadge = document.getElementById('item-assembly-badge-' + idx);
@@ -4251,7 +4254,22 @@ const Calculator = {
         const item = this.items[idx];
         if (!item) return;
         item.custom_parts = normalizeCustomParts(item);
+        const wasComposite = isCustomCompositeItem(item);
+        const hadValidParts = !!getCustomCompositeSummary(item);
         item.custom_composite = !!checked && !item.is_blank_mold;
+        if (item.custom_composite && !wasComposite) {
+            // Случайная галочка не должна портить позицию: если части так и не
+            // заполнили, при снятии вернём исходные шт/ч, вес и «молд на складе».
+            item._customCompositeRestore = {
+                pieces_per_hour: item.pieces_per_hour,
+                weight_grams: item.weight_grams,
+                base_mold_in_stock: item.base_mold_in_stock,
+            };
+        }
+        if (!item.custom_composite && wasComposite && !hadValidParts && item._customCompositeRestore) {
+            Object.assign(item, item._customCompositeRestore);
+        }
+        if (!item.custom_composite) delete item._customCompositeRestore;
         if (item.custom_composite) {
             if (item.custom_parts.length === 0) {
                 item.custom_parts.push({
@@ -6522,8 +6540,11 @@ const Calculator = {
                         item.builtin_hw_speed = 0;
                     }
                     const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
-                    item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
-                    item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
+                    // Сборку частей составного кастома шаблон не перезаписывает.
+                    if (!item.custom_composite) {
+                        item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
+                        item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
+                    }
                 }
             }
             this.items.push(item);

@@ -9012,6 +9012,109 @@ async function smokeCustomCompositeEditing(context) {
     assert.match(cardHtml, /2 новых молда/);
 }
 
+async function smokeCustomCompositeToggleSafety(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const originals = {
+            renderItemBlock: Calculator.renderItemBlock,
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            _syncTemplateHardware: Calculator._syncTemplateHardware,
+        };
+        try {
+            Calculator.renderItemBlock = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            Calculator._syncTemplateHardware = () => {};
+            Calculator.items = [Calculator.getEmptyItem(1)];
+            const item = Calculator.items[0];
+            item.product_name = 'Повторный кастом';
+            item.quantity = 500;
+            item.pieces_per_hour = 60;
+            item.weight_grams = 30;
+            item.base_mold_in_stock = true;
+
+            Calculator.toggleCustomComposite(0, true);
+            Calculator.toggleCustomComposite(0, false);
+            const afterAccidentalTick = {
+                pph: item.pieces_per_hour, weight: item.weight_grams, stock: item.base_mold_in_stock,
+            };
+
+            Calculator.toggleCustomComposite(0, true);
+            Calculator.updateCustomPart(0, 1, 'pieces_per_hour', '120');
+            Calculator.updateCustomPart(0, 1, 'weight_grams', '5');
+            Calculator.updateCustomPart(0, 1, 'qty', '2');
+            Calculator.onCustomAssemblySpeedChange(0, '60');
+            Calculator.setMoldType(0, false);
+            const afterCustomClick = {
+                composite: item.custom_composite,
+                assemblyName: item.builtin_assembly_name,
+                assemblySpeed: item.builtin_assembly_speed,
+            };
+            return { afterAccidentalTick, afterCustomClick };
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context));
+
+    assert.deepEqual(
+        state.afterAccidentalTick,
+        { pph: 60, weight: 30, stock: true },
+        'ticking the composite box on and off without finishing the parts leaves the item untouched',
+    );
+    assert.deepEqual(
+        state.afterCustomClick,
+        { composite: true, assemblyName: 'Сборка частей', assemblySpeed: 60 },
+        'clicking the already active custom button keeps part assembly',
+    );
+
+    // Старый кастом с template_id: загрузка не должна затирать сборку частей шаблоном.
+    const saved = clone(await vm.runInContext(`(() => {
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        const item = Calculator.items[0];
+        item.product_name = 'Кастом со старым шаблоном';
+        item.quantity = 500;
+        item.template_id = 77;
+        item.custom_composite = true;
+        item.builtin_assembly_name = 'Сборка частей';
+        item.builtin_assembly_speed = 60;
+        item.custom_parts = [
+            { name: 'Корпус', pieces_per_hour: 60, weight_grams: 30, qty: 1 },
+            { name: 'Кнопка', pieces_per_hour: 120, weight_grams: 5, qty: 2 },
+        ];
+        return Calculator._collectItemsForSave();
+    })()`, context));
+    context.__loadOrderData = {
+        order: { id: 9102, order_name: 'Composite template', status: 'draft' },
+        items: clone(saved),
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+    vm.runInContext(`
+        globalThis.__savedTemplates = App.templates;
+        App.templates = [{ id: 77, name: 'Old blank', category: 'blank', builtin_assembly_name: '', builtin_assembly_speed: 0 }];
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async () => ({});
+    `, context);
+    try {
+        await vm.runInContext('Calculator.loadOrder(9102)', context);
+    } finally {
+        vm.runInContext('App.templates = globalThis.__savedTemplates;', context);
+    }
+    const restored = clone(vm.runInContext('Calculator.items[0]', context));
+    assert.equal(restored.custom_composite, true);
+    assert.equal(restored.builtin_assembly_speed, 60, 'a legacy template link does not overwrite part assembly');
+    assert.equal(restored.builtin_assembly_name, 'Сборка частей');
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -9021,6 +9124,7 @@ async function main() {
     await smokeCalculatorPersistence(context);
     await smokeCustomCompositePersistence(context);
     await smokeCustomCompositeEditing(context);
+    await smokeCustomCompositeToggleSafety(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
