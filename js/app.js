@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v477';
+const APP_VERSION = 'v478';
 
 const App = {
     currentPage: 'orders',
@@ -1829,6 +1829,7 @@ const Calculator = {
             item.item_number = item.item_number || idx + 1;
             if (!Array.isArray(item.printings)) item.printings = [];
             if (!Array.isArray(item.colors)) item.colors = [];
+            item.custom_parts = normalizeCustomParts(item);
             this.renderItemBlock(idx);
         });
         if (this.hardwareItems.some(hw => hw.source === 'warehouse')) await this._ensureWhPickerData();
@@ -2013,6 +2014,9 @@ const Calculator = {
             weight_grams: 0,
             extra_molds: 0,
             base_mold_in_stock: false,
+            // Составной кастом: части со своими формами (getCustomCompositeSummary)
+            custom_composite: false,
+            custom_parts: [],
             complex_design: false,
             is_blank_mold: false,
             is_nfc: false,
@@ -2063,6 +2067,7 @@ const Calculator = {
             || (parseFloat(item.weight_grams) || 0) > 0
             || (parseFloat(item.extra_molds) || 0) > 0
             || !!item.base_mold_in_stock
+            || !!item.custom_composite
             || !!item.complex_design
             || !!item.is_blank_mold
             || !!item.is_nfc
@@ -2089,6 +2094,11 @@ const Calculator = {
         const num = idx + 1;
         const container = document.getElementById('calc-items-container');
         const showCustomOnly = !item.is_blank_mold;
+        item.custom_parts = normalizeCustomParts(item);
+        const isCustomComposite = isCustomCompositeItem(item);
+        const derivedFieldAttrs = isCustomComposite
+            ? 'readonly title="Считается по частям" style="background:var(--bg);color:var(--text-muted);"'
+            : '';
 
         // Build visual mold picker (with photos)
         let moldPickerHtml = '';
@@ -2264,6 +2274,10 @@ const Calculator = {
                     <span class="item-summary-label">Цвет</span>
                     <span class="item-summary-value">${summaryColor}</span>
                 </div>
+                ${isCustomComposite ? `<div class="item-summary-stat">
+                    <span class="item-summary-label">Составное</span>
+                    <span class="item-summary-value">${item.custom_parts.length} ${this._ruPlural(item.custom_parts.length, 'часть', 'части', 'частей')}</span>
+                </div>` : ''}
                 ${summaryPrint ? `<div class="item-summary-stat">
                     <span class="item-summary-label">Печать</span>
                     <span class="item-summary-value">${summaryPrint}</span>
@@ -2304,21 +2318,26 @@ const Calculator = {
                 </div>
                 <div class="form-group">
                     <label>Шт/час</label>
-                    <input type="number" min="0" value="${item.pieces_per_hour || ''}" id="item-pph-${idx}" oninput="Calculator.onNumChange(${idx}, 'pieces_per_hour', this.value)">
+                    <input type="number" min="0" value="${item.pieces_per_hour || ''}" id="item-pph-${idx}" ${derivedFieldAttrs} oninput="Calculator.onNumChange(${idx}, 'pieces_per_hour', this.value)">
+                    ${isCustomComposite ? '<span class="form-hint">считается по частям</span>' : ''}
                 </div>
                 <div class="form-group">
                     <label>Вес (г)</label>
-                    <input type="number" min="0" value="${item.weight_grams || ''}" id="item-weight-${idx}" oninput="Calculator.onNumChange(${idx}, 'weight_grams', this.value)">
+                    <input type="number" min="0" value="${item.weight_grams || ''}" id="item-weight-${idx}" ${derivedFieldAttrs} oninput="Calculator.onNumChange(${idx}, 'weight_grams', this.value)">
+                    ${isCustomComposite ? '<span class="form-hint">считается по частям</span>' : ''}
                 </div>
             </div>
+
+            ${showCustomOnly ? this._renderCustomCompositeBlock(idx, item) : ''}
 
             <details class="item-advanced-details" ${(item.base_mold_in_stock || item.complex_design || item.is_nfc || item.nfc_programming || item.delivery_included || !item.is_blank_mold) ? 'open' : ''}>
                 <summary class="item-advanced-summary">Дополнительно</summary>
             ${showCustomOnly ? `
+            ${isCustomComposite ? '' : `
             <div class="toggle-row">
                 <input type="checkbox" class="toggle" id="item-stock-mold-${idx}" ${item.base_mold_in_stock ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'base_mold_in_stock', this.checked)">
                 <label for="item-stock-mold-${idx}">Молд уже лежит на складе и не идет в стоимость заказа</label>
-            </div>
+            </div>`}
 
             <div class="form-row">
                 <div class="form-group">
@@ -4127,6 +4146,11 @@ const Calculator = {
             this.items[idx].complex_design = false;
             this.items[idx].is_nfc = false;
             this.items[idx].nfc_programming = false;
+            if (this.items[idx].custom_composite) {
+                this.items[idx].builtin_assembly_name = '';
+                this.items[idx].builtin_assembly_speed = 0;
+            }
+            this.items[idx].custom_composite = false;
         }
         this.updateMoldTypeUI(idx, isBlank);
         // Clear template and built-in hw if switching to custom
@@ -4137,8 +4161,11 @@ const Calculator = {
             this.items[idx].builtin_hw_price = 0;
             this.items[idx].builtin_hw_delivery_total = 0;
             this.items[idx].builtin_hw_speed = 0;
-            this.items[idx].builtin_assembly_name = '';
-            this.items[idx].builtin_assembly_speed = 0;
+            // У составного кастома «встроенная сборка» — это сборка частей.
+            if (!isCustomCompositeItem(this.items[idx])) {
+                this.items[idx].builtin_assembly_name = '';
+                this.items[idx].builtin_assembly_speed = 0;
+            }
             const hwBadge = document.getElementById('item-hw-badge-' + idx);
             if (hwBadge) hwBadge.style.display = 'none';
             const assemblyBadge = document.getElementById('item-assembly-badge-' + idx);
@@ -4201,6 +4228,196 @@ const Calculator = {
         }
         this.recalculate();
         this.scheduleAutosave();
+    },
+
+    // ==========================================
+    // СОСТАВНОЙ КАСТОМ (части со своими формами)
+    // ==========================================
+
+    _getEmptyCustomPart() {
+        return { name: '', pieces_per_hour: 0, weight_grams: 0, qty: 1, mold_in_stock: false };
+    },
+
+    // Итог частей пишем в обычные поля позиции: план производства, склад и
+    // списки читают шт/ч, вес и «молд на складе» напрямую.
+    _applyCustomCompositeToItem(item) {
+        if (!isCustomCompositeItem(item)) return null;
+        const parts = normalizeCustomParts(item);
+        const summary = getCustomCompositeSummary(item);
+        item.pieces_per_hour = summary ? summary.piecesPerHour : 0;
+        if (summary) item.weight_grams = summary.weightGrams;
+        item.base_mold_in_stock = parts.length > 0 && parts.every(part => part.mold_in_stock);
+        return summary;
+    },
+
+    toggleCustomComposite(idx, checked) {
+        const item = this.items[idx];
+        if (!item) return;
+        item.custom_parts = normalizeCustomParts(item);
+        const wasComposite = isCustomCompositeItem(item);
+        const hadValidParts = !!getCustomCompositeSummary(item);
+        item.custom_composite = !!checked && !item.is_blank_mold;
+        if (item.custom_composite && !wasComposite) {
+            // Случайная галочка не должна портить позицию: если части так и не
+            // заполнили, при снятии вернём исходные шт/ч, вес и «молд на складе».
+            item._customCompositeRestore = {
+                pieces_per_hour: item.pieces_per_hour,
+                weight_grams: item.weight_grams,
+                base_mold_in_stock: item.base_mold_in_stock,
+            };
+        }
+        if (!item.custom_composite && wasComposite && !hadValidParts && item._customCompositeRestore) {
+            Object.assign(item, item._customCompositeRestore);
+        }
+        if (!item.custom_composite) delete item._customCompositeRestore;
+        if (item.custom_composite) {
+            if (item.custom_parts.length === 0) {
+                item.custom_parts.push({
+                    ...this._getEmptyCustomPart(),
+                    name: String(item.product_name || '').trim(),
+                    pieces_per_hour: calcNumber(item.pieces_per_hour, 0),
+                    weight_grams: calcNumber(item.weight_grams, 0),
+                    mold_in_stock: !!item.base_mold_in_stock,
+                });
+            }
+            while (item.custom_parts.length < 2) item.custom_parts.push(this._getEmptyCustomPart());
+            item.builtin_assembly_name = CUSTOM_PARTS_ASSEMBLY_NAME;
+            this._applyCustomCompositeToItem(item);
+        } else {
+            item.builtin_assembly_name = '';
+            item.builtin_assembly_speed = 0;
+        }
+        this.renderItemBlock(idx);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    addCustomPart(idx) {
+        const item = this.items[idx];
+        if (!isCustomCompositeItem(item)) return;
+        item.custom_parts = normalizeCustomParts(item);
+        item.custom_parts.push(this._getEmptyCustomPart());
+        this._applyCustomCompositeToItem(item);
+        this.renderItemBlock(idx);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    removeCustomPart(idx, partIdx) {
+        const item = this.items[idx];
+        if (!isCustomCompositeItem(item)) return;
+        item.custom_parts = normalizeCustomParts(item);
+        if (item.custom_parts.length <= 2 || !item.custom_parts[partIdx]) return;
+        item.custom_parts.splice(partIdx, 1);
+        this._applyCustomCompositeToItem(item);
+        this.renderItemBlock(idx);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    // Ввод в поля части не перерисовывает карточку, чтобы не терять фокус.
+    updateCustomPart(idx, partIdx, field, value) {
+        const item = this.items[idx];
+        const part = Array.isArray(item?.custom_parts) ? item.custom_parts[partIdx] : null;
+        if (!part) return;
+        if (field === 'name') part.name = String(value || '');
+        else if (field === 'mold_in_stock') part.mold_in_stock = !!value;
+        else if (field === 'qty') part.qty = Math.max(1, Math.round(parseFloat(value) || 1));
+        else if (field === 'pieces_per_hour' || field === 'weight_grams') part[field] = Math.max(0, parseFloat(String(value).replace(',', '.')) || 0);
+        else return;
+        this._applyCustomCompositeToItem(item);
+        this._refreshCustomCompositeDom(idx);
+        if (field !== 'name') this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    onCustomAssemblySpeedChange(idx, value) {
+        const item = this.items[idx];
+        if (!isCustomCompositeItem(item)) return;
+        item.builtin_assembly_name = CUSTOM_PARTS_ASSEMBLY_NAME;
+        item.builtin_assembly_speed = Math.max(0, parseFloat(String(value).replace(',', '.')) || 0);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    _refreshCustomCompositeDom(idx) {
+        const item = this.items[idx];
+        const pphEl = document.getElementById('item-pph-' + idx);
+        if (pphEl) pphEl.value = item.pieces_per_hour || '';
+        const weightEl = document.getElementById('item-weight-' + idx);
+        if (weightEl) weightEl.value = item.weight_grams || '';
+        const summaryEl = document.getElementById('custom-parts-summary-' + idx);
+        if (summaryEl) summaryEl.innerHTML = this._customCompositeSummaryHtml(item);
+    },
+
+    _ruPlural(value, one, few, many) {
+        const abs = Math.abs(Math.trunc(Number(value) || 0));
+        const mod10 = abs % 10;
+        const mod100 = abs % 100;
+        if (mod10 === 1 && mod100 !== 11) return one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+        return many;
+    },
+
+    _customCompositeSummaryHtml(item) {
+        const issue = getCustomCompositeIssue(item);
+        if (issue) return `<span style="color:var(--orange);">${this._esc(issue)}</span>`;
+        const summary = getCustomCompositeSummary(item);
+        if (!summary) return '';
+        const fmt = value => Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+        const pieces = summary.piecesPerItem;
+        const molds = summary.newMoldCount;
+        return `Итог: ${fmt(summary.piecesPerHour)} изд/ч · ${fmt(summary.weightGrams)} г · `
+            + `${pieces} ${this._ruPlural(pieces, 'деталь', 'детали', 'деталей')} на изделие · `
+            + `${molds} ${this._ruPlural(molds, 'новый молд', 'новых молда', 'новых молдов')}`;
+    },
+
+    _renderCustomCompositeBlock(idx, item) {
+        const enabled = isCustomCompositeItem(item);
+        const parts = normalizeCustomParts(item);
+        const canRemove = parts.length > 2;
+        const labelStyle = 'display:flex;flex-direction:column;gap:4px;margin:0;font-size:13px;color:var(--text-secondary);';
+        const inputStyle = 'height:36px;font-size:14px;';
+        const rowsHtml = enabled ? parts.map((part, pi) => `
+            <div class="custom-part-row" style="display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;padding:8px 0;border-bottom:1px dashed var(--border);">
+                <div style="font-size:14px;font-weight:600;min-width:64px;padding-bottom:8px;">Часть ${pi + 1}</div>
+                <label class="form-group" style="${labelStyle}flex:1 1 160px;"><span>Название</span>
+                    <input type="text" style="${inputStyle}" value="${this._escAttr(part.name)}" placeholder="Например, корпус" oninput="Calculator.updateCustomPart(${idx}, ${pi}, 'name', this.value)">
+                </label>
+                <label class="form-group" style="${labelStyle}width:90px;"><span>Шт/ч</span>
+                    <input type="number" min="0" step="any" style="${inputStyle}" value="${part.pieces_per_hour || ''}" oninput="Calculator.updateCustomPart(${idx}, ${pi}, 'pieces_per_hour', this.value)">
+                </label>
+                <label class="form-group" style="${labelStyle}width:90px;"><span>Вес, г</span>
+                    <input type="number" min="0" step="any" style="${inputStyle}" value="${part.weight_grams || ''}" oninput="Calculator.updateCustomPart(${idx}, ${pi}, 'weight_grams', this.value)">
+                </label>
+                <label class="form-group" style="${labelStyle}width:110px;"><span>Шт. в изделии</span>
+                    <input type="number" min="1" step="1" style="${inputStyle}" value="${part.qty}" oninput="Calculator.updateCustomPart(${idx}, ${pi}, 'qty', this.value)">
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;padding-bottom:9px;white-space:nowrap;cursor:pointer;">
+                    <input type="checkbox" ${part.mold_in_stock ? 'checked' : ''} onchange="Calculator.updateCustomPart(${idx}, ${pi}, 'mold_in_stock', this.checked)">
+                    молд на складе
+                </label>
+                <button type="button" class="btn btn-sm btn-outline" style="height:36px;min-width:36px;${canRemove ? '' : 'opacity:.4;cursor:not-allowed;'}" ${canRemove ? '' : 'disabled'}
+                    title="${canRemove ? 'Убрать часть' : 'Нужно минимум 2 части'}" onclick="Calculator.removeCustomPart(${idx}, ${pi})">✕</button>
+            </div>`).join('') : '';
+
+        return `
+            <div class="custom-composite-block" id="custom-composite-${idx}" style="margin:4px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card-bg);">
+                <div class="toggle-row" style="padding:0;">
+                    <input type="checkbox" class="toggle" id="item-custom-composite-${idx}" ${enabled ? 'checked' : ''} onchange="Calculator.toggleCustomComposite(${idx}, this.checked)">
+                    <label for="item-custom-composite-${idx}" style="font-size:14px;font-weight:600;">Составное изделие (2+ части)</label>
+                </div>
+                ${enabled ? `
+                <div style="font-size:13px;color:var(--text-muted);margin:6px 0 4px;">Каждая часть — своя форма и отдельная проливка. Шт/ч и вес изделия считаются по частям.</div>
+                <div id="custom-parts-list-${idx}">${rowsHtml}</div>
+                <button type="button" class="btn btn-sm btn-outline" style="margin-top:10px;" onclick="Calculator.addCustomPart(${idx})">+ Часть</button>
+                <div class="form-group" style="margin-top:12px;max-width:280px;">
+                    <label for="item-custom-assembly-${idx}" style="font-size:13px;">Сборка частей, изд/ч</label>
+                    <input type="number" id="item-custom-assembly-${idx}" min="0" step="any" style="${inputStyle}" value="${item.builtin_assembly_speed || ''}" placeholder="пусто — не считаем" oninput="Calculator.onCustomAssemblySpeedChange(${idx}, this.value)">
+                </div>
+                <div id="custom-parts-summary-${idx}" style="margin-top:10px;font-size:14px;font-weight:600;">${this._customCompositeSummaryHtml(item)}</div>
+                ` : ''}
+            </div>`;
     },
 
     _readFileAsDataUrl(file) {
@@ -4538,6 +4755,7 @@ const Calculator = {
                 item.is_nfc = false;
                 item.nfc_programming = false;
             }
+            this._applyCustomCompositeToItem(item);
             const result = calculateItemCost(item, params);
             item.result = result;
 
@@ -5721,6 +5939,8 @@ const Calculator = {
                 nfc_programming: item.nfc_programming,
                 nfc_warehouse_item_id: nfcWarehouseItemId,
                 delivery_included: item.delivery_included,
+                custom_composite: isCustomCompositeItem(item),
+                custom_parts: JSON.stringify(normalizeCustomParts(item)),
                 printings: JSON.stringify(item.printings || []),
                 cost_fot: r.costFot,
                 cost_indirect: r.costIndirect,
@@ -6290,6 +6510,8 @@ const Calculator = {
                 try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
             }
             if (!Array.isArray(item.colors)) item.colors = [];
+            item.custom_parts = normalizeCustomParts(item);
+            item.custom_composite = isCustomCompositeItem(item);
             item.color_solution_attachment = normalizeColorAttachments(item);
             // Migrate old single color_id to colors array
             if (item.colors.length === 0 && item.color_id) {
@@ -6318,8 +6540,11 @@ const Calculator = {
                         item.builtin_hw_speed = 0;
                     }
                     const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
-                    item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
-                    item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
+                    // Сборку частей составного кастома шаблон не перезаписывает.
+                    if (!item.custom_composite) {
+                        item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
+                        item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
+                    }
                 }
             }
             this.items.push(item);
