@@ -241,18 +241,16 @@ const TimeTrack = {
         select.querySelectorAll('optgroup').forEach(g => g.remove());
         while (select.options.length > 2) select.remove(2);
 
-        // Active production first, then finished/closed and everything else,
-        // so hours can be corrected on orders that are already done.
+        // Active production first, then finished/closed orders so hours can
+        // still be corrected after an order is done. Drafts never reach the shop.
         const orders = await loadOrders({});
         const groups = [
             { label: 'В работе', rows: [] },
             { label: 'Завершённые и закрытые', rows: [] },
-            { label: 'Остальные', rows: [] },
         ];
         (orders || []).forEach(o => {
             if (TT_PRODUCTION_STATUSES.includes(o.status)) groups[0].rows.push(o);
             else if (o.status === 'completed' || o.status === 'cancelled') groups[1].rows.push(o);
-            else groups[2].rows.push(o);
         });
 
         groups.forEach(group => {
