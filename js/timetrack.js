@@ -238,16 +238,34 @@ const TimeTrack = {
         const select = document.getElementById('tt-project-select');
         if (!select) return;
 
+        select.querySelectorAll('optgroup').forEach(g => g.remove());
         while (select.options.length > 2) select.remove(2);
 
+        // Active production first, then finished/closed and everything else,
+        // so hours can be corrected on orders that are already done.
         const orders = await loadOrders({});
-        const activeProduction = (orders || []).filter(o => TT_PRODUCTION_STATUSES.includes(o.status));
+        const groups = [
+            { label: 'В работе', rows: [] },
+            { label: 'Завершённые и закрытые', rows: [] },
+            { label: 'Остальные', rows: [] },
+        ];
+        (orders || []).forEach(o => {
+            if (TT_PRODUCTION_STATUSES.includes(o.status)) groups[0].rows.push(o);
+            else if (o.status === 'completed' || o.status === 'cancelled') groups[1].rows.push(o);
+            else groups[2].rows.push(o);
+        });
 
-        activeProduction.forEach(o => {
-            const opt = document.createElement('option');
-            opt.value = o.id;
-            opt.textContent = o.order_name + (o.client_name ? ` (${o.client_name})` : '');
-            select.appendChild(opt);
+        groups.forEach(group => {
+            if (!group.rows.length) return;
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = group.label;
+            group.rows.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.id;
+                opt.textContent = o.order_name + (o.client_name ? ` (${o.client_name})` : '');
+                optgroup.appendChild(opt);
+            });
+            select.appendChild(optgroup);
         });
     },
 
