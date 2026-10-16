@@ -22,10 +22,21 @@ function createElement(id = '') {
         scrollIntoView() {},
         appendChild(child) {
             this.children.push(child);
-            if (child && Object.prototype.hasOwnProperty.call(child, 'value')) {
+            if (child && child.tagName === 'OPTGROUP') {
+                this.options.push(...child.options);
+            } else if (child && Object.prototype.hasOwnProperty.call(child, 'value')) {
                 this.options.push(child);
             }
             return child;
+        },
+        querySelectorAll(selector) {
+            const tag = String(selector || '').toUpperCase();
+            return this.children.filter(child => child && child.tagName === tag).map(child => ({
+                remove: () => {
+                    this.children = this.children.filter(item => item !== child);
+                    this.options = this.options.filter(option => !child.options.includes(option));
+                },
+            }));
         },
         remove(index) {
             this.options.splice(index, 1);
@@ -532,6 +543,8 @@ async function smokeProjectSelectIncludesSamplesAndProduction(context) {
         { id: 101, order_name: 'ЭндоСтарс', client_name: 'Алина', status: 'production_printing' },
         { id: 102, order_name: 'Образец A', client_name: 'Клиент', status: 'sample' },
         { id: 103, order_name: 'Черновик B', client_name: 'Клиент', status: 'draft' },
+        { id: 104, order_name: 'Картхолдеры', client_name: 'PG', status: 'completed' },
+        { id: 105, order_name: 'Отменённый C', client_name: 'Клиент', status: 'cancelled' },
     ];
 
     await vm.runInContext(`TimeTrack.populateProjectSelect()`, context);
@@ -546,6 +559,13 @@ async function smokeProjectSelectIncludesSamplesAndProduction(context) {
     assert.equal(options.some(option => option.value === '101' && /ЭндоСтарс/.test(option.textContent)), true);
     assert.equal(options.some(option => option.value === '102' && /Образец A/.test(option.textContent)), true);
     assert.equal(options.some(option => option.value === '103'), false);
+    assert.equal(options.some(option => option.value === '104' && /Картхолдеры/.test(option.textContent)), true);
+    assert.equal(options.some(option => option.value === '105'), true);
+
+    // Re-opening the form must not duplicate orders.
+    await vm.runInContext(`TimeTrack.populateProjectSelect()`, context);
+    const count = vm.runInContext(`document.getElementById('tt-project-select').options.filter(o => String(o.value) === '104').length`, context);
+    assert.equal(count, 1);
 }
 
 async function main() {
