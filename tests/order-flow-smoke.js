@@ -5063,6 +5063,42 @@ async function smokePendantWarehouseDemandSync(context) {
     ]);
 }
 
+async function smokeNfcBlankKeepsWarehouseWriteoffLink(context) {
+    // Регресс: бланк «NFC квадрат» после пересчёта имеет is_nfc=false (метка
+    // в цене бланка), из-за этого ~1400 меток не списались со склада.
+    const state = clone(await vm.runInContext(`(() => {
+        const nfcStock = { id: 197, name: 'NFC', sku: 'NFC', category: 'other', qty: 500, unit: 'шт' };
+        App.templates = [
+            { id: 41, name: 'NFC квадрат', category: 'nfc', pph_actual: 20, weight_grams: 20 },
+            { id: 50, name: 'Смайл', category: 'blank', pph_actual: 20, weight_grams: 20 },
+        ];
+        Calculator.resetForm();
+        Calculator._whPickerData = { other: { items: [nfcStock] } };
+        const nfcBlank = Calculator.getEmptyItem(1);
+        Object.assign(nfcBlank, { product_name: 'NFC квадрат', quantity: 150, template_id: 41, is_blank_mold: true, pieces_per_hour: 20, weight_grams: 20 });
+        const plainBlank = Calculator.getEmptyItem(2);
+        Object.assign(plainBlank, { product_name: 'Смайл', quantity: 80, template_id: 50, is_blank_mold: true, pieces_per_hour: 20, weight_grams: 20 });
+        Calculator.items = [nfcBlank, plainBlank];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        Calculator.items.forEach(item => { item.result = calculateItemCost(item, App.params); });
+        const saved = Calculator._collectItemsForSave().filter(item => item.item_type === 'product');
+        Warehouse.allItems = [nfcStock];
+        return {
+            saved: saved.map(item => ({ name: item.product_name, is_nfc: item.is_nfc, nfc_warehouse_item_id: item.nfc_warehouse_item_id })),
+            demand: Warehouse._collectWarehouseDemandFromOrderItems(saved).map(row => [row.warehouse_item_id, row.qty]),
+        };
+    })()`, context));
+
+    assert.deepEqual(state.saved, [
+        { name: 'NFC квадрат', is_nfc: false, nfc_warehouse_item_id: 197 },
+        { name: 'Смайл', is_nfc: false, nfc_warehouse_item_id: null },
+    ], 'NFC blank must keep the stock link without turning on per-item NFC pricing');
+    assert.deepEqual(state.demand, [[197, 150]], 'NFC blank must reserve and write off NFC tags; plain blanks must not');
+}
+
 async function smokeProductNfcWarehouseDemandSync(context) {
     context.__smokeNfcWarehouseItems = [{
         id: 197,
@@ -9196,6 +9232,7 @@ async function main() {
     await smokeProductionPlanCompletedGuard(context);
     await smokePendantWarehouseDemandSync(context);
     await smokeProductNfcWarehouseDemandSync(context);
+    await smokeNfcBlankKeepsWarehouseWriteoffLink(context);
     await smokeTemplateBuiltInNfcUsesWarehouseDemand(context);
     await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
     await smokeProjectHardwareShortageDetailsShowBlockingOrders(context);

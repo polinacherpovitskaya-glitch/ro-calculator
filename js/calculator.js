@@ -840,9 +840,12 @@ function isNfcLikeEntry(...values) {
 function getProductWarehouseDemandRows(item, warehouseItems) {
     const itemType = String(item?.item_type || 'product').toLowerCase();
     const qty = parseFloat(item?.quantity) || 0;
-    if (itemType !== 'product' || !item?.is_nfc || !(qty > 0)) return [];
-
     const explicitId = Number(item?.nfc_warehouse_item_id || 0);
+    // NFC-бланк держит is_nfc=false (метка уже в цене бланка), но метку со
+    // склада всё равно тратит — для него связь со складом несёт сам id.
+    const isEmbeddedBlankNfc = !!item?.is_blank_mold && explicitId > 0;
+    if (itemType !== 'product' || !(item?.is_nfc || isEmbeddedBlankNfc) || !(qty > 0)) return [];
+
     const resolvedItem = explicitId
         ? (
             findWarehouseItemById(warehouseItems, explicitId)
