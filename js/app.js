@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v479';
+const APP_VERSION = 'v480';
 
 const App = {
     currentPage: 'orders',
@@ -3922,6 +3922,12 @@ const Calculator = {
             && isNfcLikeEntry(tpl.hw_name, tpl.hw_warehouse_sku);
     },
 
+    _isEmbeddedNfcBlank(item) {
+        if (!item || !item.is_blank_mold || !item.template_id) return false;
+        const tpl = (App.templates || []).find(t => t.id == item.template_id);
+        return this._isNfcTemplate(tpl);
+    },
+
     _applyNfcTemplateToItem(item, tpl, fallback = {}) {
         if (!item || !this._isNfcTemplate(tpl)) return;
         item.is_nfc = true;
@@ -3930,6 +3936,7 @@ const Calculator = {
             item.nfc_warehouse_item_id
             || fallback.warehouse_item_id
             || tpl?.hw_warehouse_item_id
+            || (typeof findNfcWarehouseItem === 'function' ? findNfcWarehouseItem(this._getWhPickerItemsFlat())?.id : 0)
             || 0
         ) || null;
         item.nfc_warehouse_item_id = warehouseItemId;
@@ -5921,8 +5928,11 @@ const Calculator = {
         this.items.forEach(item => {
             if (!this._isMeaningfulProductItem(item)) return;
             const r = item.result || getEmptyCostResult();
-            const nfcWarehouseItemId = item.is_nfc && typeof getProductWarehouseDemandRows === 'function'
-                ? Number((getProductWarehouseDemandRows(item, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
+            // NFC-бланк: is_nfc сброшен пересчётом (метка в цене бланка), но
+            // метку со склада он тратит — сохраняем ссылку, иначе нет списания.
+            const tracksNfcStock = item.is_nfc || this._isEmbeddedNfcBlank(item);
+            const nfcWarehouseItemId = tracksNfcStock && typeof getProductWarehouseDemandRows === 'function'
+                ? Number((getProductWarehouseDemandRows({ ...item, is_nfc: true }, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
                 : null;
             items.push({
                 item_number: item.item_number,
