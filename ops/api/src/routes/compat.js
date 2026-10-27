@@ -260,6 +260,14 @@ export async function executeAtomicOrderSave(client, body) {
   sourceId(incomingOrder, ['id']);
   const incomingItems = normalizeOrderSaveItems(body?.items || [], orderId);
   const allowEmptyItemsDelete = body?.allowEmptyItemsDelete === true;
+  // Only rows the calculator actually held in its form may be removed by
+  // omission. A partially loaded form, a stale local copy or an old bundle
+  // without this list must never wipe rows it did not see.
+  const knownItemIds = new Set(
+    (Array.isArray(body?.knownItemIds) ? body.knownItemIds : [])
+      .filter((id) => id !== null && id !== undefined && id !== '')
+      .map((id) => String(id)),
+  );
 
   // Every legacy save used to lock/write these tables in separate requests.
   // Taking both locks in a stable order makes the order header and item set one
@@ -314,6 +322,10 @@ export async function executeAtomicOrderSave(client, body) {
     for (const staleItem of existingItemsForOrder) {
       const staleId = sourceId(staleItem, ['id']);
       if (incomingIds.has(staleId)) continue;
+      if (!knownItemIds.has(staleId)) {
+        savedItems.push(staleItem);
+        continue;
+      }
       await client.query(
         `DELETE FROM compat_rows WHERE table_name = 'order_items' AND source_id = $1`,
         [staleId],

@@ -247,6 +247,7 @@ test('atomic calculator save preserves status and replaces the complete item sna
       item_number: 1,
       product_name: 'After',
     }],
+    knownItemIds: [currentItemId, staleItemId],
     allowEmptyItemsDelete: false,
   }, saveKey);
   assert.equal(saved.status, 200);
