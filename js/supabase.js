@@ -6889,13 +6889,22 @@ function _isEmptyBlobPatch(patch) {
     return Object.keys(patch.set).length === 0 && Object.keys(patch.remove).length === 0 && Object.keys(patch.top).length === 0;
 }
 
+// The API cannot take this patch yet: it has no blob-patch route (404/405) or it
+// is the build from before this blob existed (400 INVALID_BLOB_TARGET). The SPA
+// and the API deploy from one merge a few minutes apart, so in that window a
+// save falls back to the legacy write instead of failing.
+function _isBlobPatchNotReadyError(error) {
+    return [404, 405].includes(Number(error.status || error.code))
+        || String(error.code) === 'INVALID_BLOB_TARGET';
+}
+
 // Sends the patch; returns the merged server value, or undefined when the
-// endpoint is not deployed yet (caller then falls back to the legacy write).
+// endpoint is not ready for it (caller then falls back to the legacy write).
 async function _sendBlobPatch(target, patch) {
     if (!supabaseClient || typeof supabaseClient.patchBlob !== 'function') return undefined;
     const { data, error } = await _withRemoteTimeout('write', `patch ${target}`, () => supabaseClient.patchBlob(target, patch));
     if (error) {
-        if ([404, 405].includes(Number(error.status || error.code))) return undefined;
+        if (_isBlobPatchNotReadyError(error)) return undefined;
         throw new Error(error.message || error.code || `patch ${target} failed`);
     }
     return data ? data.value : null;
@@ -7951,8 +7960,8 @@ async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue =
         const blobTarget = READY_GOODS_BLOB_TARGETS[storeKey];
         // Send only what changed since this tab last read or saved the list; the
         // server merges it into the current list, so rows another tab added or
-        // changed meanwhile survive. `merged` stays undefined only when the API
-        // has no blob-patch route yet (404/405).
+        // changed meanwhile survive. `merged` stays undefined only while the API
+        // cannot take the patch yet (no route, or it does not know this blob).
         let merged;
         if (blobTarget && Array.isArray(normalized)) {
             const patch = _diffRecordBlob(blobTarget, normalized);

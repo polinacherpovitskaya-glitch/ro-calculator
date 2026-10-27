@@ -317,11 +317,28 @@ async function smokeReadyGoodsConsumerCopiesDoNotLookChanged(blobMerge) {
     assert.equal(server.patches.length, sent, 'an unchanged list is not written');
 }
 
+// The API cannot take a patch *yet*: it has no blob-patch route (404/405), or it is the
+// build from before this blob existed and answers 400 INVALID_BLOB_TARGET. The SPA and the
+// API deploy from one merge a few minutes apart, so saves must not fail in that window.
+const PATCH_NOT_READY_ERRORS = [
+    { status: 404 },
+    { status: 405 },
+    { status: 400, code: 'INVALID_BLOB_TARGET', message: 'Неизвестный блоб: ready_goods_stock' },
+];
+// Real refusals keep failing loudly: another 400 code, and server errors.
+const PATCH_REFUSED_ERRORS = [
+    { status: 400 },
+    { status: 400, code: 'INVALID_ACTION' },
+    { status: 500 },
+];
+const errorLabel = patchError => `${patchError.status} ${patchError.code || ''}`.trim();
+
 async function smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge) {
-    for (const status of [404, 405]) {
+    for (const patchError of PATCH_NOT_READY_ERRORS) {
+        const status = errorLabel(patchError);
         const server = createServer(blobMerge);
         server.settings.set('ready_goods_stock_json', JSON.stringify([{ id: 1, qty: 10 }]));
-        server.patchError = { status };
+        server.patchError = patchError;
         const tab = createTab(server);
         await run(tab, `(async () => {
             globalThis.__rows = await loadReadyGoods();
@@ -339,12 +356,13 @@ async function smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge) {
         assert.deepEqual(server.settingsWrites, ['ready_goods_stock_json'], `${status}: and no second whole-list write`);
     }
     // Any other failure must never turn into a whole-list overwrite.
-    for (const status of [400, 500]) {
+    for (const patchError of PATCH_REFUSED_ERRORS) {
+        const status = errorLabel(patchError);
         const server = createServer(blobMerge);
         server.settings.set('ready_goods_stock_json', JSON.stringify([{ id: 1, qty: 10 }]));
         const tab = createTab(server);
         await run(tab, 'loadReadyGoods().then(rows => { globalThis.__rows = rows; })');
-        server.patchError = { status };
+        server.patchError = patchError;
         await assert.rejects(
             run(tab, `(async () => { globalThis.__rows.push({ id: 2, qty: 3 }); await saveReadyGoods(globalThis.__rows); })()`),
             /READY_GOODS_SHARED_UNAVAILABLE/,
@@ -362,6 +380,45 @@ async function smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge) {
         await run(tab, 'saveReadyGoods(globalThis.__rows)');
         assert.equal(server.patches.length, sent, `${status}: a saved list is not sent twice`);
     }
+}
+
+// The new SPA is live before the API that knows the ready goods targets (and an API
+// without the route at all): every store keeps saving, by the old whole-list write.
+async function smokeUnknownBlobTargetFallsBackToWholeWrite(blobMerge) {
+    const unknownTarget = { status: 400, code: 'INVALID_BLOB_TARGET', message: 'Неизвестный блоб' };
+    for (const store of READY_GOODS_STORES) {
+        const server = createServer(blobMerge);
+        server.settings.set(store.key, JSON.stringify([{ id: 1, qty: 10 }]));
+        server.patchError = unknownTarget;
+        const tab = createTab(server);
+        await run(tab, `(async () => {
+            const rows = await ${store.load}();
+            rows.push({ id: 2, qty: 3 });
+            await ${store.save}(rows);
+        })()`);
+        assert.deepEqual(serverList(server, store).map(row => row.id), [1, 2], `${store.name}: the data is saved by the old whole-list write`);
+        assert.deepEqual(server.settingsWrites, [store.key], `${store.name}: one whole-list write`);
+        // Once the API knows the target the very next save is a patch again.
+        server.patchError = null;
+        await run(tab, `(async () => {
+            const rows = await ${store.load}();
+            rows[0].qty = 9;
+            await ${store.save}(rows);
+        })()`);
+        assert.deepEqual(lastPatchFor(server, store).patch.upserts.map(row => row.id), [1], `${store.name}: back to patches`);
+        assert.deepEqual(serverList(server, store).map(row => `${row.id}:${row.qty}`), ['1:9', '2:3']);
+        assert.deepEqual(server.settingsWrites, [store.key], `${store.name}: and no second whole-list write`);
+    }
+    // The warehouse blobs go through the same helper and fall back the same way.
+    const server = createServer(blobMerge);
+    server.patchError = unknownTarget;
+    const tab = createTab(server);
+    await run(tab, `(async () => {
+        const reservations = await loadWarehouseReservations();
+        reservations.push({ id: 5, item_id: 1, order_id: 1, qty: 2, status: 'active', source: 'manual' });
+        await saveWarehouseReservations(reservations);
+    })()`);
+    assert.deepEqual(serverReservations(server).map(r => r.id), [5], 'reservations fall back to the whole write too');
 }
 
 async function smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge) {
@@ -397,6 +454,7 @@ async function main() {
     await smokeReadyGoodsDeleteRemovesOnlyKnownRows(blobMerge);
     await smokeReadyGoodsConsumerCopiesDoNotLookChanged(blobMerge);
     await smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge);
+    await smokeUnknownBlobTargetFallsBackToWholeWrite(blobMerge);
     await smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }
