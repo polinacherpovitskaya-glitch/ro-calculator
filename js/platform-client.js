@@ -347,6 +347,28 @@
             return new PlatformQuery(this, table);
         }
 
+        async patchBlob(target, patch = {}) {
+            try {
+                const result = await postMutationJson(
+                    `${this.apiUrl}/api/compat/blob-patch`,
+                    { target, patch },
+                    requestId(),
+                );
+                if (!result.response.ok) {
+                    return { data: null, error: apiError(result.payload, result.response.status) };
+                }
+                return {
+                    data: result.payload?.data ?? null,
+                    error: result.payload?.error ? apiError(result.payload.error, result.response.status) : null,
+                };
+            } catch (error) {
+                return {
+                    data: null,
+                    error: apiError({ code: 'NETWORK_ERROR', message: error?.message || error }, 0),
+                };
+            }
+        }
+
         async saveOrderSnapshot(payload = {}) {
             try {
                 const result = await postMutationJson(

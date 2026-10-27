@@ -693,6 +693,9 @@ const GLOBAL_SETTINGS_EXCLUDED_KEYS = Object.freeze([
     'ready_goods_stock_json',
     'ready_goods_history_json',
     'ready_goods_sales_records_json',
+    // Saved only through saveProjectHardwareState() as a per-key patch. Loading
+    // it into App.settings let the Settings page write a stale copy back whole.
+    'project_hardware_state_json',
     ...Object.values(WORK_SETTINGS_KEYS),
 ]);
 
@@ -1607,8 +1610,11 @@ async function saveAllSettings(settingsObj) {
     setLocal(LOCAL_KEYS.settings, settingsObj);
 
     if (isSupabaseReady()) {
+        // Dedicated payloads have their own savers; a settings form must never
+        // overwrite them with whatever copy happens to sit in App.settings.
+        const excludedKeys = new Set(GLOBAL_SETTINGS_EXCLUDED_KEYS);
         // Convert ALL values to strings for Supabase TEXT column
-        const rows = Object.entries(settingsObj).map(([key, value]) => ({
+        const rows = Object.entries(settingsObj).filter(([key]) => !excludedKeys.has(key)).map(([key, value]) => ({
             key, value: String(value ?? ''), updated_at: new Date().toISOString()
         }));
         const { error } = await supabaseClient
@@ -2844,7 +2850,10 @@ async function loadOrders(filters = {}) {
             if (error) {
                 console.error('loadOrders error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                if (localFallback.length > 0) return localFallback;
+                if (localFallback.length > 0) {
+                    _setDataLoadMeta('orders', { source: 'local', message: 'remote error' });
+                    return localFallback;
+                }
                 const bootstrapOrders = await refreshOrdersWarmCache().catch(() => null);
                 if (Array.isArray(bootstrapOrders) && bootstrapOrders.length > 0) {
                     return applyOrderFilters(bootstrapOrders);
@@ -3070,6 +3079,9 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
     const summaryOnly = options && options.summary === true;
+    // Callers that rewrite shared state from these rows (warehouse reconcile)
+    // need the live answer or nothing — a stale fallback misses new orders.
+    const requireRemote = options && options.requireRemote === true;
 
     const localFallback = (rows = null) => (Array.isArray(rows) ? rows : (getLocal(LOCAL_KEYS.orderItems) || []))
         .filter(item => ids.includes(Number(item.order_id)))
@@ -3109,6 +3121,7 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
             if (error) {
                 console.error('loadOrderItemsByOrderIds error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                if (requireRemote) return null;
                 const bootstrapFallback = await loadBootstrapFallback();
                 return bootstrapFallback || localFallback();
             }
@@ -3119,6 +3132,7 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            if (requireRemote) return null;
             const bootstrapFallback = await loadBootstrapFallback();
             return bootstrapFallback || localFallback();
         }
@@ -6098,6 +6112,10 @@ async function saveProductionPlanState(state) {
 // =============================================
 
 async function loadProjectHardwareState() {
+    return _trackMapBlob('project_hardware_state', await _loadProjectHardwareStateUntracked());
+}
+
+async function _loadProjectHardwareStateUntracked() {
     const normalizeState = (raw) => {
         const parsed = raw && typeof raw === 'object' ? { ...raw } : { checks: {}, actual_qtys: {} };
         if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
@@ -6134,6 +6152,21 @@ async function saveProjectHardwareState(state) {
     if (!payload.checks || typeof payload.checks !== 'object') payload.checks = {};
     if (!payload.actual_qtys || typeof payload.actual_qtys !== 'object') payload.actual_qtys = {};
     setLocal(LOCAL_KEYS.projectHardwareState, payload);
+    if (isSupabaseReady()) {
+        try {
+            const patch = _diffMapBlob('project_hardware_state', payload);
+            if (_isEmptyBlobPatch(patch)) return;
+            const merged = await _sendBlobPatch('project_hardware_state', patch);
+            if (merged !== undefined) {
+                _trackMapBlob('project_hardware_state', payload);
+                if (_isPlainBlobMap(merged)) setLocal(LOCAL_KEYS.projectHardwareState, merged);
+                return;
+            }
+        } catch (e) {
+            console.error('saveProjectHardwareState patch error:', e);
+            return;
+        }
+    }
     await _saveJsonSetting('project_hardware_state_json', payload);
 }
 
@@ -6721,7 +6754,156 @@ async function deleteWarehouseItem(itemId) {
     _invalidateBootstrapCache(['warehouseItems']);
 }
 
+// =============================================
+// SHARED WAREHOUSE BLOBS — save the difference, not the whole blob
+// =============================================
+// Reservations, history and the project-hardware state are single rows that
+// every tab used to overwrite whole from its own, possibly stale, copy. Each
+// load now remembers what it returned; a save sends only records/keys that
+// changed against that load and removes only what this tab saw and dropped.
+
+const _blobRecordInfo = new WeakMap();
+const _blobArrayInfo = new WeakMap();
+const _blobLatestSnapshot = {};
+
+function _blobRecordId(record) {
+    const id = record && record.id;
+    return id === null || id === undefined || id === '' ? null : String(id);
+}
+
+function _trackRecordBlob(name, records) {
+    if (!Array.isArray(records)) return records;
+    const snapshot = { ids: new Set(), jsonById: new Map() };
+    records.forEach(record => {
+        if (!record || typeof record !== 'object') return;
+        const json = JSON.stringify(record);
+        const id = _blobRecordId(record);
+        if (id !== null) {
+            snapshot.ids.add(id);
+            snapshot.jsonById.set(id, json);
+        }
+        _blobRecordInfo.set(record, { snapshot, json });
+    });
+    _blobArrayInfo.set(records, snapshot);
+    _blobLatestSnapshot[name] = snapshot;
+    return records;
+}
+
+function _diffRecordBlob(name, records) {
+    const origins = new Set();
+    const arraySnapshot = _blobArrayInfo.get(records);
+    if (arraySnapshot) origins.add(arraySnapshot);
+    records.forEach(record => {
+        const info = record && typeof record === 'object' ? _blobRecordInfo.get(record) : null;
+        if (info) origins.add(info.snapshot);
+    });
+    if (origins.size === 0 && _blobLatestSnapshot[name]) origins.add(_blobLatestSnapshot[name]);
+
+    const presentIds = new Set();
+    const upserts = [];
+    const prependIds = [];
+    let seenKnown = false;
+    records.forEach(record => {
+        if (!record || typeof record !== 'object') return;
+        const id = _blobRecordId(record);
+        if (id !== null) presentIds.add(id);
+        const json = JSON.stringify(record);
+        const info = _blobRecordInfo.get(record);
+        let baseJson = info ? info.json : undefined;
+        let known = !!info;
+        if (!info && id !== null) {
+            for (const snapshot of origins) {
+                if (snapshot.jsonById.has(id)) {
+                    baseJson = snapshot.jsonById.get(id);
+                    known = true;
+                    break;
+                }
+            }
+        }
+        if (known) seenKnown = true;
+        if (baseJson === json) return;
+        upserts.push(record);
+        // New records written before any loaded one were added to the top.
+        if (!known && !seenKnown && id !== null) prependIds.push(id);
+    });
+    const removeIds = new Set();
+    origins.forEach(snapshot => snapshot.ids.forEach(id => {
+        if (!presentIds.has(id)) removeIds.add(id);
+    }));
+    return { upserts, removeIds: [...removeIds], prependIds };
+}
+
+const _blobMapInfo = new WeakMap();
+const _blobLatestMapSnapshot = {};
+
+function _isPlainBlobMap(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function _trackMapBlob(name, state) {
+    if (!_isPlainBlobMap(state)) return state;
+    const snapshot = { maps: {}, top: {} };
+    Object.entries(state).forEach(([key, value]) => {
+        if (_isPlainBlobMap(value)) {
+            snapshot.maps[key] = {};
+            Object.entries(value).forEach(([entryKey, entryValue]) => {
+                snapshot.maps[key][entryKey] = JSON.stringify(entryValue);
+            });
+        } else {
+            snapshot.top[key] = JSON.stringify(value);
+        }
+    });
+    _blobMapInfo.set(state, snapshot);
+    _blobLatestMapSnapshot[name] = snapshot;
+    return state;
+}
+
+function _diffMapBlob(name, state) {
+    const base = _blobMapInfo.get(state) || _blobLatestMapSnapshot[name] || { maps: {}, top: {} };
+    const set = {};
+    const remove = {};
+    const top = {};
+    Object.entries(state || {}).forEach(([key, value]) => {
+        if (_isPlainBlobMap(value)) {
+            const baseMap = base.maps[key] || {};
+            Object.entries(value).forEach(([entryKey, entryValue]) => {
+                if (baseMap[entryKey] === JSON.stringify(entryValue)) return;
+                (set[key] = set[key] || {})[entryKey] = entryValue;
+            });
+            Object.keys(baseMap).forEach(entryKey => {
+                if (Object.prototype.hasOwnProperty.call(value, entryKey)) return;
+                (remove[key] = remove[key] || []).push(entryKey);
+            });
+        } else if (base.top[key] !== JSON.stringify(value)) {
+            top[key] = value;
+        }
+    });
+    return { set, remove, top };
+}
+
+function _isEmptyBlobPatch(patch) {
+    if (!patch) return true;
+    if (Array.isArray(patch.upserts)) return patch.upserts.length === 0 && patch.removeIds.length === 0;
+    return Object.keys(patch.set).length === 0 && Object.keys(patch.remove).length === 0 && Object.keys(patch.top).length === 0;
+}
+
+// Sends the patch; returns the merged server value, or undefined when the
+// endpoint is not deployed yet (caller then falls back to the legacy write).
+async function _sendBlobPatch(target, patch) {
+    if (!supabaseClient || typeof supabaseClient.patchBlob !== 'function') return undefined;
+    const { data, error } = await _withRemoteTimeout('write', `patch ${target}`, () => supabaseClient.patchBlob(target, patch));
+    if (error) {
+        if ([404, 405].includes(Number(error.status || error.code))) return undefined;
+        throw new Error(error.message || error.code || `patch ${target} failed`);
+    }
+    return data ? data.value : null;
+}
+
 async function loadWarehouseReservations() {
+    return _trackRecordBlob('warehouse_reservations', await _loadWarehouseReservationsUntracked());
+}
+
+async function _loadWarehouseReservationsUntracked() {
     if (_isStaticYandexMirrorRuntime()) {
         const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations'], { timeoutMs: 15000 });
         if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
@@ -6772,6 +6954,21 @@ async function loadWarehouseReservations() {
 async function saveWarehouseReservations(reservations) {
     setLocal(LOCAL_KEYS.warehouseReservations, reservations);
     _invalidateBootstrapCache(['warehouseReservations']);
+    if (isSupabaseReady() && Array.isArray(reservations)) {
+        try {
+            const patch = _diffRecordBlob('warehouse_reservations', reservations);
+            if (_isEmptyBlobPatch(patch)) return;
+            const merged = await _sendBlobPatch('warehouse_reservations', patch);
+            if (merged !== undefined) {
+                _trackRecordBlob('warehouse_reservations', reservations);
+                if (Array.isArray(merged)) setLocal(LOCAL_KEYS.warehouseReservations, merged);
+                return;
+            }
+        } catch (e) {
+            console.error('saveWarehouseReservations patch error:', e);
+            return;
+        }
+    }
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
@@ -6789,6 +6986,10 @@ async function saveWarehouseReservations(reservations) {
 }
 
 async function loadWarehouseHistory() {
+    return _trackRecordBlob('warehouse_history', await _loadWarehouseHistoryUntracked());
+}
+
+async function _loadWarehouseHistoryUntracked() {
     // Prefer live Supabase read so recent stock adjustments appear immediately;
     // the bootstrap mirror snapshot is up to ~30 min stale on the Yandex CDN.
     if (isSupabaseReady()) {
@@ -6829,6 +7030,27 @@ async function loadWarehouseHistory() {
 }
 
 async function saveWarehouseHistory(history) {
+    if (isSupabaseReady() && Array.isArray(history)) {
+        try {
+            const patch = _diffRecordBlob('warehouse_history', history);
+            if (!_isEmptyBlobPatch(patch)) {
+                const merged = await _sendBlobPatch('warehouse_history', patch);
+                if (merged !== undefined) {
+                    _trackRecordBlob('warehouse_history', history);
+                    setLocal(LOCAL_KEYS.warehouseHistory, Array.isArray(merged) ? merged : history);
+                    _invalidateBootstrapCache(['warehouseHistory']);
+                    return;
+                }
+            } else {
+                setLocal(LOCAL_KEYS.warehouseHistory, history);
+                return;
+            }
+        } catch (e) {
+            console.error('saveWarehouseHistory patch error:', e);
+            setLocal(LOCAL_KEYS.warehouseHistory, history);
+            return;
+        }
+    }
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
@@ -7675,12 +7897,18 @@ function getReadyGoodsSourceStatus() {
 async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
     const safeFallback = _cloneReadyGoodsPayload(fallbackValue);
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
-        const remote = await _loadJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], null);
-        if (remote !== null) {
-            const normalized = _normalizeReadyGoodsPayload(remote, safeFallback);
+        const remote = await _loadJsonSettingState(READY_GOODS_SETTINGS_KEYS[storeKey]);
+        if (remote.status === 'ok' && remote.value !== null) {
+            const normalized = _normalizeReadyGoodsPayload(remote.value, safeFallback);
             setLocal(localKey, normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
             return normalized;
+        }
+        if (remote.status === 'error') {
+            // A slow or failed read is not "no data": seeding [] here used to
+            // wipe ready goods stock, history and sales for everyone.
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
+            return _cloneReadyGoodsPayload(safeFallback);
         }
 
         const seedPayload = _cloneReadyGoodsPayload(safeFallback);
@@ -7701,6 +7929,11 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
     const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
+    // Every save rewrites the whole list; it is only safe on top of a list
+    // that was really read from the shared store.
+    if (_readyGoodsSourceStatus[storeKey] && _readyGoodsSourceStatus[storeKey].source !== READY_GOODS_SOURCE_SHARED) {
+        throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+    }
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
         await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
         if (!_hasSupabaseAccessProblem()) {
@@ -7932,6 +8165,32 @@ async function _withRemoteTimeout(kind, label, executor) {
     } catch (error) {
         _markSharedDatabaseProblem(error);
         throw error;
+    }
+}
+
+// Like _loadJsonSetting, but tells a missing row ('missing') apart from a
+// failed or timed-out read ('error'). Only a truly missing row may be seeded.
+async function _loadJsonSettingState(settingKey) {
+    if (!isSupabaseReady() || !settingKey) return { status: 'error', value: null };
+    try {
+        const { data, error } = await _withRemoteTimeout('load', `load setting ${settingKey}`, () => supabaseClient
+            .from('settings')
+            .select('value')
+            .eq('key', settingKey)
+            .maybeSingle());
+        if (error) {
+            console.error(`load setting ${settingKey} error:`, error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return { status: 'error', value: null };
+        }
+        if (!data || data.value === null || data.value === undefined || data.value === '') {
+            return { status: 'missing', value: null };
+        }
+        return { status: 'ok', value: JSON.parse(data.value) };
+    } catch (error) {
+        console.error(`load setting ${settingKey} exception:`, error);
+        if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+        return { status: 'error', value: null };
     }
 }
 

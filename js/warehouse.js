@@ -5193,7 +5193,22 @@ const Warehouse = {
             return { reservationsChanged: false, stateChanged: false, shortage: false };
         }
 
-        const detailByOrderId = await this._loadProjectHardwareOrderDetails(trackedOrders) || new Map();
+        // Reconcile rewrites checkboxes and auto reservations of every order it
+        // sees, and treats orders it does not see as gone. Only run it on a
+        // complete, live view; otherwise skip and try again on the next open.
+        const ordersMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
+        const remoteConfigured = typeof isSupabaseReady === 'function' && isSupabaseReady();
+        if (remoteConfigured && ordersMeta && ordersMeta.source !== 'supabase') {
+            console.warn('[Warehouse] reconcile skipped: orders were not loaded from the server', ordersMeta.source);
+            this.allReservations = reservations || [];
+            return { reservationsChanged: false, stateChanged: false, shortage: false, skipped: true };
+        }
+        const detailByOrderId = await this._loadProjectHardwareOrderDetails(trackedOrders, { requireComplete: remoteConfigured }) || new Map();
+        if (remoteConfigured && detailByOrderId.incomplete) {
+            console.warn('[Warehouse] reconcile skipped: order items were not fully loaded from the server');
+            this.allReservations = reservations || [];
+            return { reservationsChanged: false, stateChanged: false, shortage: false, skipped: true };
+        }
 
         const demandRows = [];
         trackedOrders.forEach(order => {
@@ -5914,7 +5929,8 @@ const Warehouse = {
         `;
     },
 
-    async _loadProjectHardwareOrderDetails(orders = []) {
+    async _loadProjectHardwareOrderDetails(orders = [], options = {}) {
+        const requireComplete = options && options.requireComplete === true;
         const list = (orders || [])
             .filter(order => order && Number.isFinite(Number(order.id)) && Number(order.id) > 0)
             .filter((order, index, source) => source.findIndex(candidate => Number(candidate.id) === Number(order.id)) === index);
@@ -5940,11 +5956,14 @@ const Warehouse = {
                     const orderIds = batch.map(order => Number(order.id));
                     let rows = null;
                     try {
-                        rows = await loadOrderItemsByOrderIds(orderIds, { summary: true });
+                        rows = await loadOrderItemsByOrderIds(orderIds, { summary: true, requireRemote: requireComplete });
                     } catch (error) {
                         console.warn('Warehouse._loadProjectHardwareOrderDetails item batch failed:', orderIds, error);
                     }
-                    if (!Array.isArray(rows)) continue;
+                    if (!Array.isArray(rows)) {
+                        details.incomplete = true;
+                        continue;
+                    }
 
                     const itemsByOrderId = new Map();
                     rows.forEach(row => {
