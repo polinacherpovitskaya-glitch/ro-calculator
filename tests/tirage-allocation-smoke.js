@@ -13,6 +13,7 @@ vm.runInContext(`${source}\nglobalThis.__tirage = {
     getTirageFreeQty,
     TIRAGE_PARTS,
     calculateOrderSummary,
+    calculateFinDirectorData,
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
 };`, context, { filename: 'js/calculator.js' });
@@ -23,6 +24,7 @@ const {
     getTirageFreeQty,
     TIRAGE_PARTS,
     calculateOrderSummary,
+    calculateFinDirectorData,
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
 } = context.__tirage;
@@ -30,6 +32,8 @@ const {
 // Объекты из vm-контекста имеют чужие прототипы: для deepEqual приводим к обычным.
 const plain = value => JSON.parse(JSON.stringify(value));
 const normalizeTirageAllocation = (...args) => plain(normalizeInContext(...args));
+// Округление до копеек — как round2 в js/calculator.js.
+const round2Test = n => Math.round(n * 100) / 100;
 
 // ---------------------------------------------------------------------------
 // normalizeTirageAllocation
@@ -243,6 +247,97 @@ assert.deepEqual([twoLines.stockQty, twoLines.freeQty, twoLines.freeCost, twoLin
 
 // строка без расчёта (result) по-прежнему пропускается
 assert.equal(calculateOrderSummary([{ ...lemonItem, result: null }], [], [], [], P, [], {}).totalRevenue, 0);
+
+// «Отдаём бесплатно» — вместе с фурнитурой и упаковкой бесплатных штук строки:
+// доля бесплатных = (партнёр + подарки + образцы) / тираж строки
+const lemonHw = { qty: 100, sell_price: 10, parent_item_index: 0, result: { costPerUnit: 5 } };
+const lemonWithHw = calculateOrderSummary([lemonItem], [lemonHw], [], [], P, [], {});
+assert.equal(lemonWithHw.freeQty, 70, 'штуки — только изделия');
+assert.equal(lemonWithHw.freeCost, round2Test(67994.5 + 100 * 5 * 0.7));
+assert.equal(lemonWithHw.totalEarned, 53700, 'фурнитура не клиентской доли — чистая себестоимость');
+const lemonPkg = { qty: 100, sell_price: 0, packaging_parent_item_index: 0, result: { costPerUnit: 8 } };
+assert.equal(calculateOrderSummary([lemonItem], [lemonHw], [lemonPkg], [], P, [], {}).freeCost,
+    round2Test(67994.5 + 100 * 5 * 0.7 + 100 * 8 * 0.7));
+// 40 клиенту / 60 партнёру: бесплатная доля фурнитуры — 0.6
+const withHwFree = calculateOrderSummary([{ ...lemonItem, tirage_allocation: { client: 40, stock: 0, partner: 60 } }], [hw], [], [], P, [], {});
+assert.equal(withHwFree.freeCost, round2Test(60 * 971.35 + 100 * 5 * 0.6));
+// фурнитура на весь заказ и фурнитура неразмеченной строки в «бесплатно» не попадают
+assert.equal(calculateOrderSummary([lemonItem], [{ ...lemonHw, parent_item_index: null }], [], [], P, [], {}).freeCost, 67994.5);
+assert.equal(calculateOrderSummary([lemonItem, a], [{ ...lemonHw, parent_item_index: 1 }], [], [], P, [], {}).freeCost, 67994.5);
+// «на продажу» — не бесплатно: строка целиком на продажу бесплатной фурнитуры не даёт
+assert.equal(calculateOrderSummary([b], [{ ...lemonHw, parent_item_index: 0 }], [], [], P, [], {}).freeCost, 0);
+
+// ---------------------------------------------------------------------------
+// calculateFinDirectorData («Смета для финдиректора»): те же честные деньги, что и в смете
+// ---------------------------------------------------------------------------
+// Затраты строки финдиректор берёт из раскладки себестоимости штуки.
+const lemonFin = { ...lemonItem, result: { costTotal: 971.35, costFot: 300, costIndirect: 500, costPlastic: 100, costMoldAmortization: 71.35 } };
+const finSplit = calculateFinDirectorData([lemonFin], [], [], P, [], {});
+assert.equal(finSplit.revenue, calculateOrderSummary([lemonFin], [], [], [], P, [], {}).totalRevenue);
+assert.deepEqual([finSplit.grossRevenue, finSplit.revenue, finSplit.revenueNet, finSplit.revenueWithVat], [177000, 177000, 177000, 185850]);
+assert.equal(finSplit.taxes, round2Test(finSplit.revenue * 0.07));
+// налог, коммерческий процент и благотворительность зависят только от выручки:
+// у «Лимона» они такие же, как у заказа, где честно продали 30 штук по 5 900 ₽
+const finSold30 = calculateFinDirectorData([{ ...lemonFin, quantity: 30, tirage_allocation: null }], [], [], P, [], {});
+assert.deepEqual([finSplit.taxes, finSplit.commercial, finSplit.charity], [finSold30.taxes, finSold30.commercial, finSold30.charity]);
+// затраты — на весь тираж: как у тех же 100 штук без разметки
+const finPlain = calculateFinDirectorData([{ ...lemonFin, tirage_allocation: null }], [], [], P, [], {});
+const pickCosts = f => [f.salary, f.indirect, f.hardwarePurchase, f.nfcTotal, f.hardwareDelivery, f.packagingPurchase,
+    f.packagingDelivery, f.design, f.printing, f.plastic, f.molds, f.delivery];
+assert.deepEqual(pickCosts(finSplit), pickCosts(finPlain));
+assert.deepEqual(pickCosts(finSplit), [30000, 50000, 0, 0, 0, 0, 0, 0, 0, 10000, 7135, 0]);
+assert.equal(finPlain.revenue, 590000, 'без разметки финдиректор считает весь тираж, как раньше');
+assert.equal(finSplit.totalCosts, 97135 + finSplit.taxes + finSplit.commercial + finSplit.charity);
+// скидка у финдиректора — тоже только на «клиенту», как в смете
+const finDiscount = calculateFinDirectorData([a, b], [], [], P, [], { mode: 'percent', value: 10 });
+assert.deepEqual([finDiscount.grossRevenue, finDiscount.discountAmount, finDiscount.discountPercent, finDiscount.revenue],
+    [150000, 5000, 10, d.totalRevenue]);
+assert.equal(finDiscount.taxes, round2Test(145000 * 0.07));
+const finBigDiscount = calculateFinDirectorData([a, b], [], [], P, [], { mode: 'amount', value: 80000 });
+assert.deepEqual([finBigDiscount.discountAmount, finBigDiscount.revenue], [50000, big.totalRevenue]);
+// фурнитура и упаковка размеченной строки: выручка — с доли «клиенту», закупка — на весь тираж
+const finSplitLine = { ...lemonFin, tirage_allocation: { client: 40, stock: 0, partner: 60 } };
+const finHw = calculateFinDirectorData([finSplitLine],
+    [{ ...hw, price: 4, delivery_price: 1, result: { costPerUnit: 5, hoursHardware: 0, indirectPerUnit: 0 } }], [], P, [], {});
+assert.equal(finHw.revenue, withHw.totalRevenue);
+assert.deepEqual([finHw.hardwarePurchase, finHw.hardwareDelivery], [400, 100]);
+const finPkg = calculateFinDirectorData([finSplitLine],
+    [], [{ ...pkg, price: 4, delivery_price: 1, result: { costPerUnit: 5, hoursPackaging: 0, indirectPerUnit: 0 } }], P, [], {});
+assert.equal(finPkg.revenue, withPkg.totalRevenue);
+assert.deepEqual([finPkg.packagingPurchase, finPkg.packagingDelivery], [400, 100]);
+// печать: «клиенту» платит изделие + печать, «на продажу» — свою цену
+assert.equal(calculateFinDirectorData([printed], [], [], P, [], {}).revenue, withPrint.totalRevenue);
+
+// Заказ без разметки: цифры финдиректора сняты с расчёта до этой правки и не должны сдвинуться.
+const finParams = { ...P, fotPerHour: 100, indirectPerHour: 50 };
+const finLegacyItems = [
+    { quantity: 120, sell_price_item: 450, printings: [{ name: 'Логотип', qty: 120, price: 12, sell_price: 35 }],
+        result: { costTotal: 188.4, costFot: 20, costIndirect: 30, costPlastic: 12.5, costPrinting: 13.1, costMoldAmortization: 4.4, costDelivery: 0 } },
+    { quantity: 30, sell_price_item: 1290, result: { costTotal: 640.15, costFot: 80, costIndirect: 120, costPlastic: 40, costMoldAmortization: 10 } },
+];
+const finLegacyHardware = [
+    { qty: 120, price: 6, delivery_price: 1, sell_price: 18, parent_item_index: 0, result: { costPerUnit: 9.5, hoursHardware: 1.2, indirectPerUnit: 0.6 } },
+    { qty: 30, price: 3, delivery_price: 0.5, sell_price: 0, parent_item_index: null, result: { costPerUnit: 4, hoursHardware: 0.3, indirectPerUnit: 0.2 } },
+];
+const finLegacyPackaging = [{ qty: 150, price: 8, delivery_price: 1.2, sell_price: 25, parent_item_index: null,
+    result: { costPerUnit: 11.2, hoursPackaging: 2, indirectPerUnit: 0.4 } }];
+const finLegacyPendants = [{ quantity: 10, elements: [], cords: [], carabiners: [],
+    result: { totalRevenue: 4500, sellPerUnit: 450, costPerUnit: 190, assemblyHours: 1, packagingHours: 0.5, attachmentIndirectTotal: 25 } }];
+const finLegacyCosts = { salary: 5300, indirect: 7363, hardwarePurchase: 810, nfcTotal: 0, hardwareDelivery: 135, packagingPurchase: 1200,
+    packagingDelivery: 180, design: 0, printing: 1572, plastic: 2700, molds: 828, delivery: 0 };
+[
+    [{}, { ...finLegacyCosts, taxes: 7511.7, commercial: 7511.7, charity: 1073.1, grossRevenue: 107310, discountAmount: 0,
+        discountPercent: 0, revenueNet: 107310, revenueWithVat: 112675.5, revenue: 107310, totalCosts: 36184.5 }],
+    [{ mode: 'percent', value: 7.5 }, { ...finLegacyCosts, taxes: 6948.32, commercial: 6948.32, charity: 992.62, grossRevenue: 107310,
+        discountAmount: 8048.25, discountPercent: 7.5, revenueNet: 99261.75, revenueWithVat: 104224.84, revenue: 99261.75, totalCosts: 34977.26 }],
+    [{ mode: 'amount', value: 4000 }, { ...finLegacyCosts, taxes: 7231.7, commercial: 7231.7, charity: 1033.1, grossRevenue: 107310,
+        discountAmount: 4000, discountPercent: 3.73, revenueNet: 103310, revenueWithVat: 108475.5, revenue: 103310, totalCosts: 35584.5 }],
+].forEach(([discount, expected]) => {
+    assert.deepEqual(
+        plain(calculateFinDirectorData(finLegacyItems, finLegacyHardware, finLegacyPackaging, finParams, finLegacyPendants, discount)),
+        expected,
+        `финдиректор без разметки (${JSON.stringify(discount)}) не меняется`);
+});
 
 // некоммерческие назначения («Переделка», «Сток / образец») разметку не учитывают
 const rework = applyProductionPurposeToOrderSummary(s, 'rework', [lemonItem], [], [], []);
