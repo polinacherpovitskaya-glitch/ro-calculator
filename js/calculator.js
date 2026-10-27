@@ -1833,6 +1833,97 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
     };
 }
 
+// === Разметка тиража строки изделия ===
+// Тираж строки делится по назначению: «клиенту» (продаём заказчику по цене строки),
+// «на продажу» (после производства уходит на склад готовой продукции, своя цена),
+// «партнёру», «в подарок», «образцы» (бесплатно). Сумма частей всегда равна тиражу,
+// «клиенту» — это остаток. Хранится в item_data строки как tirage_allocation;
+// у строк без разметки весь тираж считается клиентским, как и раньше.
+const TIRAGE_PARTS = ['client', 'stock', 'partner', 'gift', 'sample'];
+// Если тираж уменьшили и разметка не помещается, части урезаются в таком порядке:
+// сначала «на продажу», потом «в подарок», «образцы» и в последнюю очередь «партнёру».
+const TIRAGE_REDUCE_ORDER = ['stock', 'gift', 'sample', 'partner'];
+
+// Количество штук: дробные — вниз до целого, отрицательные и мусор — 0.
+function toTirageCount(value) {
+    const count = Math.floor(calcNumber(value, 0));
+    return count > 0 ? count : 0;
+}
+
+/**
+ * Привести разметку к правильной: целые >= 0, сумма частей = тираж, «клиенту» = остаток.
+ * @param raw - сохранённая или набираемая разметка (null = всё клиенту)
+ * @param quantity - тираж строки
+ * @param defaultStockPrice - цена «на продажу», если своя не задана (цена строки)
+ * @returns {{ allocation: Object, reduced: Array<{part: string, from: number, to: number}> }}
+ *   reduced — какие части пришлось уменьшить, чтобы разметка поместилась в тираж
+ */
+function normalizeTirageAllocation(raw, quantity, defaultStockPrice) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const total = toTirageCount(quantity);
+    const counts = {
+        stock: toTirageCount(source.stock),
+        partner: toTirageCount(source.partner),
+        gift: toTirageCount(source.gift),
+        sample: toTirageCount(source.sample),
+    };
+
+    const reduced = [];
+    let excess = counts.stock + counts.partner + counts.gift + counts.sample - total;
+    TIRAGE_REDUCE_ORDER.forEach(part => {
+        if (excess <= 0 || counts[part] <= 0) return;
+        const cut = Math.min(counts[part], excess);
+        reduced.push({ part, from: counts[part], to: counts[part] - cut });
+        counts[part] -= cut;
+        excess -= cut;
+    });
+
+    const ownStockPrice = round2(calcNumber(source.stock_price, 0));
+    return {
+        allocation: {
+            client: total - counts.stock - counts.partner - counts.gift - counts.sample,
+            stock: counts.stock,
+            partner: counts.partner,
+            gift: counts.gift,
+            sample: counts.sample,
+            stock_price: ownStockPrice > 0 ? ownStockPrice : Math.max(0, round2(calcNumber(defaultStockPrice, 0))),
+            partner_note: String(source.partner_note ?? ''),
+            gift_note: String(source.gift_note ?? ''),
+        },
+        reduced,
+    };
+}
+
+// Есть ли у разметки что-то кроме «клиенту»
+function hasTirageSplit(allocation) {
+    if (!allocation || typeof allocation !== 'object') return false;
+    return TIRAGE_PARTS.some(part => part !== 'client' && toTirageCount(allocation[part]) > 0);
+}
+
+// Сколько штук отдаём бесплатно: партнёр + подарки + образцы («на продажу» сюда не входит)
+function getTirageFreeQty(allocation) {
+    if (!allocation || typeof allocation !== 'object') return 0;
+    return toTirageCount(allocation.partner) + toTirageCount(allocation.gift) + toTirageCount(allocation.sample);
+}
+
+// Разметка строки для расчёта денег: нормализованная, если у строки есть что-то кроме «клиенту»;
+// иначе null — и строка считается по-старому (весь тираж клиенту по цене строки).
+function getItemTirageSplit(item) {
+    if (!item || item.tirage_allocation === null || item.tirage_allocation === undefined) return null;
+    // Цена «на продажу» по умолчанию — то, что платит клиент за штуку: изделие + печать.
+    const unitSell = (item.sell_price_item || 0) + getPrintingSellPricePerUnit(item);
+    const { allocation } = normalizeTirageAllocation(item.tirage_allocation, item.quantity, unitSell);
+    return hasTirageSplit(allocation) ? allocation : null;
+}
+
+// Доля тиража родительской строки, идущая клиенту, — для её фурнитуры и упаковки.
+// 1, если разметки у родителя нет или позиция относится ко всему заказу (родителя нет).
+function getTirageClientShare(clientShareByItem, parentIndex) {
+    if (!clientShareByItem.size || parentIndex === null || parentIndex === undefined || parentIndex === '') return 1;
+    const share = clientShareByItem.get(Number(parentIndex));
+    return share === undefined ? 1 : share;
+}
+
 /**
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
@@ -1840,10 +1931,37 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
 function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}, pendantItems = [], orderAdjustments = {}) {
     let totalRevenue = 0;
     let totalEarned = 0;
+    // Разметка тиража: «на продажу» считаем отдельно — скидка заказа её не трогает.
+    let stockRevenue = 0;
+    let stockQty = 0;
+    let freeQty = 0;
+    let freeCost = 0;
+    // Индекс изделия -> доля его тиража, идущая клиенту (только для размеченных строк).
+    const clientShareByItem = new Map();
 
-    items.forEach(item => {
+    items.forEach((item, itemIndex) => {
         if (!item.result) return;
         const qty = item.quantity || 0;
+
+        // Строка с разметкой тиража: клиентские штуки — по цене строки, «на продажу» — по своей
+        // цене, бесплатные приносят только затраты. Затраты — на весь тираж.
+        const split = getItemTirageSplit(item);
+        if (split) {
+            const totalSellPerUnit = (item.sell_price_item || 0) + getPrintingSellPricePerUnit(item);
+            const costTotal = item.result.costTotal;
+            const lineFreeQty = getTirageFreeQty(split);
+            const lineStockRevenue = split.stock * split.stock_price;
+            totalRevenue += split.client * totalSellPerUnit + lineStockRevenue;
+            totalEarned += split.client * calculateActualMargin(totalSellPerUnit, costTotal, params).earned
+                + split.stock * calculateActualMargin(split.stock_price, costTotal, params).earned
+                - lineFreeQty * (costTotal || 0);
+            stockRevenue += lineStockRevenue;
+            stockQty += split.stock;
+            freeQty += lineFreeQty;
+            freeCost += lineFreeQty * (costTotal || 0);
+            clientShareByItem.set(itemIndex, split.client / (split.client + split.stock + lineFreeQty));
+            return;
+        }
 
         // Item revenue (without printing)
         totalRevenue += (item.sell_price_item || 0) * qty;
@@ -1856,9 +1974,25 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         totalEarned += marginItem.earned * qty;
     });
 
+    // Фурнитура/упаковка размеченной строки продаётся и приносит заработок только на долю
+    // тиража «клиенту»; остальная доля — чистая себестоимость.
+    const addTirageSplitLine = (line, clientShare) => {
+        const qty = line.qty || 0;
+        const costPerUnit = line.result.costPerUnit || 0;
+        totalRevenue += (line.sell_price || 0) * qty * clientShare;
+        totalEarned += calculateActualMargin(line.sell_price || 0, costPerUnit, params).earned * qty * clientShare
+            - costPerUnit * qty * (1 - clientShare);
+    };
+
     (hardwareItems || []).forEach(hw => {
         const qty = hw.qty || 0;
         if (!hw.result) return;
+        // В калькуляторе родитель называется parent_item_index, в строках заказа — hardware_parent_item_index.
+        const clientShare = getTirageClientShare(clientShareByItem, hw.parent_item_index ?? hw.hardware_parent_item_index);
+        if (clientShare < 1) {
+            addTirageSplitLine(hw, clientShare);
+            return;
+        }
         totalRevenue += (hw.sell_price || 0) * qty;
         const m = calculateActualMargin(hw.sell_price || 0, hw.result.costPerUnit, params);
         totalEarned += m.earned * qty;
@@ -1867,6 +2001,11 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
     (packagingItems || []).forEach(pkg => {
         const qty = pkg.qty || 0;
         if (!pkg.result) return;
+        const clientShare = getTirageClientShare(clientShareByItem, pkg.parent_item_index ?? pkg.packaging_parent_item_index);
+        if (clientShare < 1) {
+            addTirageSplitLine(pkg, clientShare);
+            return;
+        }
         totalRevenue += (pkg.sell_price || 0) * qty;
         const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit, params);
         totalEarned += m.earned * qty;
@@ -1890,8 +2029,10 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         }
     });
 
-    const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
-    const finalRevenue = discount.revenueAfterDiscount;
+    // Скидка заказа — скидка клиенту: считается от выручки «клиенту» и уменьшает только её.
+    // Ожидаемая выручка «на продажу» (stockRevenue) остаётся как есть; без разметки она 0.
+    const discount = calculateOrderDiscount(totalRevenue - stockRevenue, orderAdjustments, params);
+    const finalRevenue = discount.revenueAfterDiscount + stockRevenue;
     const finalEarned = round2(totalEarned - discount.earnedImpact);
     const vatRate = getVatRate(params);
     const vatOnRevenue = finalRevenue * vatRate;
@@ -1907,6 +2048,16 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         totalWithVat: round2(totalWithVat),
         totalEarned: round2(finalEarned),
         marginPercent,
+        // Разметка тиража (без неё: всё в clientRevenue, остальное 0).
+        // clientRevenue + stockRevenue = totalRevenue.
+        // Выручка «клиенту» (всё, кроме «на продажу») после скидки:
+        clientRevenue: discount.revenueAfterDiscount,
+        // Ожидаемая выручка с части «на продажу», если продадим её всю:
+        stockRevenue: round2(stockRevenue),
+        stockQty,
+        // Отдаём бесплатно (партнёр + подарки + образцы): штук и их себестоимость по строкам изделий:
+        freeQty,
+        freeCost: round2(freeCost),
     };
 }
 
@@ -1968,6 +2119,12 @@ function applyProductionPurposeToOrderSummary(summary, purpose, items, hardwareI
         totalWithVat: 0,
         totalEarned: round2(-loss),
         marginPercent: 0,
+        // Продажи нет, поэтому разметка тиража не учитывается: затраты — на всё.
+        clientRevenue: 0,
+        stockRevenue: 0,
+        stockQty: 0,
+        freeQty: 0,
+        freeCost: 0,
         nonCommercialLoss: loss,
     };
 }
@@ -2067,6 +2224,11 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
             item.sell_price_item = Number(item.sell_price_item || 0);
             item.sell_price_printing = Number(item.sell_price_printing || 0);
             item.printings = parseOrderCalcJson(item.printings, []);
+            // Разметка тиража приходит из item_data (hydrateOrderItemForLiveCalculation). В старых
+            // строках её нет — тогда поле не появляется; испорченная разметка = нет разметки.
+            if (item.tirage_allocation !== undefined && item.tirage_allocation !== null) {
+                item.tirage_allocation = parseOrderCalcJson(item.tirage_allocation, {});
+            }
 
             const tpl = item.template_id
                 ? runtimeTemplates.find(template => String(template.id) === String(item.template_id))
