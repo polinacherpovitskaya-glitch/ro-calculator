@@ -2769,7 +2769,8 @@ async function main() {
         const savedOrderId = await vm.runInContext(`
             saveOrder(
                 { id: ${orderId}, order_name: 'cleanup save', status: 'draft' },
-                [{ item_number: 1, item_type: 'product', product_name: 'Новая версия позиции', quantity: 100 }]
+                [{ item_number: 1, item_type: 'product', product_name: 'Новая версия позиции', quantity: 100 }],
+                { knownItemIds: [${currentItemId}, ${staleItemId}] }
             )
         `, context);
 

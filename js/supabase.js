@@ -2345,7 +2345,13 @@ async function _rewriteOrderItems(orderId, items) {
     return true;
 }
 
-async function saveOrder(order, items = []) {
+async function saveOrder(order, items = [], options = {}) {
+    // knownItemIds = ids of rows the caller really held (a fully loaded
+    // calculator form). Rows missing from `items` are deleted only when their
+    // id is in this list; without it nothing is deleted by omission.
+    const knownItemIds = Array.isArray(options && options.knownItemIds)
+        ? options.knownItemIds.filter(id => id !== null && id !== undefined && id !== '').map(id => String(id))
+        : [];
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
         let orderId = _normalizeOrderId(order.id);
@@ -2402,6 +2408,7 @@ async function saveOrder(order, items = []) {
                     supabaseClient.saveOrderSnapshot({
                         order: orderData,
                         items: itemRows,
+                        knownItemIds,
                         allowEmptyItemsDelete,
                     })
                 ));
@@ -2507,9 +2514,10 @@ async function saveOrder(order, items = []) {
                     throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
                 }
 
+                const knownItemIdSet = new Set(knownItemIds);
                 const staleItemIds = (Array.isArray(existingItems) ? existingItems : [])
                     .map(item => item?.id)
-                    .filter(id => id != null && !savedItemIds.has(String(id)));
+                    .filter(id => id != null && !savedItemIds.has(String(id)) && knownItemIdSet.has(String(id)));
                 for (const staleItemId of staleItemIds) {
                     const { error: deleteStaleItemError } = await _withRemoteTimeout('write', 'delete stale order item', () => supabaseClient
                         .from('order_items')
@@ -2920,9 +2928,17 @@ async function loadOrder(orderId) {
         if (repairDuplicates && order && dedupedItems.length !== orderItems.length) {
             repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
         }
-        return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
+        return order ? {
+            order,
+            items: dedupedItems,
+            repaired_duplicates: repairedDuplicates,
+            source: options.source || 'local',
+        } : null;
     };
-    const loadStaticBootstrapOrder = async () => {
+    // With a live remote, fallback copies are possibly stale: never "repair"
+    // them back to the server (that path deletes and re-inserts every row).
+    const remoteFallback = { repairDuplicates: false };
+    const loadStaticBootstrapOrder = async (options = {}) => {
         if (!_canUseSameOriginBootstrap()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orders', 'orderItems'], { timeoutMs: 15000 });
         let refreshed = false;
@@ -2938,7 +2954,7 @@ async function loadOrder(orderId) {
         if (!refreshed) return null;
         _ordersLastSyncAt = Date.now();
         _setDataLoadMeta('orders', { source: 'bootstrap' });
-        return await loadLocalOrder({ repairDuplicates: true });
+        return await loadLocalOrder({ repairDuplicates: options.repairDuplicates !== false, source: 'bootstrap' });
     };
     const localSnapshot = await loadLocalOrder({ repairDuplicates: false });
     if (isSupabaseReady()) {
@@ -2948,9 +2964,9 @@ async function loadOrder(orderId) {
             if (e1) {
                 console.error('loadOrder error:', e1);
                 if (_isSupabaseAccessError(e1)) _markSupabaseAccessProblem(e1);
-                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
                 if (bootstrapSnapshot) return bootstrapSnapshot;
-                return await loadLocalOrder({ repairDuplicates: true });
+                return await loadLocalOrder(remoteFallback);
             }
 
             // Restore full order data from legacy TEXT or native JSONB.
@@ -2967,9 +2983,9 @@ async function loadOrder(orderId) {
             if (e2) {
                 console.error('loadOrderItems error:', e2);
                 if (_isSupabaseAccessError(e2)) _markSupabaseAccessProblem(e2);
-                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
                 if (bootstrapSnapshot) return bootstrapSnapshot;
-                return await loadLocalOrder({ repairDuplicates: true });
+                return await loadLocalOrder(remoteFallback);
             }
 
             const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
@@ -2985,13 +3001,13 @@ async function loadOrder(orderId) {
 
             _saveOrderLocally(fullOrder, items);
             _clearLocalDatasetDirty(['orders', 'orderItems']);
-            return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
+            return { order: fullOrder, items, repaired_duplicates: repairedDuplicates, source: 'remote' };
         } catch (error) {
             console.error('loadOrder exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            const bootstrapSnapshot = await loadStaticBootstrapOrder();
+            const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
             if (bootstrapSnapshot) return bootstrapSnapshot;
-            return await loadLocalOrder({ repairDuplicates: true });
+            return await loadLocalOrder(remoteFallback);
         }
     }
     if (_isStaticYandexMirrorRuntime() && !_isLocalDatasetDirty('orders') && !_isLocalDatasetDirty('orderItems')) {
