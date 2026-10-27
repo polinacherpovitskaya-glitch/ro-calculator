@@ -1,7 +1,8 @@
-// Shared warehouse blobs (reservations, history, collected checkboxes) must
-// never be overwritten whole from a stale tab, and ready goods must not be
-// wiped by a slow read. Two vm "tabs" share one fake server that applies the
-// real ops/api merge (compat-blob-patch.js).
+// Shared warehouse blobs (reservations, history, collected checkboxes) and the
+// ready goods lists (stock, history, sales records) must never be overwritten
+// whole from a stale tab, and ready goods must not be wiped by a slow read.
+// Two vm "tabs" share one fake server that applies the real ops/api merge
+// (compat-blob-patch.js).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -26,17 +27,25 @@ function createServer(blobMerge) {
         },
         settings: new Map(),
         failReads: false,
+        // When set, patchBlob answers with this error instead of merging
+        // (e.g. { status: 404 } for an API that has no blob-patch route yet).
+        patchError: null,
         settingsWrites: [],
         patches: [],
     };
+    const settingsField = key => ({ read: () => server.settings.get(key), write: v => { server.settings.set(key, v); } });
     const BLOB_FIELDS = {
         warehouse_reservations: { read: () => server.rows.warehouse_reservations.reservations_data, write: v => { server.rows.warehouse_reservations.reservations_data = v; } },
         warehouse_history: { read: () => server.rows.warehouse_history.history_data, write: v => { server.rows.warehouse_history.history_data = v; } },
-        project_hardware_state: { read: () => server.settings.get('project_hardware_state_json'), write: v => { server.settings.set('project_hardware_state_json', v); } },
+        project_hardware_state: settingsField('project_hardware_state_json'),
+        ready_goods_stock: settingsField('ready_goods_stock_json'),
+        ready_goods_history: settingsField('ready_goods_history_json'),
+        ready_goods_sales_records: settingsField('ready_goods_sales_records_json'),
     };
     server.client = {
         async patchBlob(target, patch) {
             server.patches.push({ target, patch: JSON.parse(JSON.stringify(patch)) });
+            if (server.patchError) return { data: null, error: { code: String(server.patchError.status), message: 'patch refused', ...server.patchError } };
             const field = BLOB_FIELDS[target];
             const value = blobMerge.applyBlobPatchToValue(target, field.read(), JSON.parse(JSON.stringify(patch)), new Date().toISOString());
             field.write(JSON.stringify(value));
@@ -208,11 +217,172 @@ async function smokeReadyGoodsSurviveSlowRead(blobMerge) {
     assert.equal(Array.isArray(loaded), true);
     await assert.rejects(run(tab, 'saveReadyGoods([])'), /READY_GOODS_SHARED_UNAVAILABLE/);
     assert.equal(JSON.parse(server.settings.get('ready_goods_stock_json')).length, 1, 'save after a failed read must be refused');
+    assert.equal(server.patches.length, 0, 'a refused save sends no patch either');
     // A truly missing row is still seeded.
     server.failReads = false;
     server.settings.delete('ready_goods_history_json');
     await run(tab, 'loadReadyGoodsHistory()');
     assert.equal(server.settings.get('ready_goods_history_json'), '[]');
+}
+
+// Ready goods stock, its history and the sales records are three settings rows
+// holding record lists; they are written as patches like the warehouse blobs.
+const READY_GOODS_STORES = [
+    { name: 'stock', key: 'ready_goods_stock_json', target: 'ready_goods_stock', load: 'loadReadyGoods', save: 'saveReadyGoods' },
+    { name: 'history', key: 'ready_goods_history_json', target: 'ready_goods_history', load: 'loadReadyGoodsHistory', save: 'saveReadyGoodsHistory' },
+    { name: 'sales', key: 'ready_goods_sales_records_json', target: 'ready_goods_sales_records', load: 'loadSalesRecords', save: 'saveSalesRecords' },
+];
+const serverList = (server, store) => JSON.parse(server.settings.get(store.key));
+const lastPatchFor = (server, store) => server.patches.filter(entry => entry.target === store.target).pop();
+
+async function smokeReadyGoodsTwoTabsKeepEachOthersRows(blobMerge) {
+    for (const store of READY_GOODS_STORES) {
+        const server = createServer(blobMerge);
+        server.settings.set(store.key, JSON.stringify([{ id: 1, qty: 10 }]));
+        const tabA = createTab(server);
+        const tabB = createTab(server);
+        // A loads the list and keeps it open while B works.
+        await run(tabA, `${store.load}().then(rows => { globalThis.__rows = rows; })`);
+        await run(tabB, `(async () => {
+            const rows = await ${store.load}();
+            rows.push({ id: 2, qty: 3 });
+            await ${store.save}(rows);
+        })()`);
+        const patchB = lastPatchFor(server, store).patch;
+        assert.deepEqual(patchB.upserts.map(row => row.id), [2], `${store.name}: tab B sends only its new row`);
+        assert.deepEqual(patchB.removeIds, [], `${store.name}: tab B removes nothing`);
+        // A edits row 1 from its stale copy, which has never seen row 2.
+        await run(tabA, `(async () => {
+            globalThis.__rows[0].qty = 9;
+            await ${store.save}(globalThis.__rows);
+        })()`);
+        assert.deepEqual(
+            serverList(server, store).map(row => `${row.id}:${row.qty}`),
+            ['1:9', '2:3'],
+            `${store.name}: tab A must not erase the row tab B added`,
+        );
+        const patchA = lastPatchFor(server, store).patch;
+        assert.deepEqual(patchA.upserts.map(row => row.id), [1], `${store.name}: only the changed row is sent`);
+        assert.deepEqual(patchA.removeIds, [], `${store.name}: tab A removes nothing it did not drop`);
+        assert.deepEqual(server.settingsWrites, [], `${store.name}: no whole-list write`);
+    }
+}
+
+async function smokeReadyGoodsDeleteRemovesOnlyKnownRows(blobMerge) {
+    const server = createServer(blobMerge);
+    server.settings.set('ready_goods_stock_json', JSON.stringify([
+        { id: 1, qty: 10, order_id: 5 },
+        { id: 2, qty: 4, order_id: 6 },
+    ]));
+    const tab = createTab(server);
+    await run(tab, 'loadReadyGoods().then(rows => { globalThis.__rows = rows; })');
+    // Another tab moves one more order to ready goods meanwhile.
+    server.settings.set('ready_goods_stock_json', JSON.stringify([
+        { id: 1, qty: 10, order_id: 5 },
+        { id: 2, qty: 4, order_id: 6 },
+        { id: 3, qty: 8, order_id: 7 },
+    ]));
+    // Returning order 5 from "Готово" saves a rebuilt list without its row.
+    await run(tab, `(async () => {
+        const remaining = globalThis.__rows.map(item => ({ ...item })).filter(item => item.order_id !== 5);
+        await saveReadyGoods(remaining);
+    })()`);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [2, 3], 'the other tab row survives');
+    const patch = lastPatchFor(server, READY_GOODS_STORES[0]).patch;
+    assert.deepEqual(patch.upserts, [], 'unchanged rows are not re-sent');
+    assert.deepEqual(patch.removeIds, ['1'], 'only the row this tab saw and dropped is removed');
+}
+
+async function smokeReadyGoodsConsumerCopiesDoNotLookChanged(blobMerge) {
+    const server = createServer(blobMerge);
+    server.settings.set('ready_goods_stock_json', JSON.stringify([
+        { id: 1, qty: 5, location_type: 'our' },
+        { id: 2, qty: 7, location_type: 'partner' },
+    ]));
+    const tab = createTab(server);
+    // The warehouse screens clone every row (_normalizeReadyGoodsItem) before editing.
+    await run(tab, `(async () => {
+        const rows = (await loadReadyGoods()).map(item => ({ ...item, location_type: item.location_type === 'partner' ? 'partner' : 'our' }));
+        rows.push({ id: 3, qty: 1, location_type: 'our' });
+        await saveReadyGoods(rows);
+    })()`);
+    const patch = lastPatchFor(server, READY_GOODS_STORES[0]).patch;
+    assert.deepEqual(patch.upserts.map(row => row.id), [3], 'cloned but unchanged rows are not re-sent');
+    assert.deepEqual(patch.removeIds, []);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1, 2, 3]);
+    // Saving a list nobody touched sends nothing at all.
+    const sent = server.patches.length;
+    await run(tab, `(async () => { const rows = await loadReadyGoods(); await saveReadyGoods(rows); })()`);
+    await run(tab, `(async () => { const rows = (await loadReadyGoods()).map(item => ({ ...item })); await saveReadyGoods(rows); })()`);
+    assert.equal(server.patches.length, sent, 'an unchanged list is not written');
+}
+
+async function smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge) {
+    for (const status of [404, 405]) {
+        const server = createServer(blobMerge);
+        server.settings.set('ready_goods_stock_json', JSON.stringify([{ id: 1, qty: 10 }]));
+        server.patchError = { status };
+        const tab = createTab(server);
+        await run(tab, `(async () => {
+            globalThis.__rows = await loadReadyGoods();
+            globalThis.__rows.push({ id: 2, qty: 3 });
+            await saveReadyGoods(globalThis.__rows);
+        })()`);
+        assert.deepEqual(server.settingsWrites, ['ready_goods_stock_json'], `${status}: the old whole-list write is the fallback`);
+        assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1, 2]);
+        // The whole write also makes the saved list the new base: once the route
+        // appears, only the row edited since then is sent.
+        server.patchError = null;
+        await run(tab, `(async () => { globalThis.__rows[1].qty = 4; await saveReadyGoods(globalThis.__rows); })()`);
+        assert.deepEqual(lastPatchFor(server, READY_GOODS_STORES[0]).patch.upserts, [{ id: 2, qty: 4 }], `${status}: only the new edit is patched`);
+        assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => `${row.id}:${row.qty}`), ['1:10', '2:4']);
+        assert.deepEqual(server.settingsWrites, ['ready_goods_stock_json'], `${status}: and no second whole-list write`);
+    }
+    // Any other failure must never turn into a whole-list overwrite.
+    for (const status of [400, 500]) {
+        const server = createServer(blobMerge);
+        server.settings.set('ready_goods_stock_json', JSON.stringify([{ id: 1, qty: 10 }]));
+        const tab = createTab(server);
+        await run(tab, 'loadReadyGoods().then(rows => { globalThis.__rows = rows; })');
+        server.patchError = { status };
+        await assert.rejects(
+            run(tab, `(async () => { globalThis.__rows.push({ id: 2, qty: 3 }); await saveReadyGoods(globalThis.__rows); })()`),
+            /READY_GOODS_SHARED_UNAVAILABLE/,
+            `${status}: a failed patch is reported, not hidden`,
+        );
+        assert.deepEqual(server.settingsWrites, [], `${status}: no whole-list write after a failed patch`);
+        assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1]);
+        // Once the api answers again the same change goes through.
+        server.patchError = null;
+        await run(tab, 'saveReadyGoods(globalThis.__rows)');
+        assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1, 2], `${status}: retry sends the unsaved change`);
+        assert.deepEqual(server.settingsWrites, []);
+        // A saved list is the new base: saving it again sends nothing.
+        const sent = server.patches.length;
+        await run(tab, 'saveReadyGoods(globalThis.__rows)');
+        assert.equal(server.patches.length, sent, `${status}: a saved list is not sent twice`);
+    }
+}
+
+async function smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge) {
+    const server = createServer(blobMerge);
+    server.settings.set('ready_goods_stock_json', JSON.stringify([{ id: 1, qty: 50 }]));
+    const tab = createTab(server);
+    await run(tab, 'loadReadyGoods().then(rows => { globalThis.__rows = rows; })');
+    // The next read fails: the tab is back on an unverified fallback.
+    server.failReads = true;
+    await run(tab, 'loadReadyGoods()');
+    await assert.rejects(
+        run(tab, 'saveReadyGoods(globalThis.__rows.concat([{ id: 2, qty: 1 }]))'),
+        /READY_GOODS_SHARED_UNAVAILABLE/,
+    );
+    assert.equal(server.patches.length, 0, 'no patch is sent from an unverified copy');
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1]);
+    // Reading successfully again restores saving.
+    server.failReads = false;
+    await run(tab, 'loadReadyGoods().then(rows => { globalThis.__rows = rows; })');
+    await run(tab, `(async () => { globalThis.__rows.push({ id: 2, qty: 1 }); await saveReadyGoods(globalThis.__rows); })()`);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1, 2]);
 }
 
 async function main() {
@@ -223,6 +393,11 @@ async function main() {
     await smokeCollectedCheckboxesSurviveStaleTab(blobMerge);
     await smokeSettingsPageNeverWritesHardwareState(blobMerge);
     await smokeReadyGoodsSurviveSlowRead(blobMerge);
+    await smokeReadyGoodsTwoTabsKeepEachOthersRows(blobMerge);
+    await smokeReadyGoodsDeleteRemovesOnlyKnownRows(blobMerge);
+    await smokeReadyGoodsConsumerCopiesDoNotLookChanged(blobMerge);
+    await smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge);
+    await smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }
 

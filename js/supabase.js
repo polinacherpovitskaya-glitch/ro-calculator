@@ -7857,6 +7857,15 @@ const READY_GOODS_SETTINGS_KEYS = Object.freeze({
     sales_records: 'ready_goods_sales_records_json',
 });
 
+// The same three lists as blob-patch targets (ops/api compat-blob-patch.js).
+// Each shared read remembers what it returned under this name and each save
+// sends only the difference, so two tabs never overwrite each other's rows.
+const READY_GOODS_BLOB_TARGETS = Object.freeze({
+    ready_goods: 'ready_goods_stock',
+    ready_goods_history: 'ready_goods_history',
+    sales_records: 'ready_goods_sales_records',
+});
+
 const READY_GOODS_SOURCE_SHARED = 'shared-settings';
 const READY_GOODS_SOURCE_LOCAL = 'local-cache';
 const READY_GOODS_SOURCE_UNAVAILABLE = 'shared-unavailable';
@@ -7904,7 +7913,7 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
             const normalized = _normalizeReadyGoodsPayload(remote.value, safeFallback);
             setLocal(localKey, normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
-            return normalized;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], normalized);
         }
         if (remote.status === 'error') {
             // A slow or failed read is not "no data": seeding [] here used to
@@ -7918,7 +7927,7 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
         if (!_hasSupabaseAccessProblem()) {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'seeded-empty');
             setLocal(localKey, seedPayload);
-            return seedPayload;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], seedPayload);
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
             return _cloneReadyGoodsPayload(safeFallback);
@@ -7930,16 +7939,43 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
 }
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
+    // _normalizeReadyGoodsPayload hands an array back as is, so the records keep
+    // the identity the diff below relies on.
     const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
-    // Every save rewrites the whole list; it is only safe on top of a list
-    // that was really read from the shared store.
+    // A save is only safe on top of a list that was really read from the
+    // shared store; a stale fallback must never be written back.
     if (_readyGoodsSourceStatus[storeKey] && _readyGoodsSourceStatus[storeKey].source !== READY_GOODS_SOURCE_SHARED) {
         throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
     }
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
-        await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        const blobTarget = READY_GOODS_BLOB_TARGETS[storeKey];
+        // Send only what changed since this tab last read or saved the list; the
+        // server merges it into the current list, so rows another tab added or
+        // changed meanwhile survive. `merged` stays undefined only when the API
+        // has no blob-patch route yet (404/405).
+        let merged;
+        if (blobTarget && Array.isArray(normalized)) {
+            const patch = _diffRecordBlob(blobTarget, normalized);
+            if (_isEmptyBlobPatch(patch)) {
+                setLocal(localKey, normalized);
+                return normalized;
+            }
+            try {
+                merged = await _sendBlobPatch(blobTarget, patch);
+            } catch (error) {
+                // Never fall back to a whole-list write here: it would drop rows
+                // other tabs added. The snapshot is untouched, so a retry sends
+                // the same change again.
+                console.error(`save ${blobTarget} patch error:`, error);
+                throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+            }
+        }
+        if (merged === undefined) {
+            await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        }
         if (!_hasSupabaseAccessProblem()) {
-            setLocal(localKey, normalized);
+            if (blobTarget) _trackRecordBlob(blobTarget, normalized);
+            setLocal(localKey, Array.isArray(merged) ? merged : normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
