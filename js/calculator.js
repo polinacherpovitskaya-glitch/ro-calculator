@@ -1989,6 +1989,40 @@ function applyOrderDiscountToClientPart(totalRevenue, stockRevenue, orderAdjustm
 }
 
 /**
+ * Себестоимость одной платной штуки по строкам изделий — для склада готовой продукции.
+ * Реальные производственные затраты заказа делятся между строками пропорционально их плановой
+ * себестоимости (вместе с фурнитурой и упаковкой строки); если плана нет совсем — по платным
+ * штукам. Затраты строки делятся на её платные штуки («клиенту» + «на продажу»): так стоимость
+ * бесплатных штук строки ложится на её же проданные, и маржа каждой продажи честная.
+ * @param rows - [{ key, planCost, paidQty }]; planCost — плановая себестоимость строки на весь тираж
+ * @param realProductionCost - реальные производственные затраты заказа (без налогов и продажных расходов)
+ * @returns {Object} key -> себестоимость платной штуки, ₽ до копеек (0, если у строки нет платных штук)
+ */
+function allocateRealCostToRows(rows, realProductionCost) {
+    const lines = (Array.isArray(rows) ? rows : [])
+        .filter(row => row && typeof row === 'object')
+        .map(row => ({
+            key: String(row.key),
+            planCost: Math.max(0, calcNumber(row.planCost, 0)),
+            paidQty: Math.max(0, calcNumber(row.paidQty, 0)),
+        }));
+    const realCost = Math.max(0, calcNumber(realProductionCost, 0));
+    // Вес строки в затратах: плановая себестоимость, а без плана — платные штуки.
+    const totalPlan = lines.reduce((sum, line) => sum + line.planCost, 0);
+    const byPlan = totalPlan > 0;
+    const totalWeight = byPlan ? totalPlan : lines.reduce((sum, line) => sum + line.paidQty, 0);
+
+    const unitCosts = {};
+    lines.forEach(line => {
+        const weight = byPlan ? line.planCost : line.paidQty;
+        unitCosts[line.key] = line.paidQty > 0 && totalWeight > 0
+            ? round2(realCost * weight / totalWeight / line.paidQty)
+            : 0;
+    });
+    return unitCosts;
+}
+
+/**
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */

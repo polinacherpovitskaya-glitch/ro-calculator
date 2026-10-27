@@ -17,6 +17,7 @@ vm.runInContext(`${source}\nglobalThis.__tirage = {
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
     isB2CClientName,
+    allocateRealCostToRows,
 };`, context, { filename: 'js/calculator.js' });
 
 const {
@@ -29,11 +30,13 @@ const {
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
     isB2CClientName,
+    allocateRealCostToRows: allocateRealCostInContext,
 } = context.__tirage;
 
 // Объекты из vm-контекста имеют чужие прототипы: для deepEqual приводим к обычным.
 const plain = value => JSON.parse(JSON.stringify(value));
 const normalizeTirageAllocation = (...args) => plain(normalizeInContext(...args));
+const allocateRealCostToRows = (...args) => plain(allocateRealCostInContext(...args));
 // Округление до копеек — как round2 в js/calculator.js.
 const round2Test = n => Math.round(n * 100) / 100;
 
@@ -463,5 +466,57 @@ assert.deepEqual(['B2C', 'b2c', 'ООО B2C', '', null, undefined].map(name => i
 assert.equal(getOrderLiveCalculatorSnapshot({ client_name: 'ООО Лимон' },
     [lemonRow({ item_data: { tirage_allocation: lemonAllocation } })], snapshotParams, []).revenue, 177000,
 'у обычного клиента разметка работает');
+
+// ---------------------------------------------------------------------------
+// allocateRealCostToRows: себестоимость платной штуки по строкам (склад готовой продукции)
+// ---------------------------------------------------------------------------
+// «Лимон»: одна строка — все реальные затраты заказа (121 000 ₽) на 30 платных штук
+assert.deepEqual(allocateRealCostToRows([{ key: '1', planCost: 97135, paidQty: 30 }], 121000), { 1: 4033.33 });
+// затраты делятся между строками пропорционально плановой себестоимости, затем на платные штуки строки
+assert.deepEqual(allocateRealCostToRows([
+    { key: '1', planCost: 30000, paidQty: 100 },
+    { key: '2', planCost: 10000, paidQty: 10 },
+], 60000), { 1: 450, 2: 1500 });
+// плана нет совсем — делим по платным штукам
+assert.deepEqual(allocateRealCostToRows([
+    { key: '1', planCost: 0, paidQty: 10 },
+    { key: '2', planCost: 0, paidQty: 30 },
+], 4000), { 1: 100, 2: 100 });
+// у строки нет платных штук — штуке на складе взяться неоткуда
+assert.equal(allocateRealCostToRows([{ key: '1', planCost: 500, paidQty: 0 }], 900)['1'], 0);
+
+// строка без платных штук забирает свою долю затрат: остальные строки её не доплачивают
+assert.deepEqual(allocateRealCostToRows([
+    { key: 'a', planCost: 1000, paidQty: 0 },
+    { key: 'b', planCost: 3000, paidQty: 10 },
+], 8000), { a: 0, b: 600 });
+// округление до копеек
+assert.deepEqual(allocateRealCostToRows([{ key: 'x', planCost: 1, paidQty: 3 }], 100), { x: 33.33 });
+assert.deepEqual(allocateRealCostToRows([{ key: 'x', planCost: 1, paidQty: 3 }], 200), { x: 66.67 });
+// ключ может быть числом (номер строки) — в ответе он обычный ключ объекта
+assert.deepEqual(allocateRealCostToRows([{ key: 0, planCost: 10, paidQty: 5 }], 50), { 0: 10 });
+// деньги не теряются и не придумываются: сумма по платным штукам = затраты с точностью до копейки на штуку
+const conserved = [
+    { key: '1', planCost: 97135, paidQty: 30 },
+    { key: '2', planCost: 25000, paidQty: 7 },
+    { key: '3', planCost: 4100, paidQty: 12 },
+];
+const conservedUnit = allocateRealCostToRows(conserved, 150000);
+const conservedSum = conserved.reduce((sum, row) => sum + conservedUnit[row.key] * row.paidQty, 0);
+assert.ok(Math.abs(conservedSum - 150000) <= 0.005 * (30 + 7 + 12) + 1e-9, `сумма по штукам ${conservedSum} должна сходиться с затратами`);
+
+// пустые и испорченные данные: никаких NaN и исключений
+assert.deepEqual(allocateRealCostToRows([], 1000), {});
+assert.deepEqual(allocateRealCostToRows(null, 1000), {});
+assert.deepEqual(allocateRealCostToRows(undefined, 1000), {});
+assert.deepEqual(allocateRealCostToRows([{ key: '1', planCost: 100, paidQty: 5 }], 0), { 1: 0 }, 'затрат нет — штука ничего не стоит');
+assert.deepEqual(allocateRealCostToRows([{ key: '1', planCost: 100, paidQty: 5 }], -500), { 1: 0 }, 'отрицательные затраты не бывают');
+assert.deepEqual(allocateRealCostToRows([{ key: '1', planCost: 100, paidQty: 5 }], 'мусор'), { 1: 0 });
+assert.deepEqual(allocateRealCostToRows([{ key: '1', planCost: 0, paidQty: 0 }], 500), { 1: 0 }, 'ни плана, ни платных штук');
+assert.deepEqual(allocateRealCostToRows([
+    { key: '1', planCost: '30 000', paidQty: '100' },
+    { key: '2', planCost: -5, paidQty: 'abc' },
+    null,
+], '60000'), { 1: 600, 2: 0 }, 'числа из строк читаются, отрицательное и мусор = 0, пустая строка списка пропускается');
 
 console.log('tirage-allocation-smoke: OK');
