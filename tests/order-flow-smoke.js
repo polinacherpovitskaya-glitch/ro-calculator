@@ -4239,6 +4239,153 @@ async function smokeReadyGoodsSalesAndManualAdd(context) {
     assert.match(readyGoodsHtml, /Со склада/);
 }
 
+// Ready goods live only in the shared base. A save that does not reach it must be
+// reported to the user and must not leave the screen looking as if it had worked.
+async function smokeReadyGoodsWritersReportFailedSave(context) {
+    const FAILED = 'Не удалось сохранить готовую продукцию — нет связи с общей базой. Попробуйте ещё раз.';
+    const PARTIAL = 'Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.';
+    const names = ['getReadyGoodsSourceStatus', 'loadReadyGoods', 'saveReadyGoods', 'loadReadyGoodsHistory', 'saveReadyGoodsHistory', 'loadSalesRecords', 'saveSalesRecords'];
+    const originals = Object.fromEntries(names.map(name => [name, context[name]]));
+    const writeOffDialog = context.document.getElementById('rg-writeoff-dialog');
+    const addDialog = context.document.getElementById('rg-add-dialog');
+    const originalRemove = [writeOffDialog.remove, addDialog.remove];
+
+    context.__failing = new Set();
+    context.__toasts = [];
+    context.__renders = [];
+    context.__removed = [];
+    const failable = (name, apply) => async (value) => {
+        if (context.__failing.has(name)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        apply(clone(value));
+    };
+    context.getReadyGoodsSourceStatus = () => ({
+        ready_goods: { source: 'shared-settings' },
+        ready_goods_history: { source: 'shared-settings' },
+        sales_records: { source: 'shared-settings' },
+    });
+    context.loadReadyGoods = async () => clone(context.__readyGoods);
+    context.saveReadyGoods = failable('stock', items => { context.__readyGoods = items; });
+    context.loadReadyGoodsHistory = async () => clone(context.__readyGoodsHistory);
+    context.saveReadyGoodsHistory = failable('history', history => { context.__readyGoodsHistory = history; });
+    context.loadSalesRecords = async () => clone(context.__salesRecords);
+    context.saveSalesRecords = failable('sales', records => { context.__salesRecords = records; });
+    writeOffDialog.remove = () => { context.__removed.push('writeoff'); };
+    addDialog.remove = () => { context.__removed.push('add'); };
+    vm.runInContext(`
+        globalThis.__origToast = App.toast;
+        globalThis.__origRenderStats = Warehouse.renderStats;
+        globalThis.__origRenderView = Warehouse.renderReadyGoodsView;
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.renderStats = () => { globalThis.__renders.push('stats'); };
+        Warehouse.renderReadyGoodsView = () => { globalThis.__renders.push('view'); };
+    `, context);
+
+    const reset = (...failing) => {
+        context.__readyGoods = [{
+            id: 11, product_name: 'Ready Smoke Product', order_name: 'Smoke Order', order_id: 42,
+            location_type: 'our', qty: 7, cost_per_unit: 19, added_at: '2026-03-15T00:00:00.000Z',
+        }];
+        context.__readyGoodsHistory = [];
+        context.__salesRecords = [];
+        context.__failing = new Set(failing);
+        context.__toasts = [];
+        context.__renders = [];
+        context.__removed = [];
+    };
+    const fillWriteOff = () => {
+        context.document.getElementById('rg-wo-product').value = '0';
+        context.document.getElementById('rg-wo-qty').value = '3';
+        context.document.getElementById('rg-wo-channel').value = 'marketplace';
+        context.document.getElementById('rg-wo-revenue').value = '1500';
+        context.document.getElementById('rg-wo-payout').value = '1200';
+        context.document.getElementById('rg-wo-notes').value = 'outage test';
+    };
+    const fillAdd = () => {
+        context.document.getElementById('rg-add-name').value = 'Outage Product';
+        context.document.getElementById('rg-add-qty').value = '5';
+        context.document.getElementById('rg-add-cost').value = '10';
+        context.document.getElementById('rg-add-location').value = 'our';
+        context.document.getElementById('rg-add-set').value = '';
+    };
+    const state = () => ({
+        stockQty: context.__readyGoods.map(item => item.qty),
+        sales: context.__salesRecords.length,
+        history: context.__readyGoodsHistory.length,
+    });
+
+    try {
+        // Write-off: the very first write fails, nothing reached the base.
+        reset('stock');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [FAILED], 'write-off: the failure is shown, not a success');
+        assert.deepEqual(clone(context.__removed), [], 'write-off: the dialog stays open for another try');
+        assert.deepEqual(clone(context.__renders), [], 'write-off: the screen is not redrawn as if it had worked');
+        assert.deepEqual(state(), { stockQty: [7], sales: 0, history: 0 });
+
+        // The same click once the base is back goes through.
+        context.__failing.clear();
+        context.__toasts = [];
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.equal(context.__toasts.length, 1);
+        assert.match(context.__toasts[0], /^Списано 3 шт/);
+        assert.deepEqual(clone(context.__removed), ['writeoff']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [4], sales: 1, history: 1 });
+
+        // Write-off: the stock is already off the shelf when the sale record fails. A plain
+        // "try again" would take the goods off twice, so the screen shows the real state.
+        reset('sales');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__removed), ['writeoff'], 'write-off: no stale dialog to retry from');
+        assert.deepEqual(clone(context.__renders), ['stats', 'view'], 'write-off: the screen shows what is really saved');
+        assert.deepEqual(state(), { stockQty: [4], sales: 0, history: 0 });
+
+        reset('history');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(state(), { stockQty: [4], sales: 1, history: 0 });
+
+        // Manual add: same rules.
+        reset('stock');
+        fillAdd();
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.deepEqual(clone(context.__toasts), [FAILED], 'manual add: the failure is shown, not a success');
+        assert.deepEqual(clone(context.__removed), [], 'manual add: the dialog stays open for another try');
+        assert.deepEqual(clone(context.__renders), []);
+        assert.deepEqual(state(), { stockQty: [7], sales: 0, history: 0 });
+
+        context.__failing.clear();
+        context.__toasts = [];
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.equal(context.__toasts.length, 1);
+        assert.match(context.__toasts[0], /^Добавлено 5 шт/);
+        assert.deepEqual(clone(context.__removed), ['add']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [7, 5], sales: 0, history: 1 });
+
+        reset('history');
+        fillAdd();
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__removed), ['add']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [7, 5], sales: 0, history: 0 });
+    } finally {
+        names.forEach(name => { context[name] = originals[name]; });
+        writeOffDialog.remove = originalRemove[0];
+        addDialog.remove = originalRemove[1];
+        vm.runInContext(`
+            App.toast = globalThis.__origToast;
+            Warehouse.renderStats = globalThis.__origRenderStats;
+            Warehouse.renderReadyGoodsView = globalThis.__origRenderView;
+        `, context);
+    }
+}
+
 async function smokeChinaShipmentMetadata(context) {
     const fieldValues = {
         'wh-sh-name': 'Smoke Shipment',
@@ -9864,6 +10011,7 @@ async function main() {
     await smokeCloneOrderPrefersNormalizedItems(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
+    await smokeReadyGoodsWritersReportFailedSave(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);

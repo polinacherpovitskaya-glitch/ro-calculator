@@ -7251,50 +7251,59 @@ const Warehouse = {
         const payout = parseFloat(document.getElementById('rg-wo-payout').value) || 0;
         const notes = (document.getElementById('rg-wo-notes').value || '').trim();
 
-        // Deduct from ready goods
-        const allRg = (await loadReadyGoods()).map(entry => this._normalizeReadyGoodsItem(entry));
-        const rgItem = allRg.find(i => Number(i.id) === Number(item.id));
-        if (rgItem) {
-            rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
+        // The three writes go to the shared base one after another; remember whether
+        // any has landed so a failure half-way is not mistaken for "nothing happened".
+        let savedSomething = false;
+        try {
+            // Deduct from ready goods
+            const allRg = (await loadReadyGoods()).map(entry => this._normalizeReadyGoodsItem(entry));
+            const rgItem = allRg.find(i => Number(i.id) === Number(item.id));
+            if (rgItem) {
+                rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
+            }
+            await saveReadyGoods(allRg);
+            savedSomething = true;
+
+            // Record sale
+            const records = await loadSalesRecords();
+            records.push({
+                id: Date.now(),
+                ready_goods_id: item.id,
+                product_name: item.product_name,
+                order_name: item.order_name || '',
+                marketplace_set: item.marketplace_set || '',
+                channel,
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty,
+                cost_per_unit: item.cost_per_unit || 0,
+                revenue,
+                payout,
+                notes,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveSalesRecords(records);
+
+            // History
+            const history = await loadReadyGoodsHistory();
+            history.push({
+                id: Date.now(),
+                type: 'writeoff',
+                product_name: item.product_name,
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty: -qty,
+                channel,
+                revenue,
+                payout,
+                notes: `Продажа: ${channel === 'marketplace' ? 'маркетплейс' : channel === 'website' ? 'сайт' : 'другое'}. ${notes}`,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoodsHistory(history);
+        } catch (error) {
+            this._handleReadyGoodsSaveError(error, savedSomething, 'rg-writeoff-dialog');
+            return;
         }
-        await saveReadyGoods(allRg);
-
-        // Record sale
-        const records = await loadSalesRecords();
-        records.push({
-            id: Date.now(),
-            ready_goods_id: item.id,
-            product_name: item.product_name,
-            order_name: item.order_name || '',
-            marketplace_set: item.marketplace_set || '',
-            channel,
-            location_type: this._normalizeReadyGoodsLocation(item.location_type),
-            qty,
-            cost_per_unit: item.cost_per_unit || 0,
-            revenue,
-            payout,
-            notes,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveSalesRecords(records);
-
-        // History
-        const history = await loadReadyGoodsHistory();
-        history.push({
-            id: Date.now(),
-            type: 'writeoff',
-            product_name: item.product_name,
-            location_type: this._normalizeReadyGoodsLocation(item.location_type),
-            qty: -qty,
-            channel,
-            revenue,
-            payout,
-            notes: `Продажа: ${channel === 'marketplace' ? 'маркетплейс' : channel === 'website' ? 'сайт' : 'другое'}. ${notes}`,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoodsHistory(history);
 
         const dialog = document.getElementById('rg-writeoff-dialog');
         if (dialog) dialog.remove();
@@ -7369,33 +7378,41 @@ const Warehouse = {
         const locationType = this._normalizeReadyGoodsLocation(document.getElementById('rg-add-location').value);
         const setName = (document.getElementById('rg-add-set').value || '').trim();
 
-        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
-        rg.push({
-            id: Date.now(),
-            product_name: name,
-            order_name: 'Ручное добавление',
-            order_id: null,
-            marketplace_set: setName,
-            location_type: locationType,
-            qty,
-            cost_per_unit: cost,
-            added_at: new Date().toISOString(),
-            added_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoods(rg);
+        // Two writes to the shared base; see doWriteOff for why a landed one is remembered.
+        let savedSomething = false;
+        try {
+            const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
+            rg.push({
+                id: Date.now(),
+                product_name: name,
+                order_name: 'Ручное добавление',
+                order_id: null,
+                marketplace_set: setName,
+                location_type: locationType,
+                qty,
+                cost_per_unit: cost,
+                added_at: new Date().toISOString(),
+                added_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoods(rg);
+            savedSomething = true;
 
-        const history = await loadReadyGoodsHistory();
-        history.push({
-            id: Date.now(),
-            type: 'manual_add',
-            product_name: name,
-            location_type: locationType,
-            qty,
-            notes: `Ручное добавление (${this._readyGoodsLocationLabel(locationType)}): ${name} × ${qty}`,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoodsHistory(history);
+            const history = await loadReadyGoodsHistory();
+            history.push({
+                id: Date.now(),
+                type: 'manual_add',
+                product_name: name,
+                location_type: locationType,
+                qty,
+                notes: `Ручное добавление (${this._readyGoodsLocationLabel(locationType)}): ${name} × ${qty}`,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoodsHistory(history);
+        } catch (error) {
+            this._handleReadyGoodsSaveError(error, savedSomething, 'rg-add-dialog');
+            return;
+        }
 
         const dialog = document.getElementById('rg-add-dialog');
         if (dialog) dialog.remove();
@@ -7502,6 +7519,26 @@ const Warehouse = {
             await saveReadyGoodsHistory(history);
         }
         return removedCount;
+    },
+
+    // Ready goods are saved to the shared base only. When a save does not get there
+    // the user has to hear about it, and nothing on screen may look as if it had
+    // worked. `savedSomething`: an earlier write of the same operation had landed.
+    _handleReadyGoodsSaveError(error, savedSomething, dialogId) {
+        console.error('Ready goods save failed:', error);
+        if (!savedSomething) {
+            // Nothing was written: the dialog stays as it is, so the user can try again.
+            App.toast('Не удалось сохранить готовую продукцию — нет связи с общей базой. Попробуйте ещё раз.');
+            return;
+        }
+        // Part of the operation is already in the base and a plain retry would repeat
+        // it (the goods would leave the stock twice): drop the dialog and show what
+        // is really saved.
+        const dialog = document.getElementById(dialogId);
+        if (dialog) dialog.remove();
+        App.toast('Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.');
+        this.renderStats();
+        this.renderReadyGoodsView();
     },
 
     _isReadyGoodsSharedAvailable() {
