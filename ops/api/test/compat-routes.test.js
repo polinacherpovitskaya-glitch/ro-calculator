@@ -299,3 +299,33 @@ test('calculator CORS preflight allows both production mirrors with credentials'
   assert.equal(response.headers.get('access-control-allow-origin'), 'https://calc2.recycleobject.ru');
   assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
 });
+
+test('blob patch merges warehouse history entries instead of replacing the blob', async (t) => {
+  const port = await startServer(t);
+  const cookie = await login(port);
+  const { rows: before } = await getPool().query(
+    `SELECT data FROM compat_rows WHERE table_name = 'warehouse_history' AND source_id = '1'`,
+  );
+  t.after(async () => {
+    if (before[0]) {
+      await getPool().query(
+        `UPDATE compat_rows SET data = $1 WHERE table_name = 'warehouse_history' AND source_id = '1'`,
+        [before[0].data],
+      );
+    } else {
+      await getPool().query(`DELETE FROM compat_rows WHERE table_name = 'warehouse_history' AND source_id = '1'`);
+    }
+  });
+  const baseId = Date.now();
+  const post = (patch) => fetch(`http://127.0.0.1:${port}/api/compat/blob-patch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', cookie, 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ target: 'warehouse_history', patch }),
+  });
+  assert.equal((await post({ upserts: [{ id: baseId, note: 'A' }] })).status, 200);
+  const second = await post({ upserts: [{ id: baseId + 1, note: 'B' }] });
+  assert.equal(second.status, 200);
+  const ids = (await second.json()).data.value.map((entry) => entry.id);
+  assert.ok(ids.includes(baseId), 'first tab entry survives the second tab write');
+  assert.ok(ids.includes(baseId + 1));
+});
