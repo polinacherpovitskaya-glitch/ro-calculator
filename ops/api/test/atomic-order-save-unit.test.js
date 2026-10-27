@@ -11,11 +11,14 @@ function fakeCompatClient(seed = {}) {
     if (!state.has(table)) state.set(table, new Map());
     return state.get(table);
   };
+  const reads = [];
   return {
     state,
+    reads,
     async query(sql, params = []) {
       if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
       if (sql.includes('SELECT data') && sql.includes('FROM compat_rows')) {
+        reads.push({ sql, params });
         return {
           rows: [...tableState(params[0]).entries()]
             .sort(([left], [right]) => left.localeCompare(right, 'ru', { numeric: true }))
@@ -153,4 +156,22 @@ test('executeAtomicOrderSave never deletes items the client did not load', async
     knownItemIds: [plasticId, hardwareId],
   });
   assert.equal(full.state.get('order_items').has(String(hardwareId)), false);
+});
+
+test('executeAtomicOrderSave reads only this order and its items', async () => {
+  const orderId = 1786340000004;
+  const client = fakeCompatClient({ orders: [], order_items: [] });
+  await executeAtomicOrderSave(client, {
+    order: { id: orderId, order_name: 'Narrow', status: 'draft' },
+    items: [{ id: orderId * 1000 + 1, order_id: orderId, item_number: 1 }],
+  });
+  const [ordersRead, itemsRead] = client.reads;
+  assert.match(ordersRead.sql, /source_id = ANY/);
+  assert.deepEqual(ordersRead.params, ['orders', [String(orderId)]]);
+  assert.match(itemsRead.sql, /data @>/);
+  assert.deepEqual(itemsRead.params.slice(1), [
+    JSON.stringify({ order_id: orderId }),
+    JSON.stringify({ order_id: String(orderId) }),
+    [String(orderId * 1000 + 1)],
+  ]);
 });

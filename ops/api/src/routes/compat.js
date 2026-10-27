@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { readCompatRows as readRows } from '../compat-rows.js';
+import { readCompatRows as readRows, equalityNarrow, narrowForFilters } from '../compat-rows.js';
 import { getPool, withTransaction } from '../db.js';
 import { withIdempotency } from '../idempotency.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -276,8 +276,14 @@ export async function executeAtomicOrderSave(client, body) {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`compat:${table}`]);
   }
 
-  const orderRows = await readRows(client, 'orders', true);
-  const itemRows = await readRows(client, 'order_items', true);
+  // Read only this order, its items and rows sharing the incoming ids instead
+  // of both tables in full (all items carry base64 photos).
+  const orderRows = await readRows(client, 'orders', true, [{ sourceIds: [String(orderId)] }]);
+  const orderNarrow = equalityNarrow('order_id', orderId);
+  const itemRows = await readRows(client, 'order_items', true, orderNarrow && [
+    ...orderNarrow,
+    { sourceIds: incomingItems.map((item) => sourceId(item, ['id'])) },
+  ]);
   const existingOrder = orderRows.find((row) => equalValue(row?.id, orderId)) || null;
   const nowIso = new Date().toISOString();
   const savedOrder = existingOrder
@@ -391,7 +397,7 @@ async function protectAuthAccountMutation(req, rows, incomingRows) {
 }
 
 async function executeSelect(client, table, body) {
-  let rows = await readRows(client, table);
+  let rows = await readRows(client, table, false, narrowForFilters(body.filters, primaryKeyFor(table)));
   rows = filterRows(rows, body.filters);
   rows = orderRows(rows, body.orders);
   rows = paginateRows(rows, body);
@@ -402,7 +408,12 @@ async function executeSelect(client, table, body) {
 
 async function executeMutation(req, client, table, primaryKey, body) {
   await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`compat:${table}`]);
-  const rows = await readRows(client, table, true);
+  // update/delete only touch filtered rows; inserts need the whole table for
+  // conflict and id checks, settings for the auth-account guard.
+  const narrow = ['update', 'delete'].includes(body.action) && table !== 'settings'
+    ? narrowForFilters(body.filters, primaryKey)
+    : null;
+  const rows = await readRows(client, table, true, narrow);
   const matchedRows = filterRows(rows, body.filters);
   const returning = body.returning === true;
   let changed = [];
