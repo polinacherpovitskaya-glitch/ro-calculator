@@ -9396,6 +9396,28 @@ async function smokeTirageAllocationPersistsAndInvoices(context) {
     assert.equal(kpCalls[1].some(item => item.type === 'product' || item.type === 'printing'), false, 'client 0: nothing to bill for the line');
     assert.equal(kpCalls[1].some(item => item.type === 'extra'), true);
 
+    // В счёте — целые штуки: 120 открыток на строку из 100 штук, клиенту 33 → 40, а не 39.6.
+    const postcards = String(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            result: { ...getEmptyCostResult(), costTotal: 971.35 },
+            tirage_allocation: { partner: 67 },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(0), {
+            source: 'custom', name: 'Открытка', qty: 120, price: 15, sell_price: 30, result: { costPerUnit: 15, hoursPackaging: 0 },
+        })];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        const contentEl = document.getElementById('calc-pricing-content');
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        return contentEl.innerHTML;
+    })()`, context));
+    assert.equal(invoiceRowQty(postcards, '&#9670;', 'Лимон'), 33);
+    assert.equal(invoiceRowQty(postcards, '&#9744;', 'Открытка'), 40, 'the client share of an attachment is billed in whole pieces');
+
     // Изменение тиража перенормализует разметку от того, что ввёл менеджер, и пишет под строкой, что урезано.
     const qty = clone(await vm.runInContext(`(() => {
         const originals = { recalculate: Calculator.recalculate, scheduleAutosave: Calculator.scheduleAutosave };

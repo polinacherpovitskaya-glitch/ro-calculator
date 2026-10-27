@@ -5826,10 +5826,10 @@ const Calculator = {
             }
         });
 
-        // Фурнитура/упаковка размеченной строки — на долю тиража «клиенту».
+        // Фурнитура/упаковка размеченной строки — на долю тиража «клиенту», целыми штуками.
         const billableLineQty = line => {
             const parentTirage = getTirageParentSplit(tirageSplits, line.parent_item_index);
-            return parentTirage ? round2(line.qty * parentTirage.clientShare) : line.qty;
+            return parentTirage ? Math.round(line.qty * parentTirage.clientShare) : line.qty;
         };
 
         // Hardware rows (both per-item and order-level)
