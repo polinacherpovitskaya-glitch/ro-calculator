@@ -12,16 +12,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: calculator-object-storage-write
+  group: calculator-static-write
   cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
-  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
-  RO_YANDEX_BUCKET: calc.recycleobject.ru
-  RO_RETIRED_BUCKET: calc2.recycleobject.ru
-  UPLOAD_PARALLELISM: 12
+  # Served by Caddy on the shared server (ro-server/caddy); calc2 is a
+  # permanent Caddy redirect to calc.
+  RO_CALC_HOST: calc.recycleobject.ru
+  RO_STATIC_ROOT: /home/robot/srv/static
+  RELEASES_KEPT: 5
 
 jobs:
   deploy:
@@ -66,102 +66,62 @@ jobs:
             sleep "$delay"
           done
 
-      - name: Install Yandex Cloud CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
-          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
-
-      - name: Upload calculator to Yandex Object Storage
+      - name: Configure SSH to the server
         env:
-          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
         run: |
           set -euo pipefail
-          if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
-            echo "YC_OAUTH_TOKEN secret is required to deploy ${RO_YANDEX_BUCKET}" >&2
-            exit 1
-          fi
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/calc_vm"
+          chmod 600 "$HOME/.ssh/calc_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
 
-          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
-          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
-          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
-
-          upload_one() {
-            local file="$1"
-            local rel="${file#deploy/static-yandex/}"
-            local content_type="application/octet-stream"
-            local cache_control="public, max-age=31536000, immutable"
-            case "$file" in
-              *.html)
-                content_type="text/html; charset=utf-8"
-                cache_control="no-cache, no-store, must-revalidate"
-                ;;
-              *.css) content_type="text/css; charset=utf-8" ;;
-              *.js) content_type="application/javascript; charset=utf-8" ;;
-              *.json)
-                content_type="application/json; charset=utf-8"
-                if [ "$rel" = "js/version.json" ] || [ "$rel" = "data/bootstrap.json" ] || [[ "$rel" == data/bootstrap/* ]] || [ "${rel#floor/}" != "$rel" ]; then
-                  cache_control="no-cache, no-store, must-revalidate"
-                fi
-                ;;
-              *.png) content_type="image/png" ;;
-              *.jpg|*.jpeg) content_type="image/jpeg" ;;
-              *.svg) content_type="image/svg+xml" ;;
-              *.ico) content_type="image/x-icon" ;;
-              *.webp) content_type="image/webp" ;;
-            esac
-            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type" --cache-control "$cache_control"
-          }
-          export -f upload_one
-
-          # Publish immutable assets/data first. HTML can only point at files
-          # that are already present; js/version.json is the final release marker.
-          find deploy/static-yandex -type f ! -name '*.html' ! -path 'deploy/static-yandex/js/version.json' -print0 \
-            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_one "$1"' _
-          find deploy/static-yandex -type f -name '*.html' -print0 \
-            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_one "$1"' _
-          upload_one deploy/static-yandex/js/version.json
+      # Each release lands in its own directory; Caddy serves whatever the
+      # calc symlink points at, so the switch is atomic and old releases stay
+      # available for a manual rollback (ln -sfn releases/<sha> calc).
+      - name: Upload calculator release to the server
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh_cmd="ssh -i $HOME/.ssh/calc_vm -o BatchMode=yes"
+          target="$YANDEX_VM_USER@$YANDEX_VM_HOST"
+          release="${GITHUB_SHA::10}-${GITHUB_RUN_ID}"
+          $ssh_cmd "$target" "install -d -m 755 $RO_STATIC_ROOT/releases"
+          rsync -a --delete -e "$ssh_cmd" \
+            --link-dest="$RO_STATIC_ROOT/calc/" \
+            deploy/static-yandex/ "$target:$RO_STATIC_ROOT/releases/$release/"
+          $ssh_cmd "$target" "
+            set -e
+            cd $RO_STATIC_ROOT
+            ln -sfn releases/$release calc.next
+            mv -T calc.next calc
+            ls -1dt releases/* | tail -n +$((RELEASES_KEPT + 1)) | xargs -r rm -rf
+          "
 
       - name: Verify published calculator version
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
         run: |
           set -euo pipefail
           expected="$(node -e 'console.log(require("./js/version.json").version)')"
           for attempt in 1 2 3 4 5 6; do
             actual="$(
               curl -fsSL --max-time 20 \
-                "https://${RO_YANDEX_BUCKET}/js/version.json?cb=${GITHUB_RUN_ID}-${attempt}" \
+                --resolve "${RO_CALC_HOST}:443:${YANDEX_VM_HOST}" \
+                "https://${RO_CALC_HOST}/js/version.json?cb=${GITHUB_RUN_ID}-${attempt}" \
                 | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).version||"")}catch{console.log("")}})'
             )" || actual=""
             if [ "$actual" = "$expected" ]; then
-              echo "${RO_YANDEX_BUCKET}: ${actual}"
+              echo "${RO_CALC_HOST}: ${actual}"
               exit 0
             fi
-            echo "Waiting for ${RO_YANDEX_BUCKET}: got=${actual:-unreachable}, want=${expected}"
+            echo "Waiting for ${RO_CALC_HOST}: got=${actual:-unreachable}, want=${expected}"
             sleep 10
           done
           exit 1
-
-      - name: Retire calc2 application entry points
-        env:
-          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${YC_OAUTH_TOKEN:-}"
-          for object_key in index.html 404.html floor/index.html; do
-            yc storage s3 cp ops/calc2-redirect.html "s3://${RO_RETIRED_BUCKET}/${object_key}" \
-              --content-type "text/html; charset=utf-8" \
-              --cache-control "no-cache, no-store, must-revalidate"
-          done
-          yc config unset token >/dev/null
-
-      - name: Verify calc2 redirect
-        run: |
-          set -euo pipefail
-          for path in '' 'floor/'; do
-            body="$(curl -fsSL --max-time 20 "https://${RO_RETIRED_BUCKET}/${path}?cb=${GITHUB_RUN_ID}")"
-            grep -q 'data-retired-host="calc2"' <<<"$body"
-            grep -q 'https://calc.recycleobject.ru/' <<<"$body"
-          done
 
       - name: Upload bundle artifact
         if: always()

@@ -18,28 +18,17 @@ const floorPublisher = read('scripts/production-floor-publish.mjs');
 assert.match(staticDeploy, /^name: Calculator static deploy$/m);
 assert.doesNotMatch(staticDeploy, /^\s*schedule:/m, 'application deploy must not run on a timer');
 assert.doesNotMatch(staticDeploy, /\bmatrix:/, 'the full application must not deploy once per domain');
-assert.match(staticDeploy, /RO_YANDEX_BUCKET:\s*calc\.recycleobject\.ru/);
-assert.match(staticDeploy, /RO_RETIRED_BUCKET:\s*calc2\.recycleobject\.ru/);
-assert.match(staticDeploy, /UPLOAD_PARALLELISM:\s*(?:[2-9]|[1-9]\d+)/, 'uploads must use bounded parallelism');
-assert.match(staticDeploy, /xargs -0 -r -n 1 -P "\$UPLOAD_PARALLELISM"/, 'bundle uploads must run in parallel');
+assert.match(staticDeploy, /RO_CALC_HOST:\s*calc\.recycleobject\.ru/);
 assert.match(staticDeploy, /cancel-in-progress:\s*false/, 'a started release must not be interrupted mid-upload');
+assert.doesNotMatch(staticDeploy, /yc storage|storage\.yandexcloud\.net|YC_OAUTH_TOKEN/, 'the calculator is no longer served from Yandex Object Storage');
 
-const assetsUpload = staticDeploy.indexOf("! -path 'deploy/static-yandex/js/version.json'");
-const htmlUpload = staticDeploy.indexOf("-name '*.html' -print0");
-const versionUpload = staticDeploy.indexOf('upload_one deploy/static-yandex/js/version.json');
+const releaseUpload = staticDeploy.indexOf('releases/$release/');
+const symlinkSwitch = staticDeploy.indexOf('mv -T calc.next calc');
 const versionVerify = staticDeploy.indexOf('Verify published calculator version');
-assert.ok(assetsUpload >= 0 && assetsUpload < htmlUpload, 'assets/data must publish before HTML');
-assert.ok(htmlUpload < versionUpload, 'HTML must publish before the version marker');
-assert.ok(versionUpload < versionVerify, 'the completed release must be verified after its final marker');
-
-for (const objectKey of ['index.html', '404.html', 'floor/index.html']) {
-  assert.ok(staticDeploy.includes(objectKey), `calc2 redirect must cover ${objectKey}`);
-}
-assert.doesNotMatch(
-  staticDeploy,
-  /s3:\/\/\$\{RO_RETIRED_BUCKET\}\/\$\{rel\}/,
-  'the full bundle must never upload to the retired bucket',
-);
+assert.ok(releaseUpload >= 0 && releaseUpload < symlinkSwitch, 'the full release must upload before the live symlink switches');
+assert.ok(symlinkSwitch < versionVerify, 'the completed release must be verified after the switch');
+assert.match(staticDeploy, /--link-dest=/, 'unchanged files must be hard-linked from the live release');
+assert.match(staticDeploy, /RELEASES_KEPT:\s*[1-9]/, 'old releases must be pruned but some kept for rollback');
 
 assert.match(redirect, /data-retired-host="calc2"/);
 assert.match(redirect, /location\.replace\(target\.toString\(\)\)/);
@@ -56,12 +45,11 @@ assert.match(writebackSmoke, /^\s*schedule:/m, 'write-back monitoring must remai
 
 assert.match(dataRefresh, /^name: Calculator data refresh$/m);
 assert.match(dataRefresh, /^\s*schedule:/m, 'operational snapshots must remain fresh between application releases');
-assert.match(dataRefresh, /find deploy\/static-yandex\/data deploy\/static-yandex\/floor/);
-assert.match(dataRefresh, /xargs -0 -r -n 1 -P "\$UPLOAD_PARALLELISM"/);
+assert.match(dataRefresh, /for dir in data floor; do/);
 assert.doesNotMatch(dataRefresh, /deploy\/static-yandex\/js\/version\.json/);
 assert.doesNotMatch(dataRefresh, /calc2\.recycleobject\.ru/);
-assert.match(dataRefresh, /group:\s*calculator-object-storage-write/);
-assert.match(staticDeploy, /group:\s*calculator-object-storage-write/);
+assert.match(dataRefresh, /group:\s*calculator-static-write/);
+assert.match(staticDeploy, /group:\s*calculator-static-write/);
 
 assert.match(staticBuilder, /RO_YANDEX_BUCKET \|\| 'calc\.recycleobject\.ru'/);
 assert.match(floorPublisher, /RO_FLOOR_ASSET_BASE \|\| 'https:\/\/calc\.recycleobject\.ru\/'/);
