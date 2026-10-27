@@ -1917,6 +1917,13 @@ function getTirageFreeQty(allocation) {
     return toTirageCount(allocation.partner) + toTirageCount(allocation.gift) + toTirageCount(allocation.sample);
 }
 
+// B2C-заказ из маркетплейсов: клиент «B2C» без учёта регистра — то же правило, что у
+// Orders._shouldSyncOrderToReadyGoods. Такой заказ разметку тиража не использует: весь тираж
+// уходит на склад готовой продукции, поэтому все строки считаются неразмеченными.
+function isB2CClientName(clientName) {
+    return String(clientName || '').toUpperCase() === 'B2C';
+}
+
 // Цена «на продажу» по умолчанию — то, что платит клиент за штуку строки: изделие + печать.
 // Её же показывает калькулятор, пока своя цена продажи не задана (stock_price = 0).
 function getTirageDefaultStockPrice(item) {
@@ -2255,6 +2262,8 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
     const extraCosts = [];
     const pendantItems = [];
     let rawProductIndex = -1;
+    // B2C-заказ разметку тиража не использует, даже если она осталась в строках.
+    const ignoreTirageSplit = isB2CClientName(order?.client_name);
     const hydratedOrderItems = (orderItems || [])
         .map(hydrateOrderItemForLiveCalculation)
         .filter(Boolean);
@@ -2281,7 +2290,7 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
             // Разметка тиража приходит из item_data (hydrateOrderItemForLiveCalculation). В старых
             // строках её нет — тогда поле не появляется; испорченная разметка = нет разметки.
             if (item.tirage_allocation !== undefined && item.tirage_allocation !== null) {
-                item.tirage_allocation = parseOrderCalcJson(item.tirage_allocation, {});
+                item.tirage_allocation = ignoreTirageSplit ? null : parseOrderCalcJson(item.tirage_allocation, {});
             }
 
             const tpl = item.template_id

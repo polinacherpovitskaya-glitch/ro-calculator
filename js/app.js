@@ -1947,7 +1947,7 @@ const Calculator = {
             return calculateLeftoverAssemblySummary(this.getLeftoverAssembly(), params, orderAdjustments);
         }
         const rawSummary = calculateOrderSummary(
-            this.items,
+            this._itemsForMoney(),
             this.hardwareItems,
             this.packagingItems,
             this.extraCosts,
@@ -2352,6 +2352,7 @@ const Calculator = {
             </div>
 
             ${this.renderTirageBlock(idx)}
+            ${this._renderTirageB2CNote(idx)}
 
             ${showCustomOnly ? this._renderCustomCompositeBlock(idx, item) : ''}
 
@@ -4466,8 +4467,28 @@ const Calculator = {
     _isTirageAllowed() {
         const purpose = this.getProductionPurpose();
         if (purpose === 'leftover_assembly' || isNonCommercialProductionPurpose(purpose)) return false;
-        const clientName = document.getElementById('calc-client-name')?.value || '';
-        return String(clientName).trim().toUpperCase() !== 'B2C';
+        return !this._isB2COrder();
+    },
+
+    // B2C-заказ — по имени клиента, которое уйдёт в заказ (поле обрезается при сохранении), и по
+    // тому же правилу, что у Orders._shouldSyncOrderToReadyGoods.
+    _isB2COrder() {
+        return isB2CClientName((document.getElementById('calc-client-name')?.value || '').trim());
+    },
+
+    // Строки изделий для денег (смета, «Финдиректор», счёт, КП). У B2C-заказа разметка тиража не
+    // используется: весь тираж уходит на склад готовой продукции. Сама разметка в форме остаётся,
+    // чтобы под строкой было видно, что она не действует, и вернулась, если клиента исправят.
+    _itemsForMoney() {
+        if (!this._isB2COrder()) return this.items;
+        return this.items.map(item => (item && item.tirage_allocation ? { ...item, tirage_allocation: null } : item));
+    },
+
+    _renderTirageB2CNote(idx) {
+        const item = this.items[idx];
+        if (!item) return '';
+        const visible = this._isB2COrder() && this._getTirageView(item).hasSplit;
+        return `<div id="item-tirage-b2c-${idx}" style="margin:4px 0 14px;font-size:14px;font-weight:600;color:var(--text-secondary);${visible ? '' : 'display:none;'}">Для B2C разметка не используется — весь тираж уходит на склад готовой продукции</div>`;
     },
 
     _getTirageView(item) {
@@ -4655,6 +4676,8 @@ const Calculator = {
         if (!item || !block) return;
         block.style.display = this._isTirageAllowed() ? '' : 'none';
         const view = this._getTirageView(item);
+        const b2cNote = document.getElementById('item-tirage-b2c-' + idx);
+        if (b2cNote) b2cNote.style.display = this._isB2COrder() && view.hasSplit ? '' : 'none';
         this.setText('item-tirage-summary-' + idx, this._tirageSummaryText(item, view));
         this.setText('item-tirage-toggle-' + idx, this._tirageToggleLabel(item, view));
         this.setText('item-tirage-client-' + idx, `${this._tirageCount(view.allocation.client)} шт`);
@@ -5215,7 +5238,7 @@ const Calculator = {
             // FinDirector
             const fin = this.isLeftoverAssembly()
                 ? calculateLeftoverAssemblyFinDirector(this.getLeftoverAssembly(), params, orderAdjustments)
-                : calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
+                : calculateFinDirectorData(this._itemsForMoney(), this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
             const finDiscountRow = document.getElementById('fin-discount-row');
             if (App.isAdmin()) {
@@ -5780,7 +5803,7 @@ const Calculator = {
         let invoiceRows = [];
         // Разметка тиража: заказчику выставляется только часть «клиенту» — по строке изделия,
         // её печати, фурнитуре и упаковке (как и выручка в calculateOrderSummary).
-        const tirageSplits = getOrderTirageSplits(this.items);
+        const tirageSplits = getOrderTirageSplits(this._itemsForMoney());
 
         this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;
@@ -6262,6 +6285,8 @@ const Calculator = {
         // сохраняются, а фурнитура и упаковка ссылаются на изделие по месту в сохранённом списке
         // (по нему считаются доли разметки тиража и строится состав заказа).
         const savedProductIndex = new Map();
+        // B2C-заказ разметку не использует — в заказ она не пишется.
+        const keepTirage = !this._isB2COrder();
 
         // Product items
         this.items.forEach((item, idx) => {
@@ -6319,7 +6344,7 @@ const Calculator = {
                 color_name: item.color_name || '',
                 colors: JSON.stringify(item.colors || []),
                 color_solution_attachment: serializeColorAttachments(item),
-                tirage_allocation: this._tirageAllocationForStorage(item),
+                tirage_allocation: keepTirage ? this._tirageAllocationForStorage(item) : null,
             });
         });
         // Родитель не сохраняется (пустая строка) или его уже нет — позиция становится общей:
@@ -7385,7 +7410,7 @@ const Calculator = {
         // Collect data for КП — 4 entities: item, printing, hw, pkg
         const kpItems = [];
         // Разметка тиража: в КП — только часть «клиенту» (изделие и его печать).
-        const tirageSplits = getOrderTirageSplits(this.items);
+        const tirageSplits = getOrderTirageSplits(this._itemsForMoney());
 
         this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;

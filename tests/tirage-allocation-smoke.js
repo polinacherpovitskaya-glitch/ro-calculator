@@ -16,6 +16,7 @@ vm.runInContext(`${source}\nglobalThis.__tirage = {
     calculateFinDirectorData,
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
+    isB2CClientName,
 };`, context, { filename: 'js/calculator.js' });
 
 const {
@@ -27,6 +28,7 @@ const {
     calculateFinDirectorData,
     applyProductionPurposeToOrderSummary,
     getOrderLiveCalculatorSnapshot,
+    isB2CClientName,
 } = context.__tirage;
 
 // Объекты из vm-контекста имеют чужие прототипы: для deepEqual приводим к обычным.
@@ -446,5 +448,20 @@ const reworkSnapshot = getOrderLiveCalculatorSnapshot({ production_purpose: 'rew
 assert.equal(reworkSnapshot.revenue, 0);
 assert.equal(reworkSnapshot.summary.freeQty, 0);
 assert.equal(reworkSnapshot.summary.stockRevenue, 0);
+
+// B2C-заказы из маркетплейсов разметку не используют: весь тираж уходит на склад готовой продукции.
+// Правило то же, что у Orders._shouldSyncOrderToReadyGoods: клиент «B2C» без учёта регистра.
+assert.deepEqual(['B2C', 'b2c', 'ООО B2C', '', null, undefined].map(name => isB2CClientName(name)),
+    [true, true, false, false, false, false]);
+[{ client_name: 'B2C' }, { client_name: 'b2c' }].forEach(order => {
+    const b2cSplit = getOrderLiveCalculatorSnapshot(order,
+        [lemonRow({ item_data: { tirage_allocation: lemonAllocation } }), hardwareRow(0)], snapshotParams, []);
+    const b2cPlain = getOrderLiveCalculatorSnapshot(order, [lemonRow({}), hardwareRow(0)], snapshotParams, []);
+    assert.deepEqual(plain(b2cSplit.summary), plain(b2cPlain.summary), `${order.client_name}: сохранённая разметка не учитывается`);
+    assert.equal(b2cSplit.revenue, 590000 + 100 * 10);
+});
+assert.equal(getOrderLiveCalculatorSnapshot({ client_name: 'ООО Лимон' },
+    [lemonRow({ item_data: { tirage_allocation: lemonAllocation } })], snapshotParams, []).revenue, 177000,
+'у обычного клиента разметка работает');
 
 console.log('tirage-allocation-smoke: OK');

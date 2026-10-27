@@ -9628,6 +9628,126 @@ async function smokeTirageCalculatorSummary(context) {
     assert.equal(state.plain.marginLabel, 'Маржа · план');
 }
 
+// B2C-заказ (клиент «B2C», как у Orders._shouldSyncOrderToReadyGoods) разметку не использует:
+// весь тираж уходит на склад готовой продукции. Сохранённая разметка не меняет деньги, счёт и КП,
+// при сохранении стирается, а под строкой вместо блока — короткая пометка.
+async function smokeTirageB2CIgnoresSplit(context) {
+    const rows = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-client-name').value = 'ООО Лимон';
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, pieces_per_hour: 100, weight_grams: 10, sell_price_item: 5900,
+            tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            source: 'custom', name: 'Карабин', qty: 100, price: 5, sell_price: 10,
+        })];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        const saved = Calculator._collectItemsForSave();
+        Calculator.resetForm();
+        return saved;
+    })()`, context));
+    assert.ok(rows.find(row => row.item_type === 'product').tirage_allocation, 'fixture: the split is saved for a regular client');
+
+    const originalLoadOrder = context.loadOrder;
+    context.loadOrder = async () => ({
+        order: { id: 9301, order_name: 'B2C партия', client_name: 'b2c', status: 'draft' },
+        items: clone(rows),
+        repaired_duplicates: false,
+    });
+    let state;
+    try {
+        await loadCalculatorOrderQuietly(context, 9301);
+        state = clone(await vm.runInContext(`(async () => {
+            const subtotalEl = document.getElementById('c-0-subtotal');
+            subtotalEl.parentElement = { style: {} };
+            const originals = {
+                _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+                recalculate: Calculator.recalculate,
+                scheduleAutosave: Calculator.scheduleAutosave,
+            };
+            const originalGenerate = KPGenerator.generate;
+            try {
+                Calculator._renderPerItemHwPkg = () => {};
+                Calculator.recalculate = () => {};
+                Calculator.scheduleAutosave = () => {};
+                const line = Calculator.items[0];
+                const keptInForm = JSON.parse(JSON.stringify(line.tirage_allocation));
+                Calculator._doRecalculate(App.params);
+                const b2cSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                const read = id => ({ text: document.getElementById(id).textContent, display: document.getElementById(id).style.display });
+                const screen = {
+                    sumRevenue: read('sum-revenue').text,
+                    finRevenue: read('fin-revenue').text,
+                    revenueNote: read('sum-revenue-note').display,
+                    freeNote: read('sum-free-note').display,
+                    b2cNote: read('item-tirage-b2c-0').display,
+                    block: read('item-tirage-0').display,
+                };
+                const saved = Calculator._collectItemsForSave();
+                const contentEl = document.getElementById('calc-pricing-content');
+                Calculator.renderOrderInvoice(App.params, '', contentEl);
+                const invoiceHtml = contentEl.innerHTML;
+                let kpItems = null;
+                KPGenerator.generate = async (...args) => { kpItems = JSON.parse(JSON.stringify(args[2])); };
+                document.getElementById('calc-order-name').value = 'B2C партия';
+                await Calculator.generateKP();
+                globalThis.__originalRenderItemBlock.call(Calculator, 0);
+                const card = document.getElementById('item-block-0').outerHTML;
+
+                // То же заказ без разметки — эталон
+                line.tirage_allocation = null;
+                const plainSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                globalThis.__originalRenderItemBlock.call(Calculator, 0);
+                const plainCard = document.getElementById('item-block-0').outerHTML;
+                line.tirage_allocation = keptInForm;
+
+                // Клиента исправили — разметка снова работает и снова сохраняется
+                document.getElementById('calc-client-name').value = 'ООО Лимон';
+                const regularSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                const regularSaved = Calculator._collectItemsForSave();
+                Calculator._refreshTirageBlocks();
+                const regularScreen = { b2cNote: read('item-tirage-b2c-0').display, block: read('item-tirage-0').display };
+                return {
+                    keptInForm, b2cSummary, plainSummary, screen, saved, invoiceHtml, kpItems, card, plainCard,
+                    regularStockRevenue: regularSummary.stockRevenue, regularSaved, regularScreen,
+                    revenueText: formatRub(plainSummary.totalRevenue),
+                };
+            } finally {
+                delete subtotalEl.parentElement;
+                KPGenerator.generate = originalGenerate;
+                Object.assign(Calculator, originals);
+                Calculator.resetForm();
+            }
+        })()`, context));
+    } finally {
+        context.loadOrder = originalLoadOrder;
+    }
+
+    const b2cNoteText = 'Для B2C разметка не используется — весь тираж уходит на склад готовой продукции';
+    assert.equal(state.keptInForm.stock, 30, 'the loaded split stays in the form (the note needs it)');
+    assert.deepEqual(state.b2cSummary, state.plainSummary, 'a B2C order with a saved split gives the unsplit summary');
+    assert.equal(state.b2cSummary.totalRevenue, 100 * 5900 + 100 * 10);
+    assert.equal(state.screen.sumRevenue, state.revenueText);
+    assert.equal(state.screen.finRevenue, state.revenueText, 'the fin director block ignores the split too');
+    assert.deepEqual([state.screen.revenueNote, state.screen.freeNote], ['none', 'none']);
+    assert.deepEqual([state.screen.block, state.screen.b2cNote], ['none', ''], 'the note replaces the block');
+    assert.equal(state.saved.find(row => row.item_type === 'product').tirage_allocation, null, 'B2C saves no split');
+    assert.equal(invoiceRowQty(state.invoiceHtml, '&#9670;', 'Лимон'), 100, 'B2C bills the whole tirage');
+    assert.equal(invoiceRowQty(state.invoiceHtml, '&#9881;', 'Карабин'), 100);
+    assert.deepEqual(state.kpItems.filter(item => item.type === 'product').map(item => item.qty), [100]);
+    assert.ok(state.card.includes(b2cNoteText), 'the short line is under the product line');
+    assert.doesNotMatch(state.card, /id="item-tirage-b2c-0"[^>]*display:none/, 'and it is visible when the card is drawn');
+    assert.match(state.card, /id="item-tirage-0"[^>]*display:none/);
+    assert.match(state.plainCard, /id="item-tirage-b2c-0"[^>]*display:none/, 'no note when there is nothing to ignore');
+    assert.equal(state.regularStockRevenue, 177000, 'with a regular client the split counts again');
+    assert.equal(state.regularSaved.find(row => row.item_type === 'product').tirage_allocation.stock, 30);
+    assert.deepEqual([state.regularScreen.block, state.regularScreen.b2cNote], ['', 'none']);
+}
+
 // Сохранение пропускает пустые строки изделий — индексы родителя у фурнитуры и упаковки должны
 // указывать на сохранённые позиции, иначе доля «клиенту» уходит не той строке.
 async function smokeSaveRemapsParentIndexesPastEmptyRows(context) {
@@ -9683,6 +9803,7 @@ async function main() {
     await smokeTirageBlockUi(context);
     await smokeTirageCalculatorSummary(context);
     await smokeSaveRemapsParentIndexesPastEmptyRows(context);
+    await smokeTirageB2CIgnoresSplit(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
