@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v479';
+const APP_VERSION = 'v480';
 
 const App = {
     currentPage: 'orders',
@@ -1566,6 +1566,17 @@ const Calculator = {
     _preserveStateOnNextInit: false,
     _localDraftKey: 'ro_calc_calculator_unsaved_draft',
     _loadedOrderOrigin: null,
+    // Ids of order_items rows this form really holds after a complete load from
+    // the server (or after its own save). The server deletes omitted rows only
+    // from this list, so a half-loaded or stale form can never wipe positions.
+    _knownItemIds: [],
+    _loadingOrder: false,
+    _staleOrderCopy: false,
+    // Bumped by every resetForm(); an order load that awaited the network must
+    // stop if the form was reset meanwhile, or it would pour the rest of the
+    // old order into the fresh form (which then autosaves as a new draft).
+    _formToken: 0,
+    _loadRequestSeq: 0,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -1623,6 +1634,10 @@ const Calculator = {
         this._invalidateWhPickerContext();
         this._clearCommittedWhDemandSnapshot();
         this._loadedOrderOrigin = null;
+        this._knownItemIds = [];
+        this._loadingOrder = false;
+        this._staleOrderCopy = false;
+        this._formToken += 1;
 
         App.editingOrderId = null;
         this._currentOrderStatus = 'draft';
@@ -1732,6 +1747,9 @@ const Calculator = {
                 editing_order_id: this._getCurrentEditingOrderId(),
                 editing_origin: this._loadedOrderOrigin,
                 current_order_status: this._currentOrderStatus || 'draft',
+                // A snapshot taken mid-load must not authorize deletions later.
+                known_item_ids: this._loadingOrder ? [] : (this._knownItemIds || []),
+                stale_order_copy: this._staleOrderCopy === true,
                 order_fields: orderFields,
                 discount_mode: this.discountMode,
                 discount_value: this.discountValue,
@@ -1815,6 +1833,8 @@ const Calculator = {
             App.editingOrderId = restoredOrderId;
             localStorage.setItem('ro_calc_editing_order_id', String(restoredOrderId));
             this._loadedOrderOrigin = payload.editing_origin || null;
+            this._knownItemIds = Array.isArray(payload.known_item_ids) ? payload.known_item_ids.map(String) : [];
+            this._staleOrderCopy = payload.stale_order_copy === true;
         } else {
             App.editingOrderId = null;
             this._currentOrderStatus = 'draft';
@@ -5795,8 +5815,41 @@ const Calculator = {
         if (statusEl) statusEl.textContent = 'Есть несохраненные изменения';
     },
 
+    _staleOrderCopyMessage() {
+        return 'Нет связи с базой: заказ открыт из старой копии и не сохраняется. Откройте его заново, когда связь вернётся.';
+    },
+
+    // Returns a reason why this form must not be written to the server now.
+    _orderSaveBlockReason() {
+        if (this._loadingOrder) return 'Заказ ещё загружается — подождите пару секунд';
+        if (this._staleOrderCopy) return this._staleOrderCopyMessage();
+        return '';
+    },
+
+    // Same id rule as saveOrder() in supabase.js (orderId * 1000 + item_number).
+    _orderItemIdFor(orderId, item, index) {
+        if (item && item.id) return String(item.id);
+        if (typeof _buildStableOrderItemId === 'function') return String(_buildStableOrderItemId(orderId, item, index));
+        const itemNumber = Number(item?.item_number);
+        return String((Number(orderId) || 0) * 1000 + (Number.isFinite(itemNumber) ? itemNumber : index));
+    },
+
+    _rememberSavedItemIds(orderId, items) {
+        this._knownItemIds = (items || []).map((item, i) => this._orderItemIdFor(orderId, item, i + 1));
+    },
+
     async _doAutosave() {
         if (this._autosaving) return;
+        if (this._loadingOrder) {
+            // Retry once the form is complete instead of saving a partial order.
+            this.scheduleAutosave();
+            return;
+        }
+        if (this._staleOrderCopy) {
+            const staleStatusEl = document.getElementById('calc-autosave-status');
+            if (staleStatusEl) staleStatusEl.textContent = this._staleOrderCopyMessage();
+            return;
+        }
         const autosaveGeneration = this._saveGeneration;
         // Don't autosave if the draft is completely empty.
         const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id)
@@ -5886,10 +5939,12 @@ const Calculator = {
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
+            const knownItemIds = (this._knownItemIds || []).slice();
             const orderId = await this._enqueueOrderWrite(() => {
                 if (!this._isCurrentAutosave(autosaveGeneration)) return null;
-                return saveOrder(order, items);
+                return saveOrder(order, items, { knownItemIds });
             });
+            if (orderId) this._rememberSavedItemIds(orderId, items);
             if (orderId && this._isCurrentAutosave(autosaveGeneration)) {
                 App.editingOrderId = orderId;
                 // Persist editing ID so it survives page refresh
@@ -6063,6 +6118,11 @@ const Calculator = {
         // Cancel/invalidate autosave before any async work. A timer cancellation
         // alone cannot stop an autosave that is already preparing a stale payload.
         this._beginManualSave();
+        const blockReason = this._orderSaveBlockReason();
+        if (blockReason) {
+            App.toast(blockReason);
+            return;
+        }
 
         // Recalculate before saving to ensure fresh results
         try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
@@ -6152,7 +6212,9 @@ const Calculator = {
 
         let orderId = null;
         try {
-            orderId = await this._enqueueOrderWrite(() => saveOrder(order, items));
+            const knownItemIds = (this._knownItemIds || []).slice();
+            orderId = await this._enqueueOrderWrite(() => saveOrder(order, items, { knownItemIds }));
+            if (orderId) this._rememberSavedItemIds(orderId, items);
         } catch (error) {
             console.error('[Calculator.saveOrder] save failed:', error);
             const statusEl = document.getElementById('calc-autosave-status');
@@ -6436,13 +6498,21 @@ const Calculator = {
     },
 
     async loadOrder(orderId) {
+        const requestSeq = ++this._loadRequestSeq;
         const data = await loadOrder(orderId);
+        // A newer order was opened while this one was loading.
+        if (requestSeq !== this._loadRequestSeq) return;
         if (!data) {
             App.toast('Заказ не найден');
             return;
         }
 
         this.resetForm();
+        const formToken = this._formToken;
+        const isSuperseded = () => formToken !== this._formToken || requestSeq !== this._loadRequestSeq;
+        // Product rows render before hardware/packaging finish loading. Until the
+        // whole form is restored no save may run, or it would drop those rows.
+        this._loadingOrder = true;
         App.editingOrderId = orderId;
         this._currentOrderStatus = data.order.status || 'draft'; // Preserve order status for autosave
         localStorage.setItem('ro_calc_editing_order_id', String(orderId));
@@ -6556,6 +6626,7 @@ const Calculator = {
         const hwItems = dbItems.filter(i => i.item_type === 'hardware');
         if (hwItems.length > 0) {
             await this._ensureWhPickerData();
+            if (isSuperseded()) return;
         }
         hwItems.forEach((dbHw) => {
             const hw = this.getEmptyHardware();
@@ -6627,6 +6698,7 @@ const Calculator = {
         const pkgItems = dbItems.filter(i => i.item_type === 'packaging');
         if (pkgItems.some(p => p.packaging_source === 'warehouse')) {
             await this._ensureWhPickerData();
+            if (isSuperseded()) return;
         }
         pkgItems.forEach((dbPkg) => {
             const pkg = this.getEmptyPackaging();
@@ -6718,8 +6790,19 @@ const Calculator = {
 
         this.recalculate();
         this._isDirty = false;
+        // loadOrder() reports where the snapshot came from; only a fallback copy
+        // read while the server is configured is treated as stale.
+        const isFallbackCopy = data.source === 'local' || data.source === 'bootstrap';
+        const loadedFromServer = !isFallbackCopy
+            || (typeof isSupabaseReady === 'function' && !isSupabaseReady());
+        this._staleOrderCopy = !loadedFromServer;
+        this._knownItemIds = loadedFromServer
+            ? (dbItems || []).map((item, i) => this._orderItemIdFor(orderId, item, i + 1))
+            : [];
+        this._loadingOrder = false;
         const statusEl = document.getElementById('calc-autosave-status');
-        if (statusEl) statusEl.textContent = 'Загружен сохраненный заказ';
+        if (statusEl) statusEl.textContent = loadedFromServer ? 'Загружен сохраненный заказ' : this._staleOrderCopyMessage();
+        if (!loadedFromServer) App.toast(this._staleOrderCopyMessage());
         if (data.repaired_duplicates) {
             App.toast('Дубли позиций в заказе были автоматически исправлены');
         }

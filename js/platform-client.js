@@ -354,6 +354,7 @@
                     {
                         order: payload.order,
                         items: Array.isArray(payload.items) ? payload.items : [],
+                        knownItemIds: Array.isArray(payload.knownItemIds) ? payload.knownItemIds : [],
                         allowEmptyItemsDelete: payload.allowEmptyItemsDelete === true,
                     },
                     requestId(),

@@ -3551,6 +3551,121 @@ async function smokeBlankTemplateMoldCostOverridesGlobalDefault(context) {
     assert.equal(state.moldAmortization, 6.67, 'blank mold amortization should come from template cost, not global mold setting');
 }
 
+async function smokeOrderItemsLossGuard(context) {
+    const originals = await vm.runInContext(`({
+        renderItemBlock: Calculator.renderItemBlock,
+        renderHardwareRow: Calculator.renderHardwareRow,
+        renderPackagingRow: Calculator.renderPackagingRow,
+        renderExtraCosts: Calculator.renderExtraCosts,
+        _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+        recalculate: Calculator.recalculate,
+        showOrderHistory: Calculator.showOrderHistory,
+        _ensureWhPickerData: Calculator._ensureWhPickerData,
+        _prepareColorAttachmentsForSave: Calculator._prepareColorAttachmentsForSave,
+    })`, context);
+    const originalLoadOrder = context.loadOrder;
+    const originalSaveOrder = context.saveOrder;
+    const saveCalls = [];
+    context.saveOrder = async (order, items, options) => {
+        saveCalls.push({ order: clone(order), items: clone(items), options: clone(options || {}) });
+        return order.id;
+    };
+    const orderId = 93777;
+    const rows = [
+        { id: orderId * 1000 + 1, order_id: orderId, item_number: 1, item_type: 'product', product_name: 'Лимон', quantity: 100, pieces_per_hour: 30 },
+        { id: orderId * 1000 + 100, order_id: orderId, item_number: 100, item_type: 'hardware', product_name: 'Цепочка', quantity: 100, hardware_source: 'custom' },
+    ];
+    const loadWith = (source) => {
+        context.__loadOrderData = { order: { id: orderId, order_name: 'Лимон', status: 'draft' }, items: clone(rows), source };
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+    try {
+        await vm.runInContext(`
+            Calculator.renderItemBlock = () => {};
+            Calculator.renderHardwareRow = () => {};
+            Calculator.renderPackagingRow = () => {};
+            Calculator.renderExtraCosts = () => {};
+            Calculator._renderPerItemHwPkg = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.showOrderHistory = () => {};
+            Calculator._prepareColorAttachmentsForSave = async () => {};
+            globalThis.__releaseWhPicker = null;
+            Calculator._ensureWhPickerData = () => new Promise(resolve => { globalThis.__releaseWhPicker = resolve; });
+        `, context);
+
+        // 0. Form reset while hardware is loading: the rest of the old order must
+        // not pour into the fresh form (it used to autosave as a new draft).
+        loadWith('remote');
+        const interrupted = vm.runInContext(`Calculator.loadOrder(${orderId})`, context);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await vm.runInContext(`Calculator.resetForm(); globalThis.__releaseWhPicker({})`, context);
+        await interrupted;
+        const afterReset = clone(await vm.runInContext(`({
+            hardwareCount: Calculator.hardwareItems.length,
+            editingOrderId: App.editingOrderId,
+            known: Calculator._knownItemIds.slice(),
+        })`, context));
+        assert.equal(afterReset.hardwareCount, 0, 'an interrupted load must not add old hardware to a reset form');
+        assert.equal(afterReset.editingOrderId, null);
+        assert.deepEqual(afterReset.known, []);
+
+        // 1. While hardware is still loading, no save may run.
+        loadWith('remote');
+        const loading = vm.runInContext(`Calculator.loadOrder(${orderId})`, context);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const midLoad = clone(await vm.runInContext(`(async () => {
+            const state = {
+                loading: Calculator._loadingOrder,
+                hardwareCount: Calculator.hardwareItems.length,
+                blockReason: Calculator._orderSaveBlockReason(),
+            };
+            await Calculator._doAutosave();
+            clearTimeout(Calculator._autosaveTimer);
+            Calculator._autosaveTimer = null;
+            return state;
+        })()`, context));
+        assert.equal(midLoad.loading, true, 'form must be marked as loading while hardware is pending');
+        assert.equal(midLoad.hardwareCount, 0, 'test must observe the half-loaded form');
+        assert.ok(midLoad.blockReason, 'a half-loaded form must refuse saves');
+        assert.equal(saveCalls.length, 0, 'autosave must not write a half-loaded order');
+        await vm.runInContext(`globalThis.__releaseWhPicker({})`, context);
+        await loading;
+
+        // 2. After a full remote load the known ids authorize deletions.
+        const loaded = clone(await vm.runInContext(`({
+            loading: Calculator._loadingOrder,
+            stale: Calculator._staleOrderCopy,
+            known: Calculator._knownItemIds.slice().sort(),
+        })`, context));
+        assert.equal(loaded.loading, false);
+        assert.equal(loaded.stale, false);
+        assert.deepEqual(loaded.known, rows.map(row => String(row.id)).sort());
+        await vm.runInContext(`Calculator._doAutosave()`, context);
+        assert.equal(saveCalls.length, 1, 'fully loaded order must autosave');
+        assert.deepEqual(saveCalls[0].options.knownItemIds.slice().sort(), loaded.known);
+
+        // 3. A fallback copy (server did not answer) is never written back.
+        await vm.runInContext(`Calculator._ensureWhPickerData = async () => ({})`, context);
+        loadWith('local');
+        await vm.runInContext(`Calculator.loadOrder(${orderId})`, context);
+        const stale = clone(await vm.runInContext(`({
+            stale: Calculator._staleOrderCopy,
+            known: Calculator._knownItemIds.slice(),
+        })`, context));
+        assert.equal(stale.stale, true, 'order loaded from a local copy must be marked stale');
+        assert.deepEqual(stale.known, [], 'stale copy must not authorize deletions');
+        await vm.runInContext(`Calculator._doAutosave()`, context);
+        await vm.runInContext(`Calculator.saveOrder()`, context);
+        assert.equal(saveCalls.length, 1, 'stale copy must not be autosaved or manually saved');
+    } finally {
+        await vm.runInContext(`Calculator.resetForm()`, context);
+        context.loadOrder = originalLoadOrder;
+        context.saveOrder = originalSaveOrder;
+        context.__orderItemsLossGuardOriginals = originals;
+        await vm.runInContext(`Object.assign(Calculator, __orderItemsLossGuardOriginals)`, context);
+    }
+}
+
 async function smokeSavedBlankMoldCostSurvivesOrderReload(context) {
     const prepared = clone(await vm.runInContext(`(() => {
         App.templates = [{
@@ -9174,6 +9289,7 @@ async function main() {
     await smokeCyrillicPendantUsesLiveBlankPphFields(context);
     await smokeBlankBuiltinAssemblyUsesAssemblyLoad(context);
     await smokeBlankTemplateMoldCostOverridesGlobalDefault(context);
+    await smokeOrderItemsLossGuard(context);
     await smokeSavedBlankMoldCostSurvivesOrderReload(context);
     await smokeStandaloneLetterBlankUsesPendantTierPricing(context);
     await smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context);

@@ -158,6 +158,7 @@ async function main() {
   assert.deepEqual(JSON.parse(atomicCalls[1].options.body), {
     order: { id: 7, status: 'draft' },
     items: [{ id: 7001, order_id: 7 }],
+    knownItemIds: [],
     allowEmptyItemsDelete: false,
   });
 
