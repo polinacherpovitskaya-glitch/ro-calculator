@@ -3593,6 +3593,22 @@ async function smokeOrderItemsLossGuard(context) {
             Calculator._ensureWhPickerData = () => new Promise(resolve => { globalThis.__releaseWhPicker = resolve; });
         `, context);
 
+        // 0. Form reset while hardware is loading: the rest of the old order must
+        // not pour into the fresh form (it used to autosave as a new draft).
+        loadWith('remote');
+        const interrupted = vm.runInContext(`Calculator.loadOrder(${orderId})`, context);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await vm.runInContext(`Calculator.resetForm(); globalThis.__releaseWhPicker({})`, context);
+        await interrupted;
+        const afterReset = clone(await vm.runInContext(`({
+            hardwareCount: Calculator.hardwareItems.length,
+            editingOrderId: App.editingOrderId,
+            known: Calculator._knownItemIds.slice(),
+        })`, context));
+        assert.equal(afterReset.hardwareCount, 0, 'an interrupted load must not add old hardware to a reset form');
+        assert.equal(afterReset.editingOrderId, null);
+        assert.deepEqual(afterReset.known, []);
+
         // 1. While hardware is still loading, no save may run.
         loadWith('remote');
         const loading = vm.runInContext(`Calculator.loadOrder(${orderId})`, context);

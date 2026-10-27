@@ -1572,6 +1572,11 @@ const Calculator = {
     _knownItemIds: [],
     _loadingOrder: false,
     _staleOrderCopy: false,
+    // Bumped by every resetForm(); an order load that awaited the network must
+    // stop if the form was reset meanwhile, or it would pour the rest of the
+    // old order into the fresh form (which then autosaves as a new draft).
+    _formToken: 0,
+    _loadRequestSeq: 0,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -1632,6 +1637,7 @@ const Calculator = {
         this._knownItemIds = [];
         this._loadingOrder = false;
         this._staleOrderCopy = false;
+        this._formToken += 1;
 
         App.editingOrderId = null;
         this._currentOrderStatus = 'draft';
@@ -6492,13 +6498,18 @@ const Calculator = {
     },
 
     async loadOrder(orderId) {
+        const requestSeq = ++this._loadRequestSeq;
         const data = await loadOrder(orderId);
+        // A newer order was opened while this one was loading.
+        if (requestSeq !== this._loadRequestSeq) return;
         if (!data) {
             App.toast('Заказ не найден');
             return;
         }
 
         this.resetForm();
+        const formToken = this._formToken;
+        const isSuperseded = () => formToken !== this._formToken || requestSeq !== this._loadRequestSeq;
         // Product rows render before hardware/packaging finish loading. Until the
         // whole form is restored no save may run, or it would drop those rows.
         this._loadingOrder = true;
@@ -6615,6 +6626,7 @@ const Calculator = {
         const hwItems = dbItems.filter(i => i.item_type === 'hardware');
         if (hwItems.length > 0) {
             await this._ensureWhPickerData();
+            if (isSuperseded()) return;
         }
         hwItems.forEach((dbHw) => {
             const hw = this.getEmptyHardware();
@@ -6686,6 +6698,7 @@ const Calculator = {
         const pkgItems = dbItems.filter(i => i.item_type === 'packaging');
         if (pkgItems.some(p => p.packaging_source === 'warehouse')) {
             await this._ensureWhPickerData();
+            if (isSuperseded()) return;
         }
         pkgItems.forEach((dbPkg) => {
             const pkg = this.getEmptyPackaging();
