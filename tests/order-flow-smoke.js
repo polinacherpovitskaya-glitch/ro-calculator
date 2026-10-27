@@ -9606,6 +9606,47 @@ async function smokeTirageCalculatorSummary(context) {
     assert.equal(state.plain.marginLabel, 'Маржа · план');
 }
 
+// Сохранение пропускает пустые строки изделий — индексы родителя у фурнитуры и упаковки должны
+// указывать на сохранённые позиции, иначе доля «клиенту» уходит не той строке.
+async function smokeSaveRemapsParentIndexesPastEmptyRows(context) {
+    const saved = clone(await vm.runInContext(`(() => {
+        const pear = Object.assign(Calculator.getEmptyItem(1), { product_name: 'Груша', quantity: 50, sell_price_item: 1000, pieces_per_hour: 100, weight_grams: 10 });
+        const empty = Calculator.getEmptyItem(2);
+        const lemon = Object.assign(Calculator.getEmptyItem(3), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
+            tirage_allocation: { stock: 0, partner: 60 },
+        });
+        Calculator.items = [pear, empty, lemon];
+        const hw = (parent, name, sell) => Object.assign(Calculator.getEmptyHardware(parent), {
+            source: 'custom', name, qty: 100, price: 5, sell_price: sell, result: { costPerUnit: 5, hoursHardware: 0 },
+        });
+        Calculator.hardwareItems = [hw(2, 'Карабин лимона', 10), hw(0, 'Карабин груши', 10), hw(null, 'Общий карабин', 10), hw(1, 'Карабин пустой строки', 30)];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(2), {
+            source: 'custom', name: 'Коробка лимона', qty: 100, price: 3, sell_price: 0, result: { costPerUnit: 3, hoursPackaging: 0 },
+        })];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        return Calculator._collectItemsForSave();
+    })()`, context));
+
+    assert.deepEqual(saved.filter(row => row.item_type === 'product').map(row => row.product_name), ['Груша', 'Лимон']);
+    const hardwareParents = Object.fromEntries(saved
+        .filter(row => row.item_type === 'hardware')
+        .map(row => [row.product_name, row.hardware_parent_item_index]));
+    assert.deepEqual(hardwareParents, {
+        'Карабин лимона': 1,
+        'Карабин груши': 0,
+        'Общий карабин': null,
+        'Карабин пустой строки': null,
+    });
+    assert.equal(saved.find(row => row.item_type === 'packaging').packaging_parent_item_index, 1);
+
+    // По сохранённым строкам (так считают доска и карточка) фурнитура лимона продаётся на его
+    // 40 клиентских штук, а фурнитура несохранённой пустой строки становится общей.
+    const snapshot = clone(vm.runInContext(`getOrderLiveCalculatorSnapshot({}, ${JSON.stringify(saved)}, App.params, [])`, context));
+    assert.equal(snapshot.revenue, 50 * 1000 + 40 * 5900 + 40 * 10 + 100 * 10 + 100 * 10 + 100 * 30);
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -9619,6 +9660,7 @@ async function main() {
     await smokeTirageAllocationPersistsAndInvoices(context);
     await smokeTirageBlockUi(context);
     await smokeTirageCalculatorSummary(context);
+    await smokeSaveRemapsParentIndexesPastEmptyRows(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);

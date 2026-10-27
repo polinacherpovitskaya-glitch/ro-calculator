@@ -6258,10 +6258,15 @@ const Calculator = {
         // осознанно удалит прежние позиции через __allowEmptyItemsDelete.
         if (this.isLeftoverAssembly()) return [];
         const items = [];
+        // Индекс изделия в калькуляторе -> место среди сохранённых изделий. Пустые строки не
+        // сохраняются, а фурнитура и упаковка ссылаются на изделие по месту в сохранённом списке
+        // (по нему считаются доли разметки тиража и строится состав заказа).
+        const savedProductIndex = new Map();
 
         // Product items
-        this.items.forEach(item => {
+        this.items.forEach((item, idx) => {
             if (!this._isMeaningfulProductItem(item)) return;
+            savedProductIndex.set(idx, savedProductIndex.size);
             const r = item.result || getEmptyCostResult();
             const nfcWarehouseItemId = item.is_nfc && typeof getProductWarehouseDemandRows === 'function'
                 ? Number((getProductWarehouseDemandRows(item, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
@@ -6317,6 +6322,13 @@ const Calculator = {
                 tirage_allocation: this._tirageAllocationForStorage(item),
             });
         });
+        // Родитель не сохраняется (пустая строка) или его уже нет — позиция становится общей:
+        // иначе после загрузки она прицепилась бы к чужому изделию.
+        const savedParentIndex = parentIndex => {
+            if (parentIndex === null || parentIndex === undefined || parentIndex === '') return null;
+            const saved = savedProductIndex.get(Number(parentIndex));
+            return saved === undefined ? null : saved;
+        };
 
         // Hardware items
         this.hardwareItems.filter(hw => hw.qty > 0 || hw._from_template).forEach((hw, i) => {
@@ -6341,7 +6353,7 @@ const Calculator = {
                 china_delivery_method: hw.china_delivery_method || 'avia',
                 price_cny: hw.price_cny || 0,
                 weight_grams: hw.weight_grams || 0,
-                hardware_parent_item_index: hw.parent_item_index ?? null,
+                hardware_parent_item_index: savedParentIndex(hw.parent_item_index),
                 hardware_from_template: hw._from_template || false,
             });
         });
@@ -6369,7 +6381,7 @@ const Calculator = {
                 china_delivery_method: pkg.china_delivery_method || 'avia',
                 price_cny: pkg.price_cny || 0,
                 weight_grams: pkg.weight_grams || 0,
-                packaging_parent_item_index: pkg.parent_item_index ?? null,
+                packaging_parent_item_index: savedParentIndex(pkg.parent_item_index),
             });
         });
 
