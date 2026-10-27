@@ -9230,6 +9230,382 @@ async function smokeCustomCompositeToggleSafety(context) {
     assert.equal(restored.builtin_assembly_name, 'Сборка частей');
 }
 
+// Строка счёта по значку и названию: количество штук или null, если строки нет.
+function invoiceRowQty(html, icon, name) {
+    const row = String(html || '').split('<tr').find(chunk => chunk.includes(icon) && chunk.includes(name));
+    if (!row) return null;
+    const match = row.match(/>([\d\s.,]+) шт</);
+    return match ? Number(match[1].replace(/\s/g, '').replace(',', '.')) : NaN;
+}
+
+// Calculator.loadOrder без отрисовки; заглушки снимаются, даже если загрузка упала.
+async function loadCalculatorOrderQuietly(context, orderId) {
+    await vm.runInContext(`(async () => {
+        const originals = {
+            renderItemBlock: Calculator.renderItemBlock,
+            renderHardwareRow: Calculator.renderHardwareRow,
+            renderPackagingRow: Calculator.renderPackagingRow,
+            renderExtraCosts: Calculator.renderExtraCosts,
+            _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+            recalculate: Calculator.recalculate,
+            showOrderHistory: Calculator.showOrderHistory,
+            _ensureWhPickerData: Calculator._ensureWhPickerData,
+        };
+        try {
+            Calculator.renderItemBlock = () => {};
+            Calculator.renderHardwareRow = () => {};
+            Calculator.renderPackagingRow = () => {};
+            Calculator.renderExtraCosts = () => {};
+            Calculator._renderPerItemHwPkg = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.showOrderHistory = () => {};
+            Calculator._ensureWhPickerData = async () => ({});
+            await Calculator.loadOrder(${Number(orderId)});
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context);
+}
+
+// Разметка тиража строки: сохраняется в item_data, переживает загрузку, а счёт и КП
+// выставляются только на часть «клиенту».
+async function smokeTirageAllocationPersistsAndInvoices(context) {
+    const lemonAllocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900, partner_note: 'художница' };
+    const collected = clone(await vm.runInContext(`(() => {
+        const empty = Calculator.getEmptyItem(1);
+        const lemon = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            result: { ...getEmptyCostResult(), costTotal: 971.35 },
+            tirage_allocation: ${JSON.stringify(lemonAllocation)},
+        });
+        const plainLine = Object.assign(Calculator.getEmptyItem(2), { product_name: 'Груша', quantity: 50, sell_price_item: 1000 });
+        const allClient = Object.assign(Calculator.getEmptyItem(3), {
+            product_name: 'Слива', quantity: 10, sell_price_item: 100, tirage_allocation: { client: 10, partner_note: 'никому' },
+        });
+        const noOwnPrice = Object.assign(Calculator.getEmptyItem(4), {
+            product_name: 'Айва', quantity: 20, sell_price_item: 700, tirage_allocation: { stock: 5 },
+        });
+        Calculator.items = [lemon, plainLine, allClient, noOwnPrice];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        return {
+            emptyHasKey: Object.prototype.hasOwnProperty.call(empty, 'tirage_allocation'),
+            emptyValue: empty.tirage_allocation,
+            saved: Calculator._collectItemsForSave(),
+            expected: normalizeTirageAllocation(${JSON.stringify(lemonAllocation)}, 100, 5900).allocation,
+        };
+    })()`, context));
+
+    assert.equal(collected.emptyHasKey, true, 'loadOrder copies only keys of getEmptyItem, so the allocation must be one of them');
+    assert.equal(collected.emptyValue, null);
+    const savedProducts = collected.saved.filter(row => row.item_type === 'product');
+    assert.deepEqual(savedProducts[0].tirage_allocation, collected.expected, 'the normalized allocation is saved with the row');
+    assert.deepEqual(savedProducts[0].tirage_allocation,
+        { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 5900, partner_note: 'художница', gift_note: '' });
+    assert.equal(savedProducts[1].tirage_allocation, null, 'a line without a split saves null');
+    assert.equal(savedProducts[2].tirage_allocation, null, 'everything to the client is no split');
+    assert.deepEqual(savedProducts[3].tirage_allocation,
+        { client: 15, stock: 5, partner: 0, gift: 0, sample: 0, stock_price: 0, partner_note: '', gift_note: '' },
+        'an unset sale price stays 0 = the line price, so it follows later price changes');
+
+    const originalLoadOrder = context.loadOrder;
+    context.__tirageLoadData = {
+        order: { id: 9201, order_name: 'Лимон', status: 'draft' },
+        items: clone(collected.saved),
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__tirageLoadData);
+    try {
+        await loadCalculatorOrderQuietly(context, 9201);
+        const restored = clone(vm.runInContext('Calculator.items.map(item => item.tirage_allocation)', context));
+        assert.equal(restored[0].partner_note, 'художница', 'the split survives reopening the order');
+        assert.deepEqual(restored[0], collected.expected);
+        assert.equal(restored[1], null);
+        assert.equal(restored[2], null);
+        assert.equal(restored[3].stock_price, 0);
+
+        // Разметка, записанная строкой JSON (старые/чужие записи), тоже читается.
+        context.__tirageLoadData.items[0].tirage_allocation = JSON.stringify(lemonAllocation);
+        await loadCalculatorOrderQuietly(context, 9201);
+        assert.deepEqual(clone(vm.runInContext('Calculator.items[0].tirage_allocation', context)), collected.expected);
+        context.__tirageLoadData.items[0].tirage_allocation = '{не json';
+        await loadCalculatorOrderQuietly(context, 9201);
+        assert.equal(vm.runInContext('Calculator.items[0].tirage_allocation', context), null, 'a broken allocation is no split');
+    } finally {
+        context.loadOrder = originalLoadOrder;
+    }
+
+    // Смета для заказчика: строки изделия, его печати и фурнитуры — только на «клиенту».
+    const invoice = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            printings: [{ name: 'УФ', qty: 100, price: 5, sell_price: 20 }],
+            result: { ...getEmptyCostResult(), costTotal: 971.35, costPrinting: 5.3, costPrintingDetails: [5.3] },
+            tirage_allocation: { stock: 0, partner: 60, partner_note: 'художница' },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            source: 'custom', name: 'Карабин', qty: 100, price: 5, sell_price: 10, result: { costPerUnit: 5, hoursHardware: 0 },
+        })];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [{ name: 'Доставка', amount: 1000 }];
+        Calculator.pendants = [];
+        const contentEl = document.getElementById('calc-pricing-content');
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        const html40 = contentEl.innerHTML;
+        const summary40 = calculateOrderSummary(Calculator.items, Calculator.hardwareItems, [], Calculator.extraCosts, App.params, [], {});
+        line.tirage_allocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900 };
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        const html0 = contentEl.innerHTML;
+        return { html40, html0, revenue40: summary40.totalRevenue, revenue40Text: formatRub(summary40.totalRevenue) };
+    })()`, context));
+    assert.equal(invoiceRowQty(invoice.html40, '&#9670;', 'Лимон'), 40, 'the product row bills only the client part');
+    assert.equal(invoiceRowQty(invoice.html40, '&#9998;', 'УФ'), 40, 'printing follows the client part');
+    assert.equal(invoiceRowQty(invoice.html40, '&#9881;', 'Карабин'), 40, 'line hardware follows the client part');
+    assert.equal(invoice.revenue40, 40 * 5900 + 40 * 20 + 40 * 10 + 1000);
+    assert.ok(invoice.html40.includes(invoice.revenue40Text), 'the customer total equals the calculator revenue');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9670;', 'Лимон'), null, 'client 0: no product row');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9998;', 'УФ'), null, 'client 0: no printing row');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9881;', 'Карабин'), null, 'client 0: no hardware row of that line');
+    assert.equal(invoiceRowQty(invoice.html0, '&#10010;', 'Доставка'), 1, 'other rows stay');
+
+    // КП — тоже только «клиенту».
+    const kpCalls = clone(await vm.runInContext(`(async () => {
+        const originalGenerate = KPGenerator.generate;
+        const calls = [];
+        KPGenerator.generate = async (...args) => { calls.push(JSON.parse(JSON.stringify(args[2]))); };
+        try {
+            document.getElementById('calc-order-name').value = 'КП с разметкой';
+            const line = Calculator.items[0];
+            line.tirage_allocation = { stock: 0, partner: 60 };
+            await Calculator.generateKP();
+            line.tirage_allocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900 };
+            await Calculator.generateKP();
+            return calls;
+        } finally {
+            KPGenerator.generate = originalGenerate;
+            document.getElementById('calc-order-name').value = '';
+        }
+    })()`, context));
+    assert.equal(kpCalls.length, 2);
+    assert.deepEqual(kpCalls[0].filter(item => item.type === 'product').map(item => item.qty), [40]);
+    assert.deepEqual(kpCalls[0].filter(item => item.type === 'printing').map(item => item.qty), [40]);
+    assert.equal(kpCalls[1].some(item => item.type === 'product' || item.type === 'printing'), false, 'client 0: nothing to bill for the line');
+    assert.equal(kpCalls[1].some(item => item.type === 'extra'), true);
+
+    // Изменение тиража перенормализует разметку от того, что ввёл менеджер, и пишет под строкой, что урезано.
+    const qty = clone(await vm.runInContext(`(() => {
+        const originals = { recalculate: Calculator.recalculate, scheduleAutosave: Calculator.scheduleAutosave };
+        try {
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            const line = Object.assign(Calculator.getEmptyItem(1), {
+                product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+                tirage_allocation: ${JSON.stringify(lemonAllocation)},
+            });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            const snap = () => JSON.parse(JSON.stringify(line.tirage_allocation));
+            const noticeEl = document.getElementById('item-tirage-reduced-0');
+            Calculator.onNumChange(0, 'quantity', 60);
+            const at60 = snap();
+            const notice60 = noticeEl.textContent;
+            const block60 = Calculator.renderTirageBlock(0);
+            Calculator.onNumChange(0, 'quantity', 100);
+            const back100 = snap();
+            const notice100 = noticeEl.textContent;
+            // «60» набирают поверх «100» по одной цифре: на миг тираж становится 6
+            Calculator.onNumChange(0, 'quantity', '6');
+            Calculator.onNumChange(0, 'quantity', '60');
+            const typed60 = snap();
+            Calculator.onNumChange(0, 'quantity', 120);
+            const at120 = snap();
+            return { at60, notice60, block60, back100, notice100, typed60, at120 };
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context));
+    const partsSum = allocation => allocation.client + allocation.stock + allocation.partner + allocation.gift + allocation.sample;
+    assert.equal(partsSum(qty.at60), 60, 'the parts always add up to the tirage');
+    assert.deepEqual([qty.at60.client, qty.at60.stock, qty.at60.partner, qty.at60.gift, qty.at60.sample], [0, 0, 50, 10, 0]);
+    assert.equal(qty.at60.partner_note, 'художница');
+    assert.equal(qty.notice60, 'Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10');
+    assert.match(qty.block60, /Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10/);
+    assert.deepEqual([qty.back100.client, qty.back100.stock, qty.back100.partner, qty.back100.gift], [0, 30, 50, 20],
+        'going back to the old tirage restores what the manager entered');
+    assert.equal(qty.notice100, '');
+    assert.deepEqual(qty.typed60, qty.at60, 'typing a new tirage digit by digit does not eat the split');
+    assert.deepEqual([qty.at120.client, qty.at120.stock, qty.at120.partner, qty.at120.gift], [20, 30, 50, 20], 'extra pieces go to the client');
+}
+
+// Блок «Тираж» под строкой изделия: свёрнутый вид, поля, ограничения ввода и когда он скрыт.
+async function smokeTirageBlockUi(context) {
+    const ui = clone(await vm.runInContext(`(() => {
+        const originals = {
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+        };
+        try {
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            Calculator._renderPerItemHwPkg = () => {};
+            Calculator.resetForm();
+            const line = Object.assign(Calculator.getEmptyItem(1), { product_name: 'Лимон', quantity: 100, sell_price_item: 5900 });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            const plainCollapsed = Calculator.renderTirageBlock(0);
+            Calculator.toggleTirageBlock(0);
+            const plainOpen = Calculator.renderTirageBlock(0);
+
+            Calculator.onTirageChange(0, 'stock', '30');
+            Calculator.onTirageChange(0, 'partner', '50');
+            Calculator.onTirageChange(0, 'gift', '999');
+            const giftInput = document.getElementById('item-tirage-gift-0').value;
+            Calculator.onTirageChange(0, 'stock', '45');
+            const stockInput = document.getElementById('item-tirage-stock-0').value;
+            Calculator.onTirageTextChange(0, 'partner_note', 'художница');
+            const afterEdits = JSON.parse(JSON.stringify(line.tirage_allocation));
+            const clientShown = document.getElementById('item-tirage-client-0').textContent;
+            const summaryShown = document.getElementById('item-tirage-summary-0').textContent;
+            Calculator.toggleTirageBlock(0);
+            const splitCollapsed = Calculator.renderTirageBlock(0);
+
+            Calculator.onTirageTextChange(0, 'stock_price', '6500');
+            const ownPrice = line.tirage_allocation.stock_price;
+            const ownPriceSummary = document.getElementById('item-tirage-summary-0').textContent;
+            Calculator.onTirageTextChange(0, 'stock_price', '');
+            const clearedPrice = line.tirage_allocation.stock_price;
+
+            line.printings = [{ name: 'УФ', qty: 100, price: 5, sell_price: 20 }];
+            Calculator.toggleTirageBlock(0);
+            const printedOpen = Calculator.renderTirageBlock(0);
+
+            globalThis.__originalRenderItemBlock.call(Calculator, 0);
+            const card = document.getElementById('item-block-0').outerHTML;
+
+            const hiddenFor = {};
+            [['rework', ''], ['stock_sample', ''], ['leftover_assembly', ''], ['commercial', 'B2C'], ['commercial', ' b2c ']]
+                .forEach(([purpose, client]) => {
+                    document.getElementById('calc-production-purpose').value = purpose;
+                    document.getElementById('calc-client-name').value = client;
+                    hiddenFor[purpose + '|' + client] = Calculator.renderTirageBlock(0);
+                });
+            document.getElementById('calc-production-purpose').value = 'commercial';
+            document.getElementById('calc-client-name').value = 'ООО Лимон';
+            const shownForClient = Calculator.renderTirageBlock(0);
+            return {
+                plainCollapsed, plainOpen, giftInput, stockInput, afterEdits, clientShown, summaryShown, splitCollapsed,
+                ownPrice, ownPriceSummary, clearedPrice, printedOpen, card, hiddenFor, shownForClient,
+            };
+        } finally {
+            Object.assign(Calculator, originals);
+            Calculator.resetForm();
+        }
+    })()`, context));
+
+    assert.match(ui.plainCollapsed, /Тираж:/);
+    assert.match(ui.plainCollapsed, /весь — клиенту/);
+    assert.match(ui.plainCollapsed, /▸ разметить/);
+    assert.match(ui.plainCollapsed, /id="item-tirage-body-0"[^>]*display:none/, 'collapsed by default');
+    assert.doesNotMatch(ui.plainOpen, /id="item-tirage-body-0"[^>]*display:none/, 'opens right under the line');
+    ['stock', 'partner', 'gift', 'sample'].forEach(part => {
+        assert.match(ui.plainOpen, new RegExp(`<input[^>]*id="item-tirage-${part}-0"`), `${part} has a quantity field`);
+    });
+    ['stock-price', 'partner-note', 'gift-note'].forEach(field => {
+        assert.match(ui.plainOpen, new RegExp(`<input[^>]*id="item-tirage-${field}-0"`), `${field} field`);
+    });
+    assert.doesNotMatch(ui.plainOpen, /<input[^>]*id="item-tirage-client-0"/, 'the client part is only shown, never typed');
+    assert.match(ui.plainOpen, /id="item-tirage-client-0"[^>]*>100 шт</, 'the client gets the rest');
+    assert.match(ui.plainOpen, /id="item-tirage-stock-price-0"[^>]*placeholder="5900"/, 'default sale price = the line price');
+
+    assert.equal(ui.giftInput, '20', 'a part cannot take more than what is left');
+    assert.equal(ui.stockInput, '30', 'raising a part over the rest stops at the rest');
+    assert.deepEqual(ui.afterEdits,
+        { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 0, partner_note: 'художница', gift_note: '' });
+    assert.equal(ui.clientShown, '0 шт');
+    assert.match(ui.summaryShown, /^клиенту 0 · на продажу 30 по 5\s900 ₽ · партнёру 50 · в подарок 20$/);
+    assert.match(ui.splitCollapsed, /клиенту 0 · на продажу 30 по 5\s900 ₽ · партнёру 50 · в подарок 20/);
+    assert.match(ui.splitCollapsed, /▸ изменить/);
+    assert.equal(ui.ownPrice, 6500);
+    assert.match(ui.ownPriceSummary, /на продажу 30 по 6\s500 ₽/);
+    assert.equal(ui.clearedPrice, 0, 'an empty sale price falls back to the line price');
+    assert.match(ui.printedOpen, /id="item-tirage-stock-price-0"[^>]*placeholder="5920"/, 'default sale price includes printing');
+    assert.match(ui.printedOpen, /value="художница"/);
+
+    const qtyAt = ui.card.indexOf("Calculator.onNumChange(0, 'quantity'");
+    const blockAt = ui.card.indexOf('id="item-tirage-0"');
+    assert.ok(qtyAt > 0 && blockAt > qtyAt, 'the block sits under the tirage field');
+    assert.ok(blockAt < ui.card.indexOf('item-advanced-details'), 'and above the advanced options');
+
+    Object.entries(ui.hiddenFor).forEach(([key, html]) => {
+        assert.match(html, /id="item-tirage-0"[^>]*display:none/, `hidden for ${key}`);
+    });
+    assert.doesNotMatch(ui.shownForClient, /id="item-tirage-0"[^>]*display:none/);
+}
+
+// Сводка калькулятора и «Финдиректор» при разметке: честная выручка, «ожидаем, если продадим»,
+// «Отдаём бесплатно» и «план» у маржи.
+async function smokeTirageCalculatorSummary(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        // В заглушке DOM у элементов нет родителя, а пересчёт прячет строку подитога через него.
+        const subtotalEl = document.getElementById('c-0-subtotal');
+        subtotalEl.parentElement = { style: {} };
+        try {
+            Calculator.resetForm();
+            const line = Object.assign(Calculator.getEmptyItem(1), {
+                product_name: 'Лимон', quantity: 100, pieces_per_hour: 100, weight_grams: 10, sell_price_item: 5900,
+                is_blank_mold: false, base_mold_in_stock: true,
+                tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 },
+            });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            Calculator.extraCosts = [];
+            Calculator.pendants = [];
+            const read = id => ({ text: document.getElementById(id).textContent, display: document.getElementById(id).style.display });
+            Calculator._doRecalculate(App.params);
+            const summary = Calculator.getPurposeAwareOrderSummary(App.params);
+            const split = {
+                totalRevenue: summary.totalRevenue,
+                revenueText: formatRub(summary.totalRevenue),
+                freeText: 'Отдаём бесплатно: 70 шт. на ' + formatRub(Math.round(summary.freeCost)) + ' себестоимости',
+                sumRevenue: read('sum-revenue').text,
+                finRevenue: read('fin-revenue').text,
+                revenueNote: read('sum-revenue-note'),
+                freeNote: read('sum-free-note'),
+                marginLabel: read('sum-margin-label').text,
+            };
+            line.tirage_allocation = null;
+            Calculator._doRecalculate(App.params);
+            const plain = {
+                revenueNote: read('sum-revenue-note'),
+                freeNote: read('sum-free-note'),
+                marginLabel: read('sum-margin-label').text,
+            };
+            return { split, plain };
+        } finally {
+            delete subtotalEl.parentElement;
+            Calculator.resetForm();
+        }
+    })()`, context));
+
+    assert.equal(state.split.totalRevenue, 177000);
+    assert.equal(state.split.sumRevenue, state.split.revenueText);
+    assert.equal(state.split.finRevenue, state.split.revenueText, 'the fin director block shows the same honest revenue');
+    assert.deepEqual(state.split.revenueNote, { text: 'ожидаем, если продадим 30 шт.', display: '' });
+    assert.deepEqual(state.split.freeNote, { text: state.split.freeText, display: '' });
+    assert.equal(state.split.marginLabel, 'Маржа · план');
+    assert.equal(state.plain.revenueNote.display, 'none');
+    assert.equal(state.plain.freeNote.display, 'none');
+    assert.equal(state.plain.marginLabel, 'Маржа · план');
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -9240,6 +9616,9 @@ async function main() {
     await smokeCustomCompositePersistence(context);
     await smokeCustomCompositeEditing(context);
     await smokeCustomCompositeToggleSafety(context);
+    await smokeTirageAllocationPersistsAndInvoices(context);
+    await smokeTirageBlockUi(context);
+    await smokeTirageCalculatorSummary(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);

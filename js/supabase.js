@@ -3035,6 +3035,8 @@ const ORDER_ITEM_CALC_FIELDS = [
     'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
     'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
     'custom_composite', 'custom_parts',
+    // Разметка тиража строки: без неё доска считала бы выручку со всего тиража.
+    'tirage_allocation',
     'setup_hours_override', 'colors', 'color_count',
     'builtin_assembly_name', 'builtin_assembly_speed',
     'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',
