@@ -69,6 +69,7 @@ jobs:
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
           node tests/warehouse-blob-patch-smoke.js
+          node tests/warehouse-reservations-churn-smoke.js
           node tests/tirage-allocation-smoke.js
           node tests/marketing-purpose-smoke.js
           node tests/factual-real-cost-smoke.js
