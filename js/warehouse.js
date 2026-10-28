@@ -4014,40 +4014,74 @@ const Warehouse = {
         const currentQty = round2(rows.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0));
         if (Math.abs(currentQty - normalizedTarget) <= 0.000001) return false;
 
+        return this._applyProjectHardwareReservationTarget(reservations, rows, {
+            orderId: normalizedOrderId,
+            itemId: normalizedItemId,
+            targetQty: normalizedTarget,
+            orderName,
+            managerName,
+            nowIso,
+        });
+    },
+
+    // Brings the active auto reservations of one (order, item) pair to targetQty
+    // in place: the first record keeps its id and gets the new qty, extra ones are
+    // released, a record is created only when the pair has none. Releasing and
+    // re-creating them on every save grew the shared reservations blob by a record
+    // per row per save; an unchanged pair now writes nothing.
+    _applyProjectHardwareReservationTarget(reservations, rows, { orderId, itemId, targetQty, orderName, managerName, nowIso }) {
+        const normalizedTarget = round2(Math.max(0, parseFloat(targetQty) || 0));
+        const list = Array.isArray(rows) ? rows : [];
+
         if (normalizedTarget <= 0) {
-            rows.forEach(r => {
+            list.forEach(r => {
                 r.status = 'released';
                 r.released_at = nowIso;
             });
-            return rows.length > 0;
+            return list.length > 0;
         }
 
-        if (rows.length > 0) {
-            rows.forEach((r, index) => {
-                if (index === 0) {
-                    r.qty = normalizedTarget;
-                    r.updated_at = nowIso;
-                    r.updated_by = managerName || '';
-                    return;
-                }
-                r.status = 'released';
-                r.released_at = nowIso;
+        if (list.length === 0) {
+            reservations.push({
+                id: this._nextReservationId(reservations),
+                item_id: Number(itemId || 0),
+                order_id: Number(orderId || 0),
+                order_name: orderName || 'Заказ',
+                qty: normalizedTarget,
+                status: 'active',
+                source: 'project_hardware',
+                created_at: nowIso,
+                created_by: managerName || '',
             });
             return true;
         }
 
-        reservations.push({
-            id: Date.now() + Math.floor(Math.random() * 1000),
-            item_id: normalizedItemId,
-            order_id: normalizedOrderId,
-            order_name: orderName || 'Заказ',
-            qty: normalizedTarget,
-            status: 'active',
-            source: 'project_hardware',
-            created_at: nowIso,
-            created_by: managerName || '',
+        const [kept, ...extra] = list;
+        extra.forEach(r => {
+            r.status = 'released';
+            r.released_at = nowIso;
         });
-        return true;
+        let changed = extra.length > 0;
+        if (Math.abs((parseFloat(kept.qty) || 0) - normalizedTarget) > 0.000001) {
+            kept.qty = normalizedTarget;
+            kept.updated_at = nowIso;
+            kept.updated_by = managerName || '';
+            changed = true;
+        }
+        if (orderName && kept.order_name !== orderName) {
+            kept.order_name = orderName;
+            changed = true;
+        }
+        return changed;
+    },
+
+    // Date.now() plus a random offset collided inside one batch; the blob merge
+    // matches records by id, so a new id must not be taken yet.
+    _nextReservationId(reservations) {
+        const taken = new Set((reservations || []).map(r => String(r && r.id)));
+        let id = Date.now() + Math.floor(Math.random() * 1000);
+        while (taken.has(String(id))) id += 1;
+        return id;
     },
 
     _getProjectHardwareBlockingReservations(reservations, currentOrderId, itemId) {
@@ -5274,20 +5308,25 @@ const Warehouse = {
         let reservationsChanged = false;
         let shortage = false;
 
+        // Auto reservations are re-allocated from scratch below, so the stock they
+        // hold counts as free; the result is then applied to them in place.
+        const autoRowsByKey = new Map();
+        const autoRows = new Set();
         (reservations || []).forEach(r => {
             if (r.status !== 'active') return;
             const key = this._projectHardwareKey(r.order_id, r.item_id);
             const isAutoHardwareReservation = r.source === 'project_hardware'
                 || (r.source === 'order_calc' && trackedKeys.has(key));
             if (!isAutoHardwareReservation) return;
-            r.status = 'released';
-            r.released_at = nowIso;
-            reservationsChanged = true;
+            if (!autoRowsByKey.has(key)) autoRowsByKey.set(key, []);
+            autoRowsByKey.get(key).push(r);
+            autoRows.add(r);
         });
+        const reserveTargets = new Map();
 
         const activeByItem = new Map();
         (reservations || []).forEach(r => {
-            if (r.status !== 'active') return;
+            if (r.status !== 'active' || autoRows.has(r)) return;
             const itemId = Number(r.item_id || 0);
             if (!itemId) return;
             activeByItem.set(itemId, (activeByItem.get(itemId) || 0) + (parseFloat(r.qty) || 0));
@@ -5326,23 +5365,33 @@ const Warehouse = {
             const reserveQty = Math.min(targetQty, available);
 
             if (reserveQty > 0) {
-                reservations.push({
-                    id: Date.now() + Math.floor(Math.random() * 1000),
-                    item_id: Number(row.item_id),
-                    order_id: Number(row.order_id),
-                    order_name: row.order_name || 'Заказ',
-                    qty: reserveQty,
-                    status: 'active',
-                    source: 'project_hardware',
-                    created_at: nowIso,
-                    created_by: row.manager_name || '',
-                });
+                const key = this._projectHardwareKey(row.order_id, row.item_id);
+                const target = reserveTargets.get(key) || {
+                    orderId: Number(row.order_id),
+                    itemId: Number(row.item_id),
+                    targetQty: 0,
+                    orderName: row.order_name || 'Заказ',
+                    managerName: row.manager_name || '',
+                };
+                target.targetQty += reserveQty;
+                reserveTargets.set(key, target);
                 activeByItem.set(Number(row.item_id), alreadyReserved + reserveQty);
-                reservationsChanged = true;
             }
 
             if (reserveQty < targetQty) {
                 shortage = true;
+            }
+        });
+
+        autoRowsByKey.forEach((rows, key) => {
+            if (reserveTargets.has(key)) return;
+            if (this._applyProjectHardwareReservationTarget(reservations, rows, { targetQty: 0, nowIso })) {
+                reservationsChanged = true;
+            }
+        });
+        reserveTargets.forEach((target, key) => {
+            if (this._applyProjectHardwareReservationTarget(reservations, autoRowsByKey.get(key) || [], { ...target, nowIso })) {
+                reservationsChanged = true;
             }
         });
 
@@ -5423,19 +5472,25 @@ const Warehouse = {
         const shortageRows = [];
         let stateChanged = false;
 
+        // This order's own auto reservations are recalculated below, so the stock
+        // they hold counts as free; the result is then applied to them in place.
+        const ownRowsByItem = new Map();
+        const ownRows = new Set();
         reservations.forEach(r => {
             if (r.status !== 'active') return;
             if (Number(r.order_id) !== normalizedOrderId) return;
-            if (!itemIds.includes(Number(r.item_id || 0))) return;
+            const itemId = Number(r.item_id || 0);
+            if (!itemIds.includes(itemId)) return;
             if (!this._isProjectHardwareReservationSource(r.source)) return;
-            r.status = 'released';
-            r.released_at = nowIso;
-            reservationsChanged = true;
+            if (!ownRowsByItem.has(itemId)) ownRowsByItem.set(itemId, []);
+            ownRowsByItem.get(itemId).push(r);
+            ownRows.add(r);
         });
+        const reserveTargets = new Map();
 
         const activeByItem = new Map();
         reservations.forEach(r => {
-            if (r.status !== 'active') return;
+            if (r.status !== 'active' || ownRows.has(r)) return;
             const itemId = Number(r.item_id || 0);
             if (!itemId) return;
             activeByItem.set(itemId, (activeByItem.get(itemId) || 0) + (parseFloat(r.qty) || 0));
@@ -5506,19 +5561,8 @@ const Warehouse = {
             const reserveQty = Math.min(targetQty, available);
 
             if (reserveQty > 0) {
-                reservations.push({
-                    id: Date.now() + Math.floor(Math.random() * 1000),
-                    item_id: itemId,
-                    order_id: normalizedOrderId,
-                    order_name: orderName || 'Заказ',
-                    qty: reserveQty,
-                    status: 'active',
-                    source: 'project_hardware',
-                    created_at: nowIso,
-                    created_by: managerName || '',
-                });
+                reserveTargets.set(itemId, reserveQty);
                 activeByItem.set(itemId, alreadyReserved + reserveQty);
-                reservationsChanged = true;
             }
 
             if (reserveQty < targetQty) {
@@ -5536,6 +5580,19 @@ const Warehouse = {
                 });
             }
         }
+
+        itemIds.forEach(itemId => {
+            if (this._applyProjectHardwareReservationTarget(reservations, ownRowsByItem.get(itemId) || [], {
+                orderId: normalizedOrderId,
+                itemId,
+                targetQty: reserveTargets.get(itemId) || 0,
+                orderName: orderName || 'Заказ',
+                managerName: managerName || '',
+                nowIso,
+            })) {
+                reservationsChanged = true;
+            }
+        });
 
         Object.keys(this.projectHardwareState.checks || {}).forEach(existingKey => {
             if (!existingKey.startsWith(`${normalizedOrderId}:`)) return;
