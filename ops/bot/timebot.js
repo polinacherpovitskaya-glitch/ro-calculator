@@ -18,6 +18,11 @@ const {
     pickAnyLinkedEmployee,
     buildInactiveBindingMessage,
 } = require('./timebot-employee-access');
+const {
+    isSameTimeEntry,
+    splitDuplicateEntries,
+} = require('./timebot-duplicate-guard');
+const { evaluateDayTotal } = require('./timebot-day-limit');
 const { getStateTtlMs, getTimebotRuntimePaths, requiresCommentToSave } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -1267,30 +1272,6 @@ function matchOrderForFreeformProject(projectName, orders) {
     return exactUnique[0] || prefixUnique[0] || containsUnique[0] || null;
 }
 
-function isSameFreeformEntry(existing, candidate) {
-    if (!existing || !candidate) return false;
-    if (String(existing.date || '') !== String(candidate.date || '')) return false;
-
-    const existingHours = round2(existing.hours);
-    const candidateHours = round2(candidate.hours);
-    if (existingHours !== candidateHours) return false;
-
-    const existingMeta = parseMeta(existing.task_description);
-    const existingStage = normalizeLookupText(existingMeta.stage_label || '');
-    const candidateStage = normalizeLookupText(candidate.stage_label || '');
-    if (existingStage !== candidateStage) return false;
-
-    const existingOrderId = Number(existing.order_id || 0);
-    const candidateOrderId = Number(candidate.order_id || 0);
-    if (existingOrderId && candidateOrderId) {
-        return existingOrderId === candidateOrderId;
-    }
-
-    const existingProject = normalizeLookupText(existingMeta.project || '');
-    const candidateProject = normalizeLookupText(candidate.project_name || '');
-    return existingProject === candidateProject;
-}
-
 async function loadOrdersForFreeformMatching() {
     const { data, error } = await database
         .from('orders')
@@ -1343,7 +1324,7 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
         pendingPayloads = [];
 
         for (const [index, entry] of prepared.entries()) {
-            const duplicate = existingEntries.find(existing => isSameFreeformEntry(existing, entry));
+            const duplicate = existingEntries.find(existing => isSameTimeEntry(existing, entry));
             if (duplicate) {
                 skipped.push(entry);
                 continue;
@@ -1439,7 +1420,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
 
     const { data: todayEntries, error: todayEntriesError } = await database
         .from('time_entries')
-        .select('hours')
+        .select('*')
         .eq('employee_id', liveEmployee.id)
         .eq('date', reportDate);
     if (todayEntriesError) {
@@ -1453,7 +1434,38 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
     }
     state.existing_hours = round2((todayEntries || []).reduce((sum, entry) => sum + (parseFloat(entry.hours) || 0), 0));
 
-    const payloads = state.entries.map((entry, index) => ({
+    // Repeating a report must not multiply the hours: keep only the entries the
+    // day does not already have.
+    const { toInsert, duplicates } = splitDuplicateEntries(
+        todayEntries || [],
+        state.entries.map(entry => ({ ...entry, date: reportDate }))
+    );
+
+    if (toInsert.length === 0) {
+        send(chatId,
+            `${liveEmployee.name}, эти часы уже записаны за *${reportDate}* — второй раз не добавляю.\n\n` +
+            `Итого за день: *${state.existing_hours}ч*\n\n` +
+            'Если нужно что-то поправить — напиши Полине.',
+            { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+        );
+        clearState(telegramId);
+        return;
+    }
+
+    // An impossible day total means something went wrong upstream — a repeated
+    // report, a mistyped number — and those hours reach the payroll, so refuse
+    // rather than store them.
+    const dayLimit = evaluateDayTotal(
+        liveEmployee,
+        state.existing_hours + toInsert.reduce((sum, entry) => sum + (parseFloat(entry.hours) || 0), 0)
+    );
+    if (dayLimit.level === 'block') {
+        send(chatId, `${liveEmployee.name}, ${dayLimit.message}`, MAIN_KEYBOARD);
+        clearState(telegramId);
+        return;
+    }
+
+    const payloads = toInsert.map((entry, index) => ({
         id: Date.now() + index + Math.floor(Math.random() * 1000),
         employee_id: liveEmployee.id,
         employee_name: liveEmployee.name,
@@ -1473,17 +1485,22 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
             await new Promise(r => setTimeout(r, 5));
         }
 
-        const summary = state.entries
+        const summary = toInsert
             .map(e => `${e.project_name} / ${e.stage_label} — ${e.hours}ч`)
             .join('\n');
 
-        const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
+        const sessionHours = round2(toInsert.reduce((s, e) => s + e.hours, 0));
         const dayTotal = round2(state.existing_hours + sessionHours);
+
+        const skippedNote = duplicates.length
+            ? `\n\nПропустил как повтор (уже записано): ${duplicates.length}`
+            : '';
+        const limitNote = dayLimit.level === 'warn' ? `\n\n${dayLimit.message}` : '';
 
         const emoji = dayTotal >= 8 ? '💪' : dayTotal >= 4 ? '👍' : '✅';
         send(chatId,
             `${emoji} Супер, ${liveEmployee.name}! Записано!\n\n` +
-            `${summary}\n\n` +
+            `${summary}${skippedNote}${limitNote}\n\n` +
             `Отчёт за *${reportDate}*: *${dayTotal}ч*\n\n` +
             `Отличная работа! До завтра 🙌`,
             { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
