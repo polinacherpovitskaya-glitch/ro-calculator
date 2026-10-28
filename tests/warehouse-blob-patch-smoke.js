@@ -647,6 +647,54 @@ async function withFlippedReadyGoodsRead(server, tab, { failedKey, slowKey }, op
 const PROBE_STOCK = [...OTHER_ROWS, { id: 3, product_name: 'Кружка', qty: 1, location_type: 'our' }];
 const stockView = server => serverList(server, READY_GOODS_STORES[0]).map(row => `${row.product_name}:${row.qty}`);
 
+// js/supabase.js itself never saves a list a failed read handed out — nor one built on it — even
+// once a later read of the same list has made the store look shared again: such a list holds none
+// of the real rows, and its patch would remove them all.
+async function smokeReadyGoodsListOfAFailedReadIsNeverSaved(blobMerge) {
+    const BUILT_ON_IT = {
+        'the list itself': 'globalThis.__failed',
+        'a copy of it': '[...globalThis.__failed]',
+        'its cloned rows': 'globalThis.__failed.map(row => ({ ...row }))',
+        'a filtered copy': 'globalThis.__failed.filter(Boolean)',
+    };
+    for (const store of READY_GOODS_STORES) {
+        const server = createServer(blobMerge);
+        server.settings.set(store.key, JSON.stringify([{ id: 1, qty: 4 }, { id: 2, qty: 10 }]));
+        const tab = createTab(server);
+        const refusals = [];
+        tab.console.error = (...args) => { refusals.push(args.join(' ')); };
+        const storeKey = { stock: 'ready_goods', history: 'ready_goods_history', sales: 'sales_records' }[store.name];
+        await run(tab, `${store.load}()`);
+        server.failNextRead.add(store.key);
+        await run(tab, `${store.load}().then(rows => { globalThis.__failed = rows; })`);
+        assert.equal(run(tab, 'globalThis.__failed.length'), 0, `${store.name}: the failed read hands back an empty list`);
+        await run(tab, `${store.load}()`);
+        assert.equal(run(tab, `getReadyGoodsSourceStatus().${storeKey}.source`), 'shared-settings', `${store.name}: the store looks shared again`);
+        for (const [label, build] of Object.entries(BUILT_ON_IT)) {
+            await assert.rejects(
+                run(tab, `(async () => { const rows = ${build}; rows.push({ id: 3, qty: 1 }); await ${store.save}(rows); })()`),
+                /READY_GOODS_SHARED_UNAVAILABLE/,
+                `${store.name}: ${label} is not saved`,
+            );
+        }
+        await assert.rejects(run(tab, `${store.save}([])`), /READY_GOODS_SHARED_UNAVAILABLE/, `${store.name}: nor an empty list`);
+        assert.equal(refusals.filter(line => line.includes('refused')).length, Object.keys(BUILT_ON_IT).length + 1, `${store.name}: each refusal is logged`);
+        assert.deepEqual(serverList(server, store).map(row => row.id), [1, 2], `${store.name}: every row survives`);
+        assert.deepEqual(server.patches, [], `${store.name}: nothing is sent`);
+        assert.deepEqual(server.settingsWrites, [], `${store.name}: no whole write either`);
+        // A list a successful read returned saves as before — also as cloned rows.
+        await run(tab, `(async () => { const rows = await ${store.load}(); rows.push({ id: 3, qty: 1 }); await ${store.save}(rows); })()`);
+        await run(tab, `(async () => { const rows = (await ${store.load}()).map(row => ({ ...row })); rows[0].qty = 5; await ${store.save}(rows); })()`);
+        assert.deepEqual(serverList(server, store).map(row => `${row.id}:${row.qty}`), ['1:5', '2:10', '3:1'], `${store.name}: a real list still saves`);
+    }
+    // An empty stock has nothing to lose: a new row on top of an empty read still saves.
+    const server = createServer(blobMerge);
+    server.settings.set('ready_goods_stock_json', '[]');
+    const tab = createTab(server);
+    await run(tab, `(async () => { const rows = (await loadReadyGoods()).map(row => ({ ...row })); rows.push({ id: 7, qty: 2 }); await saveReadyGoods(rows); })()`);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [7]);
+}
+
 // The transfer's own read of the stock failed. Neither a tirage transfer nor a B2C one may take
 // that empty list for the stock: a patch from it removed every row (Брелок, Значок, Кружка → only
 // the new position). Nothing is written, and the transfer says so.
@@ -714,6 +762,7 @@ async function main() {
     await smokeTirageRecalcKeepsASaleMadeMeanwhile(blobMerge);
     await smokeTransferRefusesItsFailedStockRead(blobMerge);
     await smokeTirageStockSummaryRefusesItsFailedRead(blobMerge);
+    await smokeReadyGoodsListOfAFailedReadIsNeverSaved(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }
 

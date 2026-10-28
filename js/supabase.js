@@ -7891,6 +7891,31 @@ function _cloneReadyGoodsPayload(value) {
     return value;
 }
 
+// Lists a ready goods read handed out when it did not reach the shared base. They hold none of
+// the real rows, so _saveReadyGoodsStore never saves one — nor a list built on one — even after a
+// later read of the same list in this tab has turned the store's status back to «shared».
+const _readyGoodsFallbackLists = new WeakSet();
+
+function _readyGoodsFallbackPayload(fallbackValue) {
+    const payload = _cloneReadyGoodsPayload(fallbackValue);
+    if (payload && typeof payload === 'object') _readyGoodsFallbackLists.add(payload);
+    return payload;
+}
+
+// Would this save stand on a failed read? The list itself is one a failed read handed out (rows
+// pushed into it or not); or it was built on one ([...list], list.map(...)): then it has no tracked
+// origin — neither the list nor any of its records came from a read — and holds no record the
+// tab's latest read of the list knows of, so its patch, diffed against that read, would remove
+// every row of it. Copies of a real read keep the ids of that read and still save.
+function _isReadyGoodsListFromFailedRead(name, records) {
+    if (_readyGoodsFallbackLists.has(records)) return true;
+    if (!Array.isArray(records) || _blobArrayInfo.has(records)) return false;
+    if (records.some(record => record && typeof record === 'object' && _blobRecordInfo.has(record))) return false;
+    const latest = _blobLatestSnapshot[name];
+    if (!latest || latest.ids.size === 0) return false;
+    return !records.some(record => latest.ids.has(_blobRecordId(record)));
+}
+
 function _normalizeReadyGoodsPayload(value, fallbackValue = []) {
     if (Array.isArray(fallbackValue)) return Array.isArray(value) ? value : _cloneReadyGoodsPayload(fallbackValue);
     if (fallbackValue && typeof fallbackValue === 'object') return (value && typeof value === 'object') ? value : _cloneReadyGoodsPayload(fallbackValue);
@@ -7928,7 +7953,7 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
             // A slow or failed read is not "no data": seeding [] here used to
             // wipe ready goods stock, history and sales for everyone.
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
-            return _cloneReadyGoodsPayload(safeFallback);
+            return _readyGoodsFallbackPayload(safeFallback);
         }
 
         const seedPayload = _cloneReadyGoodsPayload(safeFallback);
@@ -7939,12 +7964,12 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
             return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], seedPayload);
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
-            return _cloneReadyGoodsPayload(safeFallback);
+            return _readyGoodsFallbackPayload(safeFallback);
         }
     }
 
     _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, isSupabaseReady() ? 'shared-unavailable' : 'shared-required');
-    return _cloneReadyGoodsPayload(safeFallback);
+    return _readyGoodsFallbackPayload(safeFallback);
 }
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
@@ -7954,6 +7979,12 @@ async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue =
     // A save is only safe on top of a list that was really read from the
     // shared store; a stale fallback must never be written back.
     if (_readyGoodsSourceStatus[storeKey] && _readyGoodsSourceStatus[storeKey].source !== READY_GOODS_SOURCE_SHARED) {
+        throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+    }
+    // The status is one for the whole tab: a list from a failed read stays unsafe after another
+    // read of the same list made the store look shared again.
+    if (_isReadyGoodsListFromFailedRead(READY_GOODS_BLOB_TARGETS[storeKey], normalized)) {
+        console.error(`save ${READY_GOODS_BLOB_TARGETS[storeKey]}: refused — the list comes from a read that did not reach the shared base`);
         throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
     }
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
