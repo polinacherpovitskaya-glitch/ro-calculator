@@ -10949,6 +10949,7 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         globalThis.__cardOriginals = {
             params: App.params,
             canAccess: App.canAccess,
+            isAdmin: App.isAdmin,
             toast: App.toast,
             metaByOrderId: Orders.metaByOrderId,
             ensureAllowed: Orders._ensureStatusTransitionAllowed,
@@ -10960,6 +10961,7 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         };
         App.params = ${JSON.stringify(LEMON_CARD_PARAMS)};
         App.canAccess = () => false;
+        App.isAdmin = () => false;
         App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
     `, context);
     const run = code => vm.runInContext(code, context);
@@ -11014,33 +11016,44 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         render();
         assert.equal(context.__realCostCalls.length, 1, 'redrawing the header does not read «Факт» again');
 
-        // 3. Разбивка — по клику, прямо под карточками; зарплатные строки только при доступе к «Факту».
+        // 3. Разбивка — по клику, прямо под карточками. Зарплатные строки и «Косвенные» — тогда же, когда
+        // их показывает страница «Факт» (App.isAdmin()); общая сумма и реальная маржа видны всем.
         assert.ok(!statsText().includes('Фурнитура'), 'closed until clicked');
         run('OrderDetail.toggleRealCostDetails()');
         const opened = statsText();
         assert.ok(opened.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), opened);
         assert.ok(opened.includes('Пластик / материалы 15 135 ₽ 15 135 ₽ по плану'), opened);
         assert.ok(opened.includes('Итого 97 135 ₽ 121 000 ₽'), opened);
+        assert.ok(opened.includes('Маржа 17,1% план 30,6%'), 'the real margin stays visible to everyone');
         assert.ok(!opened.includes('NFC'), 'a row with nothing in it is not listed');
-        assert.ok(!opened.includes('ЗП'), 'no salary rows without access to «Факт»');
-        assert.ok(opened.includes('Зарплата по этапам скрыта'), 'the missing rows are explained');
+        assert.ok(!opened.includes('ЗП'), 'no salary rows for those who cannot see them on «Факт»');
+        assert.ok(!opened.includes('Косвенные'), 'nor the indirect row');
+        assert.ok(opened.includes('Зарплата и косвенные скрыты'), 'the missing rows are explained');
         assert.ok(!opened.includes('Табеля по заказу нет'), 'there is a timesheet');
         noSmallText(dom('od-stats').innerHTML, 'real cost details');
-        run(`App.canAccess = page => page === 'factual'`);
+        // Доступ к странице «Факт» администратором не делает: у строк тот же замок, что у страницы.
+        run(`App.canAccess = () => true`);
         run('OrderDetail.renderStats()');
-        const openedWithAccess = statsText();
-        assert.ok(openedWithAccess.includes('ЗП выливание 30 000 ₽ 42 000 ₽ по факту'), openedWithAccess);
-        assert.ok(openedWithAccess.includes('ЗП срезание 5 000 ₽ 5 000 ₽ по плану'), openedWithAccess);
-        assert.ok(!openedWithAccess.includes('Зарплата по этапам скрыта'), 'nothing is hidden from them');
+        const factualPageOnly = statsText();
+        assert.ok(!factualPageOnly.includes('ЗП') && !factualPageOnly.includes('Косвенные'), factualPageOnly);
+        run(`App.canAccess = () => false; App.isAdmin = () => true`);
+        run('OrderDetail.renderStats()');
+        const openedAsAdmin = statsText();
+        assert.ok(openedAsAdmin.includes('ЗП выливание 30 000 ₽ 42 000 ₽ по факту'), openedAsAdmin);
+        assert.ok(openedAsAdmin.includes('ЗП срезание 5 000 ₽ 5 000 ₽ по плану'), openedAsAdmin);
+        assert.ok(openedAsAdmin.includes('Косвенные 12 000 ₽ 20 000 ₽ по факту'), openedAsAdmin);
+        assert.ok(!openedAsAdmin.includes('Зарплата и косвенные скрыты'), 'nothing is hidden from them');
         run('OrderDetail.toggleRealCostDetails()');
         assert.ok(!statsText().includes('Фурнитура'), 'closes on the second click');
         context.__cardCost = lemonRealCost();
         const withoutSalary = visibleText(run('OrderDetail.renderRealCostDetails(__cardCost, false)'));
         const withSalary = visibleText(run('OrderDetail.renderRealCostDetails(__cardCost, true)'));
         assert.ok(!withoutSalary.includes('ЗП'), withoutSalary);
+        assert.ok(!withoutSalary.includes('Косвенные'), withoutSalary);
         assert.ok(withoutSalary.includes('Фурнитура'), withoutSalary);
         assert.ok(withSalary.includes('ЗП выливание'), withSalary);
-        run(`App.canAccess = () => false`);
+        assert.ok(withSalary.includes('Косвенные'), withSalary);
+        run(`App.isAdmin = () => false`);
 
         // 4. Табеля нет: себестоимость плановая, и шапка так и говорит (по статьям — тоже).
         context.__realCosts[9601] = lemonPlanOnlyCost();
@@ -11049,14 +11062,20 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.ok(noSheet.includes('Маржа 30,6% по плану'), noSheet);
         assert.ok(noSheet.includes('Себестоимость 97 135 ₽ по плану'), noSheet);
         assert.ok(noSheet.includes('Часы 12.1 ч план 12.1 · табеля нет'), noSheet);
-        run(`App.canAccess = page => page === 'factual'`);
         run('OrderDetail.toggleRealCostDetails()');
+        const noSheetRowsHidden = statsText();
+        assert.ok(noSheetRowsHidden.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetRowsHidden);
+        assert.ok(!noSheetRowsHidden.includes('ЗП') && !noSheetRowsHidden.includes('Косвенные'), noSheetRowsHidden);
+        assert.ok(noSheetRowsHidden.includes('Табеля по заказу нет — зарплата и косвенные взяты по плану.'), noSheetRowsHidden);
+        run(`App.isAdmin = () => true`);
+        run('OrderDetail.renderStats()');
         const noSheetRows = statsText();
         assert.ok(noSheetRows.includes('ЗП выливание 30 000 ₽ 30 000 ₽ по плану'), noSheetRows);
+        assert.ok(noSheetRows.includes('Косвенные 12 000 ₽ 12 000 ₽ по плану'), noSheetRows);
         assert.ok(!noSheetRows.includes('по факту'), noSheetRows);
         assert.ok(noSheetRows.includes('Табеля по заказу нет — зарплата и косвенные взяты по плану.'), noSheetRows);
         run('OrderDetail.toggleRealCostDetails()');
-        run(`App.canAccess = () => false`);
+        run(`App.isAdmin = () => false`);
 
         // 5. «Факт» не ответил: шапка остаётся плановой, подписана «план», карточки себестоимости нет.
         context.__realCosts[9601] = new Error('timesheet unavailable');
@@ -11274,6 +11293,7 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         vm.runInContext(`
             App.params = globalThis.__cardOriginals.params;
             App.canAccess = globalThis.__cardOriginals.canAccess;
+            App.isAdmin = globalThis.__cardOriginals.isAdmin;
             App.toast = globalThis.__cardOriginals.toast;
             Orders.metaByOrderId = globalThis.__cardOriginals.metaByOrderId;
             Orders._ensureStatusTransitionAllowed = globalThis.__cardOriginals.ensureAllowed;

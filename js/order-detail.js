@@ -351,8 +351,17 @@ const OrderDetail = {
             && typeof Factual !== 'undefined' && !!Factual && typeof Factual.computeOrderRealCost === 'function';
     },
 
+    // Зарплатные строки и «Косвенные» карточка показывает тогда же, когда страница «Факт»
+    // (Factual._renderDetail): администратору, App.isAdmin(). Остальные видят разбивку без них;
+    // общая сумма реальной себестоимости и реальная маржа видны всем.
     _canSeeSalaryBreakdown() {
-        return typeof App !== 'undefined' && !!App && typeof App.canAccess === 'function' && !!App.canAccess('factual');
+        return typeof App !== 'undefined' && !!App && typeof App.isAdmin === 'function' && !!App.isAdmin();
+    },
+
+    // Строки, которые страница «Факт» прячет от не-администраторов: зарплата по этапам и
+    // «Косвенные» (часы × косвенные за час). Тот же признак, что у страницы.
+    _isSalaryGatedRow(row) {
+        return !!row && (row.isSalary === true || String(row.key || '').startsWith('salary_') || row.key === 'indirect_production');
     },
 
     // «Факт» считает заказ по свежему табелю — один раз на открытие карточки (и ещё раз, когда
@@ -386,13 +395,13 @@ const OrderDetail = {
     },
 
     // Из чего сложилась себестоимость заказа: статьи «Факта», план и то, что взято в расчёт (по
-    // факту или по плану). Зарплатные строки — только тем, у кого есть доступ к «Факту»; общая
-    // сумма видна всем.
+    // факту или по плану). Зарплатные строки и «Косвенные» — только при canSeeSalary (см.
+    // _canSeeSalaryBreakdown); общая сумма видна всем.
     renderRealCostDetails(breakdown, canSeeSalary) {
         const rows = Array.isArray(breakdown?.rows) ? breakdown.rows : [];
         const hasMoney = row => !!row && ((Number(row.plan) || 0) !== 0 || (Number(row.used) || 0) !== 0);
-        const shown = rows.filter(row => hasMoney(row) && (canSeeSalary || !row.isSalary));
-        const salaryHidden = !canSeeSalary && rows.some(row => hasMoney(row) && row.isSalary);
+        const shown = rows.filter(row => hasMoney(row) && (canSeeSalary || !this._isSalaryGatedRow(row)));
+        const salaryHidden = !canSeeSalary && rows.some(row => hasMoney(row) && this._isSalaryGatedRow(row));
         const cell = 'padding:8px 12px;font-size:14px;';
         const head = 'padding:8px 12px;font-size:14px;text-transform:none;letter-spacing:0;';
         const body = shown.map(row => `
@@ -407,7 +416,7 @@ const OrderDetail = {
             notes.push('Табеля по заказу нет — зарплата и косвенные взяты по плану.');
         }
         if (salaryHidden) {
-            notes.push('Зарплата по этапам скрыта: её видят те, у кого есть доступ к «Факту».');
+            notes.push('Зарплата и косвенные скрыты: их видит только владелец.');
         }
         return `
         <div class="card" id="od-real-cost-details" style="margin-bottom:0;">
