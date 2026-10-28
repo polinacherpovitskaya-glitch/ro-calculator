@@ -10193,6 +10193,18 @@ async function smokeTirageReadyGoodsTransfer(context) {
             product_name: 'Брелок', order_name: 'B2C партия', order_id: 9303, marketplace_set: '',
             location_type: 'our', qty: 10, cost_per_unit: 120, added_by: 'Smoke',
         });
+        // The production plan moves it to «Готово» as well, and a stale board (old status in hand)
+        // does it once more: the tirage is on the stock once, not twice.
+        const b2cHistory = () => base.lists.history.filter(entry => entry.type === 'from_order' && entry.order_name === 'B2C партия').length;
+        assert.equal(await move(9303, 'B2C партия'), 0);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9303, { id: 9303, order_name: 'B2C партия' }, 'delivery', 'completed')`, context);
+        assert.deepEqual(positionsOf(9303).map(row => row.qty), [10], 'one position, the tirage once');
+        assert.equal(b2cHistory(), 1, 'one transfer in the history');
+        // Back from «Готово» the positions leave; the next «Готово» moves the tirage again.
+        assert.equal(await vm.runInContext(`Warehouse.removeOrderFromReadyGoods(9303, 'B2C партия', 'delivery')`, context), 1);
+        assert.equal(positionsOf(9303).length, 0);
+        assert.equal(await move(9303, 'B2C партия'), 1);
+        assert.deepEqual(positionsOf(9303).map(row => row.qty), [10]);
 
         // 11. Без разметки, «Переделка», «Сборка из остатков» — ничего не переносится, и склад
         // даже не читается.

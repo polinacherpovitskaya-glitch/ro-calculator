@@ -7441,6 +7441,10 @@ const Warehouse = {
         const locationType = this._resolveReadyGoodsLocation(data);
 
         const { stock: rg, history } = await this._loadReadyGoodsForWrite();
+        // The tirage is already on the stock: the order went to «Готово» once more (the production
+        // plan, then a board that still showed the old status, a second click). Positions leave
+        // the stock when the order leaves «Готово», so a real new transfer always finds none.
+        if (rg.some(item => item && Number(item.order_id) === Number(orderId) && item.source !== 'tirage')) return 0;
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
         let addedCount = 0;
