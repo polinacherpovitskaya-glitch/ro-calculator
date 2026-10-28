@@ -11154,6 +11154,51 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         const afterSale = visibleText(run('OrderDetail.renderTirageInfo()'));
         assert.ok(afterSale.includes('На складе 25 из 30 · заморожено 100 833 ₽ · продано 5 на 29 500 ₽'), afterSale);
 
+        // 9a. Склад не прочитался (общая база не ответила): это не «на складе пусто». Настоящая загрузка
+        // тогда помечает список «недоступно» и отдаёт пустой — читатель отвечает ошибкой, а блок остаётся
+        // как был, вместе с кнопкой. История склада читателю не нужна: без неё он читает как обычно.
+        const shownBefore = visibleText(dom('od-tirage-slot').innerHTML);
+        const tirageStockBefore = clone(run('OrderDetail.tirageStock'));
+        assert.deepEqual(tirageStockBefore, { inStock: 25, total: 30, frozen: 100833.25, soldQty: 5, soldRevenue: 29500 });
+        const stockLoader = context.loadReadyGoods;
+        const salesLoader = context.loadSalesRecords;
+        context.loadReadyGoods = async () => { const rows = await stockLoader(); return base.unavailable.has('stock') ? [] : rows; };
+        context.loadSalesRecords = async () => { const rows = await salesLoader(); return base.unavailable.has('sales') ? [] : rows; };
+        const cardWarn = console.warn;
+        console.warn = () => {};
+        try {
+            for (const list of ['stock', 'sales']) {
+                base.unavailable.add(list);
+                const outcome = await run(`Warehouse.getOrderTirageStockSummary(9601).then(() => 'resolved', error => String(error.message))`);
+                assert.equal(outcome, 'READY_GOODS_SHARED_UNAVAILABLE', `${list}: an unreadable store is not an empty stock`);
+                await run('OrderDetail.loadTirageStock()');
+                assert.equal(visibleText(dom('od-tirage-slot').innerHTML), shownBefore, `${list}: the block stays as it was`);
+                assert.deepEqual(clone(run('OrderDetail.tirageStock')), tirageStockBefore, `${list}: and so does what it shows`);
+                assert.ok(visibleText(run('OrderDetail.renderTirageInfo()')).includes('Пересчитать себестоимость'), `${list}: the button stays`);
+                base.unavailable.delete(list);
+            }
+            // Нет истории — читателю всё равно: он её не читает.
+            base.unavailable.add('history');
+            assert.deepEqual(clone(await run('Warehouse.getOrderTirageStockSummary(9601)')), tirageStockBefore, 'history is not read, so it does not matter');
+            base.unavailable.delete('history');
+            // Первое чтение не удалось: у блока нет строки склада, но он не падает и разметка на месте.
+            open(lemon);
+            base.unavailable.add('stock');
+            await run('OrderDetail.loadTirageStock()');
+            const noStockLine = visibleText(run('OrderDetail.renderTirageInfo()'));
+            assert.ok(noStockLine.includes('клиенту 0 · на продажу 30 по 5 900 ₽'), noStockLine);
+            assert.ok(!noStockLine.includes('На складе'), noStockLine);
+            assert.equal(run('OrderDetail.tirageStock'), null);
+        } finally {
+            console.warn = cardWarn;
+            context.loadReadyGoods = stockLoader;
+            context.loadSalesRecords = salesLoader;
+            base.unavailable.clear();
+        }
+        // База снова отвечает: тот же вызов видит склад.
+        await run('OrderDetail.loadTirageStock()');
+        assert.equal(visibleText(dom('od-tirage-slot').innerHTML), shownBefore);
+
         // 10. «Пересчитать себестоимость»: ФинТабло догнал — у непроданных 25 штук 150 000 / 30 = 5 000 ₽,
         // записи продаж не тронуты, шапка читает «Факт» заново.
         context.__realCosts[9601] = lemonRealCost({ realTotal: 150000 });

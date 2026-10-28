@@ -7621,8 +7621,16 @@ const Warehouse = {
     // { inStock: pieces on the stock, total: pieces that went on sale (stock + sold), frozen: ₽
     // cost of the unsold pieces, soldQty: pieces sold, soldRevenue: ₽ of those sales }. An order
     // without positions gives zeros. One read of the stock and one of the sales; nothing is written.
+    // Rejects with READY_GOODS_SHARED_UNAVAILABLE when either store could not be read: the loaders
+    // do not throw then, they mark the store «shared-unavailable» and hand back an empty list, which
+    // would read as «nothing on the stock». Only the two stores read here are checked — the history
+    // is not read, so _isReadyGoodsSharedAvailable (all three) would refuse for the wrong reason.
     async getOrderTirageStockSummary(orderId) {
         const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
+        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
+        const bothShared = !!sourceStatus
+            && [sourceStatus.ready_goods, sourceStatus.sales_records].every(item => item && item.source === 'shared-settings');
+        if (!bothShared) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
         const positions = (stock || []).filter(item => this._isOrderTiragePosition(item, orderId));
         const empty = { inStock: 0, total: 0, frozen: 0, soldQty: 0, soldRevenue: 0 };
         if (positions.length === 0) return empty;
