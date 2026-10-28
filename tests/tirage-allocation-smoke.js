@@ -93,6 +93,14 @@ assert.equal(normalizeTirageAllocation({ stock: 1, stock_price: 0 }, 10, 5900).a
 assert.equal(normalizeTirageAllocation({ stock: 1, stock_price: '1 500,456' }, 10, 5900).allocation.stock_price, 1500.46);
 assert.equal(normalizeTirageAllocation({ stock: 1, stock_price: -3 }, 10, -7).allocation.stock_price, 0);
 
+// ключ строки (по нему склад находит позицию строки) проходит через нормализацию как есть,
+// и когда тираж урезан; без ключа — поля нет вовсе
+assert.equal(normalizeTirageAllocation({ stock: 30, line_key: 'k7x2' }, 100, 5900).allocation.line_key, 'k7x2');
+assert.equal(normalizeTirageAllocation({ stock: 30, gift: 20, line_key: 'k7x2' }, 10, 5900).allocation.line_key, 'k7x2');
+assert.equal('line_key' in normalizeTirageAllocation({ stock: 30 }, 100, 5900).allocation, false);
+assert.equal('line_key' in normalizeTirageAllocation({ stock: 30, line_key: '' }, 100, 5900).allocation, false);
+assert.equal('line_key' in normalizeTirageAllocation({ stock: 30, line_key: 7 }, 100, 5900).allocation, false, 'только строка');
+
 // пометки «кому» — свободный текст
 const notes = normalizeTirageAllocation({ partner: 1, partner_note: 'художница Маша', gift: 1, gift_note: 7 }, 10, 0).allocation;
 assert.equal(notes.partner_note, 'художница Маша');

@@ -7632,18 +7632,22 @@ const Warehouse = {
         return !!item && item.source === 'tirage' && Number(item.order_id) === Number(orderId);
     },
 
-    // The id comes from the order and the line: two tabs (or a second click) moving one order
-    // write the very same position, and the shared base keeps one.
+    // The id of a line's position comes from the line's key (or, for a line without one, from the
+    // order and the line number): two tabs (or a second click) moving one line write the very same
+    // position and the shared base keeps one, while two lines never share an id.
     _tiragePositionId(orderId, line) {
+        const fromKey = /^[0-9a-z]{1,11}$/.test(line.lineKey || '') ? parseInt(line.lineKey, 36) : NaN;
+        if (Number.isSafeInteger(fromKey) && fromKey > 0) return fromKey;
         const number = Number(line.itemNumber);
         const id = Number(orderId) * 1000 + number;
         return Number.isSafeInteger(id) && number >= 0 && number < 1000 ? id : this._newReadyGoodsId();
     },
 
-    // Product lines of an order for the stock: «на продажу» and its price, the planned cost of the
-    // line (its pieces plus its hardware and packaging) and its paid pieces. Pendants share the
-    // order's cost but never go to the stock; orderLevelCost — hardware and packaging of the whole
-    // order (only the planned cost needs it, the real cost already holds it).
+    // Product lines of an order for the stock: «на продажу» and its price, the line's stable key
+    // (line_key of its split), the planned cost of the line (its pieces plus its hardware and
+    // packaging) and its paid pieces. Pendants share the order's cost but never go to the stock;
+    // orderLevelCost — hardware and packaging of the whole order (only the planned cost needs it,
+    // the real cost already holds it).
     _getTirageLines(orderData) {
         const order = orderData?.order || {};
         const rows = (Array.isArray(orderData?.items) ? orderData.items : []).filter(row => row && typeof row === 'object');
@@ -7673,6 +7677,7 @@ const Warehouse = {
             const line = {
                 key: `product:${itemNumber}`,
                 itemNumber,
+                lineKey: split && split.line_key ? split.line_key : null,
                 productName: row.product_name || 'Товар',
                 stock: split ? split.stock : 0,
                 salePrice: split ? split.stock_price : 0,
@@ -7701,14 +7706,16 @@ const Warehouse = {
         return { lines, orderLevelCost };
     },
 
-    // Each position of the order and the line it belongs to (by the line number); a line that is
-    // gone — null.
+    // Each position of the order and the line it belongs to: by the line's key (line_key of the
+    // split ↔ order_line_key of the position), so renumbered lines keep their positions; a position
+    // without a key (older data) — by the line number. A line that is gone — null.
     _matchTiragePositions(positions, lines) {
         const productLines = lines.filter(line => line.itemNumber !== undefined);
+        const byKey = new Map(productLines.filter(line => line.lineKey).map(line => [line.lineKey, line]));
         const byNumber = new Map(productLines.map(line => [line.itemNumber, line]));
         const matched = new Map();
         positions.forEach(item => {
-            const line = byNumber.get(Number(item.order_item_number));
+            const line = item.order_line_key ? byKey.get(item.order_line_key) : byNumber.get(Number(item.order_item_number));
             matched.set(item, line || null);
         });
         return matched;
@@ -7754,8 +7761,8 @@ const Warehouse = {
     // position holds «на продажу» minus what it sold, a position whose line is no longer on sale (or
     // gone) and that sold nothing leaves. mode 'transfer' (the order goes to «Готово») only creates
     // and reconciles the quantity; mode 'sync' (a completed order was saved) also follows the line's
-    // price and name, and refuses — writing nothing — when «на продажу» would drop below what is
-    // sold.
+    // number, price and name, and refuses — writing nothing — when «на продажу» would drop below
+    // what is sold.
     async _syncTiragePositions(orderId, orderName, orderData, { mode = 'transfer' } = {}) {
         const result = { added: 0, changed: 0, removed: 0, blocked: false, message: '' };
         const tirage = this._getTirageLines(orderData);
@@ -7799,13 +7806,19 @@ const Warehouse = {
             });
         };
 
+        const takenIds = new Set(stores.stock.map(item => String(item && item.id)));
         newLines.forEach(line => {
+            let id = this._tiragePositionId(orderId, line);
+            // An id that another record of the stock already has is never reused.
+            if (takenIds.has(String(id))) id = this._newReadyGoodsId();
+            takenIds.add(String(id));
             const position = {
-                id: this._tiragePositionId(orderId, line),
+                id,
                 product_name: line.productName,
                 order_name: name,
                 order_id: Number(orderId),
                 order_item_number: line.itemNumber,
+                order_line_key: line.lineKey,
                 source: 'tirage',
                 location_type: 'our',
                 qty: line.stock,
@@ -7860,6 +7873,8 @@ const Warehouse = {
                 changed = true;
             }
             if (mode === 'sync' && line) {
+                if (Number(item.order_item_number) !== line.itemNumber) { item.order_item_number = line.itemNumber; changed = true; }
+                if (line.lineKey && item.order_line_key !== line.lineKey) { item.order_line_key = line.lineKey; changed = true; }
                 if (item.sale_price !== line.salePrice) { item.sale_price = line.salePrice; changed = true; }
                 if (item.product_name !== line.productName) { item.product_name = line.productName; changed = true; }
             }

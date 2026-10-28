@@ -9712,7 +9712,11 @@ async function smokeTirageBlockUi(context) {
 
     assert.equal(ui.giftInput, '20', 'a part cannot take more than what is left');
     assert.equal(ui.stockInput, '30', 'raising a part over the rest stops at the rest');
-    assert.deepEqual(ui.afterEdits,
+    // With its first split the line got its stable key (the ready goods stock finds the line's
+    // position by it); the rest is the split as typed.
+    const { line_key: lineKeyAfterEdits, ...splitAfterEdits } = ui.afterEdits;
+    assert.match(String(lineKeyAfterEdits || ''), /^[0-9a-z]+$/, 'the split line has a key');
+    assert.deepEqual(splitAfterEdits,
         { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 0, partner_note: 'художница', gift_note: '' });
     assert.equal(ui.clientShown, '0 шт');
     assert.match(ui.summaryShown, /^клиенту 0 · на продажу 30 по 5\s900 ₽ · партнёру 50 · в подарок 20$/);
@@ -10083,10 +10087,10 @@ async function smokeTirageReadyGoodsTransfer(context) {
         const lemon = positionsOf(9301)[0];
         assert.deepEqual(Object.keys(lemon).sort(), [
             'added_at', 'added_by', 'cost_per_unit', 'id', 'location_type', 'order_id', 'order_item_number',
-            'order_name', 'product_name', 'qty', 'sale_price', 'source',
+            'order_line_key', 'order_name', 'product_name', 'qty', 'sale_price', 'source',
         ]);
         assert.deepEqual(tiragePositionView(lemon), {
-            product_name: 'Лимон', order_name: 'Лимон', order_id: 9301, order_item_number: 1, source: 'tirage',
+            product_name: 'Лимон', order_name: 'Лимон', order_id: 9301, order_item_number: 1, order_line_key: null, source: 'tirage',
             location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900, added_by: 'Smoke',
         });
         assert.match(lemon.added_at, /^\d{4}-\d\d-\d\dT/);
@@ -10233,7 +10237,7 @@ async function smokeTirageReadyGoodsTransfer(context) {
             Date.now = realNow;
         }
         assert.deepEqual(positionsOf(9307).map(tiragePositionView), [{
-            product_name: 'Груша', order_name: 'Груша и слива', order_id: 9307, order_item_number: 1, source: 'tirage',
+            product_name: 'Груша', order_name: 'Груша и слива', order_id: 9307, order_item_number: 1, order_line_key: null, source: 'tirage',
             location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1020, added_by: 'Smoke',
         }]);
         assert.equal(positionsOf(9308)[0].cost_per_unit, 561);
@@ -10356,7 +10360,7 @@ async function smokeTirageReadyGoodsSyncToSplit(context) {
         assert.equal(clone(await sync(withPear)).ok, true);
         const pear = base.lists.stock.find(row => Number(row.order_id) === 9401 && row.order_item_number === 2);
         assert.deepEqual(tiragePositionView(pear), {
-            product_name: 'Груша', order_name: 'Лимон', order_id: 9401, order_item_number: 2, source: 'tirage',
+            product_name: 'Груша', order_name: 'Лимон', order_id: 9401, order_item_number: 2, order_line_key: null, source: 'tirage',
             location_type: 'our', qty: 4, cost_per_unit: 356.65, sale_price: 700, added_by: 'Smoke',
         });
         assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9401, options: { fresh: true } }]);
@@ -10535,6 +10539,180 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
             App.toast = globalThis.__tirageSaveOriginals.toast;
             Warehouse.syncProjectHardwareOrderState = globalThis.__tirageSaveOriginals.syncProjectHardwareOrderState;
             Calculator._prepareColorAttachmentsForSave = globalThis.__tirageSaveOriginals.prepare;
+        `, context);
+    }
+}
+
+// Позиция «на продажу» принадлежит строке, а не её номеру: удаление и копирование строк меняют
+// номера всех строк заказа, а позиция остаётся при своей строке (ключ строки в разметке тиража).
+async function smokeTiragePositionsFollowTheirLine(context) {
+    const BLOCKED = 'Заказ не сохранён: у «Лимон» на продажу 0 шт., а со склада уже продано 5 шт. Меньше проданного поставить нельзя.';
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'saveOrder'].map(name => [name, context[name]]));
+    const lemonPosition = {
+        id: 1, product_name: 'Лимон', order_name: 'Сад', order_id: 9801, order_item_number: 1, order_line_key: 'lemonkey',
+        source: 'tirage', location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    const pearPosition = {
+        id: 2, product_name: 'Груша', order_name: 'Сад', order_id: 9801, order_item_number: 2, order_line_key: 'pearkey',
+        source: 'tirage', location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1000, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    let base = null;
+    context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: [] });
+    context.__writes = [];
+    context.saveOrder = async (order, items) => { context.__writes.push(clone(items)); return order.id; };
+    context.__toasts = [];
+    vm.runInContext(`
+        globalThis.__lineKeyOriginals = {};
+        ['renderItemBlock', 'rerenderAllHardware', 'rerenderAllPackaging', 'recalculate', '_updateItemsEmptyState', 'scheduleAutosave', '_prepareColorAttachmentsForSave']
+            .forEach(name => { globalThis.__lineKeyOriginals[name] = Calculator[name]; Calculator[name] = name === '_prepareColorAttachmentsForSave' ? async () => {} : () => {}; });
+        globalThis.__lineKeyOriginals.toast = App.toast;
+        globalThis.__lineKeyOriginals.syncProjectHardwareOrderState = Warehouse.syncProjectHardwareOrderState;
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.syncProjectHardwareOrderState = async () => ({});
+    `, context);
+    const setForm = () => vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'Сад';
+        document.getElementById('calc-client-name').value = 'Сад';
+        App.editingOrderId = 9801;
+        localStorage.setItem('ro_calc_editing_order_id', '9801');
+        Calculator._currentOrderStatus = 'completed';
+        Calculator.items = [
+            Object.assign(Calculator.getEmptyItem(1), { product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
+                tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900, line_key: 'lemonkey' } }),
+            Object.assign(Calculator.getEmptyItem(2), { product_name: 'Груша', quantity: 20, sell_price_item: 1000, pieces_per_hour: 100, weight_grams: 10,
+                tirage_allocation: { stock: 10, gift: 10, line_key: 'pearkey' } }),
+        ];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+    })()`, context);
+    const orderPositions = () => base.lists.stock.filter(row => Number(row.order_id) === 9801);
+
+    try {
+        // Удалили строку №1 «Лимон»: «Груша» стала №1, но её позиция — та же (количество и
+        // себестоимость её), а позиция «Лимона» без продаж уходит со склада.
+        base = useReadyGoodsBase(context, { stock: [lemonPosition, pearPosition] });
+        setForm();
+        await vm.runInContext('Calculator.removeItem(0); Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 1);
+        assert.deepEqual(context.__writes[0].filter(row => row.item_type === 'product').map(row => `${row.item_number}:${row.product_name}`), ['1:Груша']);
+        assert.deepEqual(orderPositions().map(tiragePositionView), [{
+            product_name: 'Груша', order_name: 'Сад', order_id: 9801, order_item_number: 1, order_line_key: 'pearkey', source: 'tirage',
+            location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1000, added_by: 'Smoke',
+        }]);
+        assert.equal(orderPositions()[0].id, 2, 'the pear keeps its own position');
+        assert.ok(base.lists.history.some(entry => entry.product_name === 'Лимон' && /больше не на продажу/.test(entry.notes)));
+
+        // С проданными 5 «Лимонами» удалить его строку нельзя — ни автосохранением, ни вручную.
+        base = useReadyGoodsBase(context, {
+            stock: [{ ...lemonPosition, qty: 25 }, pearPosition],
+            sales: [{ id: 5, ready_goods_id: 1, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33 }],
+        });
+        context.__writes = [];
+        context.__toasts = [];
+        setForm();
+        await vm.runInContext('Calculator.removeItem(0); Calculator._doAutosave()', context);
+        assert.equal(String(context.document.getElementById('calc-autosave-status').textContent || ''), BLOCKED);
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.ok(context.__toasts.includes(BLOCKED));
+        assert.equal(context.__writes.length, 0, 'the order is not saved');
+        assert.deepEqual(orderPositions().map(row => `${row.product_name}:${row.qty}:${row.order_item_number}`), ['Лимон:25:1', 'Груша:10:2']);
+
+        // Перенос при «Готово» записывает ключ строки в позицию, и id позиции — от ключа. Если такой
+        // id уже у другой записи склада, позиция получает свой.
+        setForm();
+        const savedRows = clone(vm.runInContext('Calculator._collectItemsForSave()', context));
+        context.loadOrder = async () => ({ order: { id: 9802, order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: clone(savedRows) });
+        const manualTwin = { id: parseInt('pearkey', 36), product_name: 'Ручная', order_id: null, qty: 3, cost_per_unit: 10, location_type: 'our' };
+        base = useReadyGoodsBase(context, { stock: [manualTwin] });
+        assert.equal(await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9802, 'Сад')`, context), 2);
+        const moved = base.lists.stock.filter(row => Number(row.order_id) === 9802);
+        assert.deepEqual(moved.map(row => `${row.product_name}:${row.order_line_key}:${row.qty}`), ['Лимон:lemonkey:30', 'Груша:pearkey:10']);
+        assert.equal(moved[0].id, parseInt('lemonkey', 36), 'the position id comes from the line key');
+        assert.notEqual(moved[1].id, manualTwin.id, 'an id another record has is never reused');
+        assert.deepEqual(base.lists.stock.find(row => row.product_name === 'Ручная'), manualTwin, 'the other record survives');
+        context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: [] });
+
+        // Копия строки с разметкой — новая строка со своим ключом.
+        setForm();
+        const cloned = clone(await vm.runInContext(`(() => {
+            Calculator.cloneItem(0);
+            return {
+                keys: Calculator.items.map(item => item.tirage_allocation && item.tirage_allocation.line_key),
+                baseKey: Calculator.items[1]._tirageBase ? Calculator.items[1]._tirageBase.line_key : Calculator.items[1].tirage_allocation.line_key,
+                saved: Calculator._collectItemsForSave().filter(row => row.item_type === 'product').map(row => row.tirage_allocation && row.tirage_allocation.line_key),
+            };
+        })()`, context));
+        assert.equal(cloned.keys[0], 'lemonkey');
+        assert.equal(typeof cloned.keys[1], 'string');
+        assert.ok(cloned.keys[1] && cloned.keys[1] !== 'lemonkey', 'the copy gets a key of its own');
+        assert.equal(cloned.baseKey, cloned.keys[1]);
+        assert.equal(new Set(cloned.saved).size, 3, 'no two saved lines share a key');
+
+        // Ключ выдаётся, когда у строки впервые появляется разметка, и дальше не меняется.
+        const keys = clone(await vm.runInContext(`(() => {
+            Calculator.resetForm();
+            Calculator.items = [
+                Object.assign(Calculator.getEmptyItem(1), { product_name: 'Слива', quantity: 100, sell_price_item: 300 }),
+                Object.assign(Calculator.getEmptyItem(2), { product_name: 'Айва', quantity: 50, sell_price_item: 400 }),
+            ];
+            const keyOf = idx => (Calculator.items[idx].tirage_allocation || {}).line_key || '';
+            const steps = {};
+            Calculator.onTirageTextChange(1, 'partner_note', 'кому-то');
+            steps.noteOnly = keyOf(1);
+            Calculator.onTirageChange(0, 'stock', '30');
+            steps.first = keyOf(0);
+            Calculator.onTirageChange(0, 'gift', '5');
+            steps.edited = keyOf(0);
+            Calculator.items[0].quantity = 20;
+            Calculator._renormalizeItemTirage(Calculator.items[0]);
+            steps.cut = keyOf(0);
+            steps.cutStock = Calculator.items[0].tirage_allocation.stock;
+            Calculator.onTirageChange(1, 'gift', '3');
+            steps.second = keyOf(1);
+            steps.saved = Calculator._collectItemsForSave().filter(row => row.item_type === 'product').map(row => row.tirage_allocation.line_key);
+            return steps;
+        })()`, context));
+        assert.equal(keys.noteOnly, '', 'no split, no key');
+        assert.ok(keys.first, 'the first split gives the line a key');
+        assert.equal(keys.edited, keys.first);
+        assert.equal(keys.cut, keys.first, 'a smaller tirage keeps the key');
+        assert.equal(keys.cutStock, 15);
+        assert.ok(keys.second && keys.second !== keys.first);
+        assert.deepEqual(keys.saved, [keys.first, keys.second], 'the keys are saved with the lines');
+
+        // Две строки размечены в одну миллисекунду (и случайная часть совпала): ключи всё равно разные.
+        const realNow = Date.now;
+        const realRandom = Math.random;
+        Date.now = () => 1761552000000;
+        Math.random = () => 0.5;
+        let sameMsKeys;
+        try {
+            sameMsKeys = clone(vm.runInContext(`(() => {
+                Calculator.items = [
+                    Object.assign(Calculator.getEmptyItem(1), { product_name: 'Слива', quantity: 10, sell_price_item: 300 }),
+                    Object.assign(Calculator.getEmptyItem(2), { product_name: 'Айва', quantity: 10, sell_price_item: 400 }),
+                ];
+                Calculator.onTirageChange(0, 'stock', '2');
+                Calculator.onTirageChange(1, 'stock', '3');
+                return Calculator.items.map(item => item.tirage_allocation.line_key);
+            })()`, context));
+        } finally {
+            Date.now = realNow;
+            Math.random = realRandom;
+        }
+        assert.notEqual(sameMsKeys[0], sameMsKeys[1]);
+    } finally {
+        await vm.runInContext('Calculator.resetForm()', context);
+        Object.assign(context, originals);
+        vm.runInContext(`
+            Object.entries(globalThis.__lineKeyOriginals).forEach(([name, value]) => {
+                if (name === 'toast') App.toast = value;
+                else if (name === 'syncProjectHardwareOrderState') Warehouse.syncProjectHardwareOrderState = value;
+                else Calculator[name] = value;
+            });
         `, context);
     }
 }
@@ -10777,6 +10955,7 @@ async function main() {
     await smokeTirageCompletedOrderSaveFollowsReadyGoods(context);
     await smokeProductionPlanStatusSyncsReadyGoods(context);
     await smokeReadyGoodsRecordsCreatedInOneMillisecondKeepTheirIds(context);
+    await smokeTiragePositionsFollowTheirLine(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);

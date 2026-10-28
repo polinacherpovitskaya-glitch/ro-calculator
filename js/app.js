@@ -4646,11 +4646,24 @@ const Calculator = {
         this.scheduleAutosave();
     },
 
-    // Менеджер поменял разметку: это и есть новая «введённая» разметка.
+    // Менеджер поменял разметку: это и есть новая «введённая» разметка. Строка, у которой разметка
+    // появилась впервые, получает ключ line_key и дальше его не меняет: по нему склад готовой
+    // продукции узнаёт позицию строки, даже когда строки перенумеровались (удаление, копирование).
     _setItemTirage(item, allocation) {
-        item.tirage_allocation = allocation;
-        item._tirageBase = { ...allocation };
+        const lineKey = allocation.line_key || (hasTirageSplit(allocation) ? this._newTirageLineKey() : '');
+        const next = lineKey ? { ...allocation, line_key: lineKey } : allocation;
+        item.tirage_allocation = next;
+        item._tirageBase = { ...next };
         item._tirageReduced = [];
+    },
+
+    // Короткий уникальный ключ строки: миллисекунды × 1000 + случайное 0–999 в base36, в этой
+    // вкладке всегда больше предыдущего.
+    _newTirageLineKey() {
+        let value = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        if (this._lastTirageLineKeyValue && value <= this._lastTirageLineKeyValue) value = this._lastTirageLineKeyValue + 1;
+        this._lastTirageLineKeyValue = value;
+        return value.toString(36);
     },
 
     // Тираж строки изменился: разметка перенормализуется от введённой менеджером, а не от уже
@@ -4983,6 +4996,12 @@ const Calculator = {
         cloned.result = null;
         cloned.totalCostWithHwPkg = 0;
         cloned.target_price_item = 0;
+        // Копия — новая строка: ключ разметки тиража у неё свой (иначе склад спутал бы строки).
+        if (cloned.tirage_allocation && cloned.tirage_allocation.line_key) {
+            const lineKey = this._newTirageLineKey();
+            cloned.tirage_allocation = { ...cloned.tirage_allocation, line_key: lineKey };
+            if (cloned._tirageBase) cloned._tirageBase = { ...cloned._tirageBase, line_key: lineKey };
+        }
 
         // Insert cloned item right after source
         this.items.splice(idx + 1, 0, cloned);

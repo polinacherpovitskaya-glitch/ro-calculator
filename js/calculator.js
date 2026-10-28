@@ -1890,6 +1890,10 @@ function normalizeTirageAllocation(raw, quantity, defaultStockPrice) {
     });
 
     const ownStockPrice = round2(calcNumber(source.stock_price, 0));
+    // Ключ строки (line_key) проходит как есть: калькулятор выдаёт его один раз, когда у строки
+    // впервые появляется разметка, и по нему склад готовой продукции находит позицию строки,
+    // даже когда строки заказа перенумеровались. Без ключа поля нет.
+    const lineKey = typeof source.line_key === 'string' ? source.line_key : '';
     return {
         allocation: {
             client: total - counts.stock - counts.partner - counts.gift - counts.sample,
@@ -1900,6 +1904,7 @@ function normalizeTirageAllocation(raw, quantity, defaultStockPrice) {
             stock_price: ownStockPrice > 0 ? ownStockPrice : Math.max(0, round2(calcNumber(defaultStockPrice, 0))),
             partner_note: String(source.partner_note ?? ''),
             gift_note: String(source.gift_note ?? ''),
+            ...(lineKey ? { line_key: lineKey } : {}),
         },
         reduced,
     };
