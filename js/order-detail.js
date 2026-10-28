@@ -179,16 +179,9 @@ const OrderDetail = {
         return lines;
     },
 
-    // Реальная маржа заказа, %: заработок по калькулятору за вычетом перерасхода себестоимости
-    // против плана («Факт» − план), от выручки. null — если считать не из чего.
+    // Реальная маржа заказа, % — формула денег живёт в js/calculator.js (computeRealMargin).
     computeRealMargin(totalEarned, totalRevenue, realTotal, planTotal) {
-        const number = value => (value === null || value === undefined || value === '' ? NaN : Number(value));
-        const earned = number(totalEarned);
-        const revenue = number(totalRevenue);
-        const real = number(realTotal);
-        const plan = number(planTotal);
-        if (![earned, revenue, real, plan].every(Number.isFinite) || !(revenue > 0)) return null;
-        return round2((earned - (real - plan)) * 100 / revenue);
+        return computeRealMargin(totalEarned, totalRevenue, realTotal, planTotal);
     },
 
     // Реальная себестоимость заказа из «Факта» вместе с реальной маржой; null, пока «Факт» не ответил.

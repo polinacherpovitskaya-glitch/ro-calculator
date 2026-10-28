@@ -2028,6 +2028,25 @@ function allocateRealCostToRows(rows, realProductionCost) {
 }
 
 /**
+ * Реальная маржа заказа, % — для шапки карточки: заработок по калькулятору за вычетом перерасхода
+ * себестоимости против плана («Факт» − план), от выручки.
+ * @param totalEarned - заработок по калькулятору (calculateOrderSummary → totalEarned)
+ * @param totalRevenue - выручка по калькулятору
+ * @param realTotal - реальная себестоимость заказа (Factual.computeOrderRealCost → realTotal)
+ * @param planTotal - плановая себестоимость тех же статей (→ planTotal)
+ * @returns {number|null} % до сотых; null — если считать не из чего (нет выручки или числа)
+ */
+function computeRealMargin(totalEarned, totalRevenue, realTotal, planTotal) {
+    const number = value => (value === null || value === undefined || value === '' ? NaN : Number(value));
+    const earned = number(totalEarned);
+    const revenue = number(totalRevenue);
+    const real = number(realTotal);
+    const plan = number(planTotal);
+    if (![earned, revenue, real, plan].every(Number.isFinite) || !(revenue > 0)) return null;
+    return round2((earned - (real - plan)) * 100 / revenue);
+}
+
+/**
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */

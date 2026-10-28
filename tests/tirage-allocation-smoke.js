@@ -18,6 +18,7 @@ vm.runInContext(`${source}\nglobalThis.__tirage = {
     getOrderLiveCalculatorSnapshot,
     isB2CClientName,
     allocateRealCostToRows,
+    computeRealMargin,
 };`, context, { filename: 'js/calculator.js' });
 
 const {
@@ -31,6 +32,7 @@ const {
     getOrderLiveCalculatorSnapshot,
     isB2CClientName,
     allocateRealCostToRows: allocateRealCostInContext,
+    computeRealMargin,
 } = context.__tirage;
 
 // Объекты из vm-контекста имеют чужие прототипы: для deepEqual приводим к обычным.
@@ -526,5 +528,23 @@ assert.deepEqual(allocateRealCostToRows([
     { key: '2', planCost: -5, paidQty: 'abc' },
     null,
 ], '60000'), { 1: 600, 2: 0 }, 'числа из строк читаются, отрицательное и мусор = 0, пустая строка списка пропускается');
+
+// computeRealMargin: реальная маржа карточки — заработок по калькулятору за вычетом перерасхода
+// себестоимости против плана («Факт» − план), от выручки
+// «Лимон»: (54 200 − (121 000 − 97 135)) / 177 000
+assert.equal(computeRealMargin(54200, 177000, 121000, 97135), 17.14);
+// себестоимость как в плане (в том числе без табеля: итог «Факта» = план) — маржа плановая
+assert.equal(computeRealMargin(54200, 177000, 97135, 97135), 30.62);
+// дешевле плана — маржа выше
+assert.equal(computeRealMargin(54200, 177000, 90000, 97135), Math.round((54200 + 7135) * 100 / 177000 * 100) / 100);
+// числа из строк читаются
+assert.equal(computeRealMargin('54200', '177000', '121000', '97135'), 17.14);
+// считать не из чего — null, а не 0 и не NaN
+assert.equal(computeRealMargin(54200, 0, 121000, 97135), null, 'нет выручки');
+assert.equal(computeRealMargin(54200, -5, 121000, 97135), null, 'отрицательная выручка');
+assert.equal(computeRealMargin(null, 177000, 121000, 97135), null, 'заработок неизвестен');
+assert.equal(computeRealMargin(54200, 177000, undefined, 97135), null, 'реальной себестоимости нет');
+assert.equal(computeRealMargin(54200, 177000, 121000, ''), null, 'плановой нет');
+assert.equal(computeRealMargin(54200, 177000, 'мусор', 97135), null);
 
 console.log('tirage-allocation-smoke: OK');
