@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v481';
+const APP_VERSION = 'v482';
 
 const App = {
     currentPage: 'orders',
@@ -1947,7 +1947,7 @@ const Calculator = {
             return calculateLeftoverAssemblySummary(this.getLeftoverAssembly(), params, orderAdjustments);
         }
         const rawSummary = calculateOrderSummary(
-            this.items,
+            this._itemsForMoney(),
             this.hardwareItems,
             this.packagingItems,
             this.extraCosts,
@@ -2062,6 +2062,9 @@ const Calculator = {
             // Sell prices
             sell_price_item: 0,
             sell_price_printing: 0,
+            // Разметка тиража (клиенту / на продажу / партнёру / в подарок / образцы);
+            // null — весь тираж клиенту. Хранится в item_data строки.
+            tirage_allocation: null,
             result: null,
             template_id: null,
         };
@@ -2347,6 +2350,9 @@ const Calculator = {
                     ${isCustomComposite ? '<span class="form-hint">считается по частям</span>' : ''}
                 </div>
             </div>
+
+            ${this.renderTirageBlock(idx)}
+            ${this._renderTirageB2CNote(idx)}
 
             ${showCustomOnly ? this._renderCustomCompositeBlock(idx, item) : ''}
 
@@ -4236,6 +4242,9 @@ const Calculator = {
                     hw.delivery_price = newQty > 0 ? round2(hw.delivery_total / newQty) : 0;
                 }
             });
+            // Разметка тиража всегда помещается в тираж: лишнее урезается, под строкой видно что.
+            this._renormalizeItemTirage(this.items[idx]);
+            this._refreshTirageDom(idx, { syncInputs: true });
         }
         this.recalculate();
         this.scheduleAutosave();
@@ -4438,6 +4447,304 @@ const Calculator = {
                 <div id="custom-parts-summary-${idx}" style="margin-top:10px;font-size:14px;font-weight:600;">${this._customCompositeSummaryHtml(item)}</div>
                 ` : ''}
             </div>`;
+    },
+
+    // ==========================================
+    // РАЗМЕТКА ТИРАЖА (клиенту / на продажу / партнёру / в подарок / образцы)
+    // ==========================================
+    // Математика и деньги — в js/calculator.js (normalizeTirageAllocation, calculateOrderSummary).
+    // Здесь — блок «Тираж» под строкой изделия. item.tirage_allocation — нормализованная разметка,
+    // stock_price в ней — своя цена продажи (0 = цена строки: изделие + печать, она и в деньгах).
+    // Временные поля строки (в заказ не сохраняются): _tirageBase — то, что ввёл менеджер (от него
+    // разметка перенормализуется при смене тиража, поэтому набор числа по цифре её не съедает),
+    // _tirageReduced — что урезала последняя смена тиража, _tirageOpen — блок раскрыт.
+
+    TIRAGE_PART_LABELS: { client: 'клиенту', stock: 'на продажу', partner: 'партнёру', gift: 'в подарок', sample: 'образцы' },
+    TIRAGE_EDITABLE_PARTS: ['stock', 'partner', 'gift', 'sample'],
+
+    // Разметка — только у клиентских заказов: у «Переделки», «Стока / образца», «Сборки из
+    // остатков» и B2C-заказов из маркетплейсов блок скрыт и всё считается как раньше.
+    _isTirageAllowed() {
+        const purpose = this.getProductionPurpose();
+        if (purpose === 'leftover_assembly' || isNonCommercialProductionPurpose(purpose)) return false;
+        return !this._isB2COrder();
+    },
+
+    // B2C-заказ — по имени клиента, которое уйдёт в заказ (поле обрезается при сохранении), и по
+    // тому же правилу, что у Orders._shouldSyncOrderToReadyGoods.
+    _isB2COrder() {
+        return isB2CClientName((document.getElementById('calc-client-name')?.value || '').trim());
+    },
+
+    // Строки изделий для денег (смета, «Финдиректор», счёт, КП). У B2C-заказа разметка тиража не
+    // используется: весь тираж уходит на склад готовой продукции. Сама разметка в форме остаётся,
+    // чтобы под строкой было видно, что она не действует, и вернулась, если клиента исправят.
+    _itemsForMoney() {
+        if (!this._isB2COrder()) return this.items;
+        return this.items.map(item => (item && item.tirage_allocation ? { ...item, tirage_allocation: null } : item));
+    },
+
+    _renderTirageB2CNote(idx) {
+        const item = this.items[idx];
+        if (!item) return '';
+        const visible = this._isB2COrder() && this._getTirageView(item).hasSplit;
+        return `<div id="item-tirage-b2c-${idx}" style="margin:4px 0 14px;font-size:14px;font-weight:600;color:var(--text-secondary);${visible ? '' : 'display:none;'}">Для B2C разметка не используется — весь тираж уходит на склад готовой продукции</div>`;
+    },
+
+    _getTirageView(item) {
+        const { allocation } = normalizeTirageAllocation(item?.tirage_allocation, item?.quantity, 0);
+        const defaultPrice = round2(getTirageDefaultStockPrice(item || {}));
+        return {
+            allocation,
+            total: allocation.client + allocation.stock + allocation.partner + allocation.gift + allocation.sample,
+            defaultPrice,
+            // Цена «на продажу», по которой считаются деньги: своя или цена строки.
+            price: allocation.stock_price > 0 ? allocation.stock_price : defaultPrice,
+            hasSplit: hasTirageSplit(allocation),
+        };
+    },
+
+    // Сколько штук можно отдать части: тираж минус остальные части («клиенту» — это остаток).
+    _tirageAvailable(view, part) {
+        const a = view.allocation;
+        const others = a.stock + a.partner + a.gift + a.sample - (a[part] || 0);
+        return Math.max(0, view.total - others);
+    },
+
+    _tirageCount(value) {
+        return Number(value || 0).toLocaleString('ru-RU');
+    },
+
+    _tirageSummaryText(item, view = this._getTirageView(item)) {
+        if (!view.hasSplit) return 'весь — клиенту';
+        const a = view.allocation;
+        const parts = [`клиенту ${this._tirageCount(a.client)}`];
+        if (a.stock > 0) {
+            parts.push(view.price > 0
+                ? `на продажу ${this._tirageCount(a.stock)} по ${formatRub(view.price)}`
+                : `на продажу ${this._tirageCount(a.stock)}, цена не задана`);
+        }
+        if (a.partner > 0) parts.push(`партнёру ${this._tirageCount(a.partner)}`);
+        if (a.gift > 0) parts.push(`в подарок ${this._tirageCount(a.gift)}`);
+        if (a.sample > 0) parts.push(`образцы ${this._tirageCount(a.sample)}`);
+        return parts.join(' · ');
+    },
+
+    _tirageToggleLabel(item, view = this._getTirageView(item)) {
+        if (item?._tirageOpen) return '▾ свернуть';
+        return view.hasSplit ? '▸ изменить' : '▸ разметить';
+    },
+
+    _tiragePriceHint(view) {
+        return view.defaultPrice > 0
+            ? `Пусто — по цене строки: ${formatRub(view.defaultPrice)}`
+            : 'Пусто — по цене строки, когда её укажут';
+    },
+
+    _tirageReducedText(item) {
+        const reduced = Array.isArray(item?._tirageReduced) ? item._tirageReduced : [];
+        if (!reduced.length) return '';
+        return 'Тираж уменьшился: ' + reduced
+            .map(change => `${this.TIRAGE_PART_LABELS[change.part] || change.part} ${change.from} → ${change.to}`)
+            .join(', ');
+    },
+
+    renderTirageBlock(idx) {
+        const item = this.items[idx];
+        if (!item) return '';
+        const view = this._getTirageView(item);
+        const a = view.allocation;
+        const notice = this._tirageReducedText(item);
+        const labelStyle = 'display:flex;flex-direction:column;gap:4px;margin:0;font-size:13px;font-weight:600;color:var(--text-secondary);';
+        const inputStyle = 'height:38px;font-size:15px;';
+        const hintStyle = 'font-size:13px;color:var(--text-muted);line-height:1.4;';
+        const rowStyle = 'display:flex;flex-wrap:wrap;gap:8px 14px;align-items:flex-end;padding:10px 0;border-top:1px dashed var(--border);';
+        const qtyField = (part, label) => `
+                        <label class="form-group" style="${labelStyle}width:180px;"><span>${label}</span>
+                            <input type="number" min="0" max="${this._tirageAvailable(view, part)}" step="1" inputmode="numeric" id="item-tirage-${part}-${idx}" style="${inputStyle}" value="${a[part] || ''}" placeholder="0" oninput="Calculator.onTirageChange(${idx}, '${part}', this.value)">
+                        </label>`;
+        const noteField = (field, label, placeholder) => `
+                        <label class="form-group" style="${labelStyle}flex:1 1 240px;"><span>${label}</span>
+                            <input type="text" id="item-tirage-${field.replace('_', '-')}-${idx}" style="${inputStyle}" value="${this._escAttr(a[field])}" placeholder="${placeholder}" oninput="Calculator.onTirageTextChange(${idx}, '${field}', this.value)">
+                        </label>`;
+        return `
+            <div class="tirage-block" id="item-tirage-${idx}" style="margin:4px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card-bg);${this._isTirageAllowed() ? '' : 'display:none;'}">
+                <div onclick="Calculator.toggleTirageBlock(${idx})" style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;font-size:15px;cursor:pointer;">
+                    <span style="font-weight:700;">Тираж:</span>
+                    <span id="item-tirage-summary-${idx}">${this._esc(this._tirageSummaryText(item, view))}</span>
+                    <span id="item-tirage-toggle-${idx}" style="color:var(--accent);font-weight:600;white-space:nowrap;">${this._tirageToggleLabel(item, view)}</span>
+                </div>
+                <div id="item-tirage-reduced-${idx}" style="margin-top:6px;font-size:14px;font-weight:600;color:var(--orange);${notice ? '' : 'display:none;'}">${this._esc(notice)}</div>
+                <div id="item-tirage-body-${idx}" style="margin-top:10px;${item._tirageOpen ? '' : 'display:none;'}">
+                    <div style="${hintStyle}margin-bottom:4px;">Сумма частей всегда равна тиражу. Затраты считаем на весь тираж, выручку — только с «Клиенту» и «На продажу». Фурнитура и упаковка идут за изделием.</div>
+                    <div style="${rowStyle}border-top:none;">
+                        <div class="form-group" style="${labelStyle}width:180px;"><span>Клиенту</span>
+                            <div id="item-tirage-client-${idx}" style="height:38px;display:flex;align-items:center;padding:0 12px;border:1px dashed var(--border);border-radius:6px;background:var(--bg);font-size:15px;font-weight:700;color:var(--text);">${this._tirageCount(a.client)} шт</div>
+                        </div>
+                        <div style="${hintStyle}flex:1 1 240px;padding-bottom:10px;">Остаток тиража: продаём заказчику по цене строки. Только эта часть идёт в КП и счёт.</div>
+                    </div>
+                    <div style="${rowStyle}">
+                        ${qtyField('stock', 'На продажу со склада')}
+                        <label class="form-group" style="${labelStyle}width:200px;"><span>Цена продажи, ₽/шт</span>
+                            <input type="number" min="0" step="any" id="item-tirage-stock-price-${idx}" style="${inputStyle}" value="${a.stock_price > 0 ? a.stock_price : ''}" placeholder="${view.defaultPrice || ''}" oninput="Calculator.onTirageTextChange(${idx}, 'stock_price', this.value)">
+                        </label>
+                        <div id="item-tirage-price-hint-${idx}" style="${hintStyle}flex:1 1 200px;padding-bottom:10px;">${this._esc(this._tiragePriceHint(view))}</div>
+                    </div>
+                    <div style="${rowStyle}">
+                        ${qtyField('partner', 'Партнёру бесплатно')}
+                        ${noteField('partner_note', 'Кому', 'Например, художница Маша')}
+                    </div>
+                    <div style="${rowStyle}">
+                        ${qtyField('gift', 'В подарок')}
+                        ${noteField('gift_note', 'Кому / зачем', 'Например, подарки партнёрам')}
+                    </div>
+                    <div style="${rowStyle}">
+                        ${qtyField('sample', 'Образцы')}
+                    </div>
+                </div>
+            </div>`;
+    },
+
+    toggleTirageBlock(idx) {
+        const item = this.items[idx];
+        if (!item) return;
+        item._tirageOpen = !item._tirageOpen;
+        const block = document.getElementById('item-tirage-' + idx);
+        if (block) block.outerHTML = this.renderTirageBlock(idx);
+    },
+
+    // Количество части. Поле не даёт ввести больше доступного: лишнее срезается до остатка,
+    // поэтому «клиенту» никогда не уходит в минус. Ввод не перерисовывает блок (фокус не теряется).
+    onTirageChange(idx, part, value) {
+        const item = this.items[idx];
+        if (!item || !this.TIRAGE_EDITABLE_PARTS.includes(part)) return;
+        const view = this._getTirageView(item);
+        const requested = toTirageCount(value);
+        const count = Math.min(requested, this._tirageAvailable(view, part));
+        const { allocation } = normalizeTirageAllocation({ ...view.allocation, [part]: count }, item.quantity, 0);
+        this._setItemTirage(item, allocation);
+        if (requested > count) {
+            const input = document.getElementById(`item-tirage-${part}-${idx}`);
+            if (input) input.value = String(count);
+        }
+        this._refreshTirageDom(idx);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    // Цена продажи со склада (пусто = цена строки) и пометки «кому» у партнёра и подарка.
+    onTirageTextChange(idx, field, value) {
+        const item = this.items[idx];
+        if (!item || !['stock_price', 'partner_note', 'gift_note'].includes(field)) return;
+        const next = { ...this._getTirageView(item).allocation };
+        if (field === 'stock_price') next.stock_price = Math.max(0, round2(calcNumber(value, 0)));
+        else next[field] = String(value ?? '');
+        const { allocation } = normalizeTirageAllocation(next, item.quantity, 0);
+        this._setItemTirage(item, allocation);
+        this._refreshTirageDom(idx);
+        if (field === 'stock_price') this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    // Менеджер поменял разметку: это и есть новая «введённая» разметка. Строка, у которой разметка
+    // появилась впервые, получает ключ line_key и дальше его не меняет: по нему склад готовой
+    // продукции узнаёт позицию строки, даже когда строки перенумеровались (удаление, копирование).
+    _setItemTirage(item, allocation) {
+        const lineKey = allocation.line_key || (hasTirageSplit(allocation) ? this._newTirageLineKey() : '');
+        const next = lineKey ? { ...allocation, line_key: lineKey } : allocation;
+        item.tirage_allocation = next;
+        item._tirageBase = { ...next };
+        item._tirageReduced = [];
+    },
+
+    // Короткий уникальный ключ строки: миллисекунды × 1000 + случайное 0–999 в base36, в этой
+    // вкладке всегда больше предыдущего.
+    _newTirageLineKey() {
+        let value = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        if (this._lastTirageLineKeyValue && value <= this._lastTirageLineKeyValue) value = this._lastTirageLineKeyValue + 1;
+        this._lastTirageLineKeyValue = value;
+        return value.toString(36);
+    },
+
+    // Тираж строки изменился: разметка перенормализуется от введённой менеджером, а не от уже
+    // урезанной, — иначе набор «60» поверх «100» (на миг тираж 6) съел бы почти все части.
+    _renormalizeItemTirage(item) {
+        if (!item) return;
+        if (!item._tirageBase) {
+            if (!item.tirage_allocation || typeof item.tirage_allocation !== 'object') {
+                item._tirageReduced = [];
+                return;
+            }
+            item._tirageBase = { ...item.tirage_allocation };
+        }
+        const { allocation, reduced } = normalizeTirageAllocation(item._tirageBase, item.quantity, 0);
+        item.tirage_allocation = allocation;
+        item._tirageReduced = reduced;
+    },
+
+    // Обновить блок «Тираж» на месте, не трогая поле, в котором сейчас печатают.
+    _refreshTirageDom(idx, options = {}) {
+        const item = this.items[idx];
+        const block = document.getElementById('item-tirage-' + idx);
+        if (!item || !block) return;
+        block.style.display = this._isTirageAllowed() ? '' : 'none';
+        const view = this._getTirageView(item);
+        const b2cNote = document.getElementById('item-tirage-b2c-' + idx);
+        if (b2cNote) b2cNote.style.display = this._isB2COrder() && view.hasSplit ? '' : 'none';
+        this.setText('item-tirage-summary-' + idx, this._tirageSummaryText(item, view));
+        this.setText('item-tirage-toggle-' + idx, this._tirageToggleLabel(item, view));
+        this.setText('item-tirage-client-' + idx, `${this._tirageCount(view.allocation.client)} шт`);
+        this.setText('item-tirage-price-hint-' + idx, this._tiragePriceHint(view));
+        const notice = this._tirageReducedText(item);
+        const noticeEl = document.getElementById('item-tirage-reduced-' + idx);
+        if (noticeEl) {
+            noticeEl.textContent = notice;
+            noticeEl.style.display = notice ? '' : 'none';
+        }
+        this.TIRAGE_EDITABLE_PARTS.forEach(part => {
+            const input = document.getElementById(`item-tirage-${part}-${idx}`);
+            if (!input) return;
+            input.max = String(this._tirageAvailable(view, part));
+            if (options.syncInputs) input.value = view.allocation[part] ? String(view.allocation[part]) : '';
+        });
+        const priceEl = document.getElementById('item-tirage-stock-price-' + idx);
+        if (priceEl) priceEl.placeholder = view.defaultPrice ? String(view.defaultPrice) : '';
+    },
+
+    // После пересчёта: цена строки могла поменяться, а назначение или клиент — скрыть блок.
+    _refreshTirageBlocks() {
+        try {
+            (this.items || []).forEach((_, idx) => this._refreshTirageDom(idx));
+        } catch (e) {
+            console.warn('[tirage] block refresh failed:', e);
+        }
+    },
+
+    // Разметка для строки заказа (и из неё при загрузке): нормализованная; JSON-строка тоже
+    // читается; всё клиенту, пусто или мусор — null, как у строк без разметки.
+    _tirageAllocationForStorage(item) {
+        const raw = parseOrderCalcJson(item?.tirage_allocation, {});
+        const { allocation } = normalizeTirageAllocation(raw, item?.quantity, 0);
+        return hasTirageSplit(allocation) ? allocation : null;
+    },
+
+    // Сводка при разметке: выручка — ожидаемая, если продадим часть «на продажу»; отдельной
+    // строкой — сколько отдаём бесплатно и во что это обходится.
+    _syncTirageSummaryNotes(summary, isNonCommercial) {
+        const stockQty = isNonCommercial ? 0 : Number(summary?.stockQty || 0);
+        const freeQty = isNonCommercial ? 0 : Number(summary?.freeQty || 0);
+        const revenueNote = document.getElementById('sum-revenue-note');
+        if (revenueNote) {
+            revenueNote.textContent = stockQty > 0 ? `ожидаем, если продадим ${this._tirageCount(stockQty)} шт.` : '';
+            revenueNote.style.display = stockQty > 0 ? '' : 'none';
+        }
+        const freeNote = document.getElementById('sum-free-note');
+        if (freeNote) {
+            freeNote.textContent = freeQty > 0
+                ? `Отдаём бесплатно: ${this._tirageCount(freeQty)} шт. на ${formatRub(Math.round(Number(summary.freeCost) || 0))} себестоимости`
+                : '';
+            freeNote.style.display = freeQty > 0 ? '' : 'none';
+        }
     },
 
     _readFileAsDataUrl(file) {
@@ -4689,6 +4996,12 @@ const Calculator = {
         cloned.result = null;
         cloned.totalCostWithHwPkg = 0;
         cloned.target_price_item = 0;
+        // Копия — новая строка: ключ разметки тиража у неё свой (иначе склад спутал бы строки).
+        if (cloned.tirage_allocation && cloned.tirage_allocation.line_key) {
+            const lineKey = this._newTirageLineKey();
+            cloned.tirage_allocation = { ...cloned.tirage_allocation, line_key: lineKey };
+            if (cloned._tirageBase) cloned._tirageBase = { ...cloned._tirageBase, line_key: lineKey };
+        }
 
         // Insert cloned item right after source
         this.items.splice(idx + 1, 0, cloned);
@@ -4857,6 +5170,7 @@ const Calculator = {
                 item.target_price_item = calcTarget(0.40);
             }
         });
+        this._refreshTirageBlocks();
 
         // === Calculate hardware items ===
         this.hardwareItems.forEach((hw, idx) => {
@@ -4943,7 +5257,7 @@ const Calculator = {
             // FinDirector
             const fin = this.isLeftoverAssembly()
                 ? calculateLeftoverAssemblyFinDirector(this.getLeftoverAssembly(), params, orderAdjustments)
-                : calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
+                : calculateFinDirectorData(this._itemsForMoney(), this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
             const finDiscountRow = document.getElementById('fin-discount-row');
             if (App.isAdmin()) {
@@ -4978,7 +5292,9 @@ const Calculator = {
             this.setText('sum-hours', formatHours(load.totalHours));
             this.setText('sum-revenue-label', isNonCommercial ? 'Выручка' : 'Выручка без НДС');
             this.setText('sum-earned-label', isNonCommercial ? 'Некоммерческие расходы' : 'Заработок');
-            this.setText('sum-margin-label', isNonCommercial ? 'Маржа' : 'Маржа');
+            // Калькулятор считает плановые цифры; реальная маржа — в карточке заказа.
+            this.setText('sum-margin-label', isNonCommercial ? 'Маржа' : 'Маржа · план');
+            this._syncTirageSummaryNotes(summary, isNonCommercial);
             this._syncDiscountUi(summary);
 
             // Re-render pendant cards with updated results
@@ -5504,10 +5820,15 @@ const Calculator = {
             return;
         }
         let invoiceRows = [];
+        // Разметка тиража: заказчику выставляется только часть «клиенту» — по строке изделия,
+        // её печати, фурнитуре и упаковке (как и выручка в calculateOrderSummary).
+        const tirageSplits = getOrderTirageSplits(this._itemsForMoney());
 
         this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;
-            const qty = item.quantity;
+            const tirage = tirageSplits.get(i);
+            const qty = tirage ? tirage.split.client : item.quantity;
+            if (tirage && !(qty > 0)) return;
             // Use only manually entered sell price (no auto-fill)
             let itemPrice = item.sell_price_item;
             if (itemPrice > 0) {
@@ -5547,17 +5868,24 @@ const Calculator = {
             }
         });
 
+        // Фурнитура/упаковка размеченной строки — на долю тиража «клиенту», целыми штуками.
+        const billableLineQty = line => {
+            const parentTirage = getTirageParentSplit(tirageSplits, line.parent_item_index);
+            return parentTirage ? Math.round(line.qty * parentTirage.clientShare) : line.qty;
+        };
+
         // Hardware rows (both per-item and order-level)
         this.hardwareItems.forEach((hw, i) => {
-            if (hw.qty > 0 && hw.sell_price > 0) {
+            const qty = billableLineQty(hw);
+            if (qty > 0 && hw.sell_price > 0) {
                 const parentName = (hw.parent_item_index !== null && hw.parent_item_index !== undefined)
                     ? (this.items[hw.parent_item_index]?.product_name || ('Изделие ' + (hw.parent_item_index + 1)))
                     : '';
                 invoiceRows.push({
                     name: (parentName ? `Фурнитура (${parentName})` : 'Общая фурнитура') + ' · ' + (hw.name || ('Фурнитура ' + (i + 1))),
-                    qty: hw.qty,
+                    qty: qty,
                     price: hw.sell_price,
-                    total: round2(hw.sell_price * hw.qty),
+                    total: round2(hw.sell_price * qty),
                     type: 'hw',
                 });
             }
@@ -5565,15 +5893,16 @@ const Calculator = {
 
         // Packaging rows (both per-item and order-level)
         this.packagingItems.forEach((pkg, i) => {
-            if (pkg.qty > 0 && pkg.sell_price > 0) {
+            const qty = billableLineQty(pkg);
+            if (qty > 0 && pkg.sell_price > 0) {
                 const parentName = (pkg.parent_item_index !== null && pkg.parent_item_index !== undefined)
                     ? (this.items[pkg.parent_item_index]?.product_name || ('Изделие ' + (pkg.parent_item_index + 1)))
                     : '';
                 invoiceRows.push({
                     name: (parentName ? `Упаковка (${parentName})` : 'Общая упаковка') + ' · ' + (pkg.name || ('Упаковка ' + (i + 1))),
-                    qty: pkg.qty,
+                    qty: qty,
                     price: pkg.sell_price,
-                    total: round2(pkg.sell_price * pkg.qty),
+                    total: round2(pkg.sell_price * qty),
                     type: 'pkg',
                 });
             }
@@ -5939,6 +6268,16 @@ const Calculator = {
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
+            // «Готово»: «на продажу» below what is already sold is not saved.
+            if (order.status === 'completed') {
+                const soldFloor = await this._checkCompletedOrderReadyGoods(orderIdForSave, order, items);
+                if (soldFloor.blocked) {
+                    const blockedStatusEl = document.getElementById('calc-autosave-status');
+                    if (blockedStatusEl) blockedStatusEl.textContent = soldFloor.message;
+                    return;
+                }
+            }
+
             const knownItemIds = (this._knownItemIds || []).slice();
             const orderId = await this._enqueueOrderWrite(() => {
                 if (!this._isCurrentAutosave(autosaveGeneration)) return null;
@@ -5956,6 +6295,13 @@ const Calculator = {
                 if (statusEl) statusEl.textContent = 'Черновик сохранён • ' + timeStr;
                 this._clearLocalDraftSnapshot();
             }
+            // The order is written: now the ready goods stock follows its split.
+            if (orderId && order.status === 'completed'
+                && !(await this._syncCompletedOrderReadyGoods(orderId, order, items))
+                && this._isCurrentAutosave(autosaveGeneration)) {
+                const syncStatusEl = document.getElementById('calc-autosave-status');
+                if (syncStatusEl) syncStatusEl.textContent = this.READY_GOODS_SYNC_FAILED_MESSAGE;
+            }
         } catch (e) {
             console.error('[autosave] error:', e);
             const statusEl = document.getElementById('calc-autosave-status');
@@ -5965,16 +6311,58 @@ const Calculator = {
         }
     },
 
+    // Заказ в «Готово»: его штуки «на продажу» стоят на складе готовой продукции и могли уже
+    // продаваться. Сначала проверка (blocked — «на продажу» меньше проданного, заказ не сохраняют,
+    // в message — почему), потом запись заказа, потом склад подстраивается под его разметку.
+    // Синхронизация повторяемая: если она не прошла, следующее сохранение догонит склад.
+    READY_GOODS_SYNC_FAILED_MESSAGE: 'Заказ сохранён, но склад готовой продукции не обновился — сохраните ещё раз',
+
+    async _checkCompletedOrderReadyGoods(orderId, order, items) {
+        if (!order || order.status !== 'completed') return { ok: true, message: '' };
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.checkOrderReadyGoodsSoldFloor !== 'function') {
+            return { ok: true, message: '' };
+        }
+        try {
+            return (await Warehouse.checkOrderReadyGoodsSoldFloor(orderId, { order, items })) || { ok: true, message: '' };
+        } catch (error) {
+            // Nothing to block on; the sync after the save reports the stock.
+            console.error('[Calculator] ready goods check failed:', error);
+            return { ok: false, message: '' };
+        }
+    },
+
+    // true — the stock follows the saved order (or there is nothing to follow).
+    async _syncCompletedOrderReadyGoods(orderId, order, items) {
+        if (!order || order.status !== 'completed') return true;
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.syncOrderReadyGoodsToTirage !== 'function') {
+            return true;
+        }
+        try {
+            const result = await Warehouse.syncOrderReadyGoodsToTirage(orderId, { order, items });
+            return !result || result.ok !== false;
+        } catch (error) {
+            console.error('[Calculator] ready goods sync failed:', error);
+            return false;
+        }
+    },
+
     _collectItemsForSave() {
         // Остатки не находятся на складе и не должны создавать никаких позиций,
         // резервов или списаний. При переводе старого заказа пустой состав ниже
         // осознанно удалит прежние позиции через __allowEmptyItemsDelete.
         if (this.isLeftoverAssembly()) return [];
         const items = [];
+        // Индекс изделия в калькуляторе -> место среди сохранённых изделий. Пустые строки не
+        // сохраняются, а фурнитура и упаковка ссылаются на изделие по месту в сохранённом списке
+        // (по нему считаются доли разметки тиража и строится состав заказа).
+        const savedProductIndex = new Map();
+        // B2C-заказ разметку не использует — в заказ она не пишется.
+        const keepTirage = !this._isB2COrder();
 
         // Product items
-        this.items.forEach(item => {
+        this.items.forEach((item, idx) => {
             if (!this._isMeaningfulProductItem(item)) return;
+            savedProductIndex.set(idx, savedProductIndex.size);
             const r = item.result || getEmptyCostResult();
             const nfcWarehouseItemId = item.is_nfc && typeof getProductWarehouseDemandRows === 'function'
                 ? Number((getProductWarehouseDemandRows(item, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
@@ -6027,8 +6415,16 @@ const Calculator = {
                 color_name: item.color_name || '',
                 colors: JSON.stringify(item.colors || []),
                 color_solution_attachment: serializeColorAttachments(item),
+                tirage_allocation: keepTirage ? this._tirageAllocationForStorage(item) : null,
             });
         });
+        // Родитель не сохраняется (пустая строка) или его уже нет — позиция становится общей:
+        // иначе после загрузки она прицепилась бы к чужому изделию.
+        const savedParentIndex = parentIndex => {
+            if (parentIndex === null || parentIndex === undefined || parentIndex === '') return null;
+            const saved = savedProductIndex.get(Number(parentIndex));
+            return saved === undefined ? null : saved;
+        };
 
         // Hardware items
         this.hardwareItems.filter(hw => hw.qty > 0 || hw._from_template).forEach((hw, i) => {
@@ -6053,7 +6449,7 @@ const Calculator = {
                 china_delivery_method: hw.china_delivery_method || 'avia',
                 price_cny: hw.price_cny || 0,
                 weight_grams: hw.weight_grams || 0,
-                hardware_parent_item_index: hw.parent_item_index ?? null,
+                hardware_parent_item_index: savedParentIndex(hw.parent_item_index),
                 hardware_from_template: hw._from_template || false,
             });
         });
@@ -6081,7 +6477,7 @@ const Calculator = {
                 china_delivery_method: pkg.china_delivery_method || 'avia',
                 price_cny: pkg.price_cny || 0,
                 weight_grams: pkg.weight_grams || 0,
-                packaging_parent_item_index: pkg.parent_item_index ?? null,
+                packaging_parent_item_index: savedParentIndex(pkg.parent_item_index),
             });
         });
 
@@ -6210,6 +6606,17 @@ const Calculator = {
                 || 'draft';
         }
 
+        // «Готово»: «на продажу» below what is already sold is not saved.
+        if (order.status === 'completed') {
+            const soldFloor = await this._checkCompletedOrderReadyGoods(orderIdForSave, order, items);
+            if (soldFloor.blocked) {
+                const blockedStatusEl = document.getElementById('calc-autosave-status');
+                if (blockedStatusEl) blockedStatusEl.textContent = soldFloor.message;
+                App.toast(soldFloor.message);
+                return;
+            }
+        }
+
         let orderId = null;
         try {
             const knownItemIds = (this._knownItemIds || []).slice();
@@ -6308,7 +6715,15 @@ const Calculator = {
             this._invalidateWhPickerContext();
             this._captureCommittedWhDemandSnapshot(orderId);
 
-            if (warehouseSyncError) {
+            // The order is written: now the ready goods stock follows its split.
+            const readyGoodsSynced = order.status === 'completed'
+                ? await this._syncCompletedOrderReadyGoods(orderId, order, items)
+                : true;
+
+            if (!readyGoodsSynced) {
+                // Saving again re-runs both syncs, so this message covers a hardware failure too.
+                App.toast(this.READY_GOODS_SYNC_FAILED_MESSAGE);
+            } else if (warehouseSyncError) {
                 App.toast('Заказ сохранён, но склад не синхронизировался');
             } else if (!warehouseSyncResult || !warehouseSyncResult.shortage) {
                 App.toast('Заказ сохранен');
@@ -6583,6 +6998,8 @@ const Calculator = {
             item.custom_parts = normalizeCustomParts(item);
             item.custom_composite = isCustomCompositeItem(item);
             item.color_solution_attachment = normalizeColorAttachments(item);
+            // Разметка тиража из item_data (объект или JSON-строка); всё клиенту — null.
+            item.tirage_allocation = this._tirageAllocationForStorage(item);
             // Migrate old single color_id to colors array
             if (item.colors.length === 0 && item.color_id) {
                 const allC = Colors.data || [];
@@ -7082,15 +7499,20 @@ const Calculator = {
 
         // Collect data for КП — 4 entities: item, printing, hw, pkg
         const kpItems = [];
+        // Разметка тиража: в КП — только часть «клиенту» (изделие и его печать).
+        const tirageSplits = getOrderTirageSplits(this._itemsForMoney());
 
-        this.items.forEach(item => {
+        this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;
+            const tirage = tirageSplits.get(i);
+            const qty = tirage ? tirage.split.client : item.quantity;
+            if (tirage && !(qty > 0)) return;
             // Item (without printing)
             if ((item.sell_price_item || 0) > 0) {
                 kpItems.push({
                     type: 'product',
                     name: item.product_name || 'Изделие',
-                    qty: item.quantity,
+                    qty: qty,
                     price: item.sell_price_item,
                     colors: (item.colors || []).map(c => c.name).filter(Boolean),
                 });
@@ -7102,7 +7524,7 @@ const Calculator = {
                     kpItems.push({
                         type: 'printing',
                         name: pr.name || ('Нанесение ' + (pi + 1)),
-                        qty: item.quantity,
+                        qty: qty,
                         price: pr.sell_price,
                     });
                 }
@@ -7112,7 +7534,7 @@ const Calculator = {
                 kpItems.push({
                     type: 'printing',
                     name: 'Нанесение',
-                    qty: item.quantity,
+                    qty: qty,
                     price: item.sell_price_printing,
                 });
             }

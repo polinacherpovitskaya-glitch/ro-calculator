@@ -1,8 +1,8 @@
 // Атомарные патчи для legacy-«блобов» склада: одна строка compat_rows хранит
-// весь список (резервы, история) или набор карт (галочки «собрано»). Раньше
-// вкладки перезаписывали такую строку целиком из своей, возможно устаревшей,
-// копии. Здесь клиент присылает только изменения, а сервер вливает их в
-// текущее значение под блокировкой таблицы.
+// весь список (резервы, история, готовая продукция) или набор карт (галочки
+// «собрано»). Раньше вкладки перезаписывали такую строку целиком из своей,
+// возможно устаревшей, копии. Здесь клиент присылает только изменения, а
+// сервер вливает их в текущее значение под блокировкой таблицы.
 
 export const BLOB_TARGETS = Object.freeze({
   warehouse_reservations: {
@@ -28,6 +28,31 @@ export const BLOB_TARGETS = Object.freeze({
     keyRow: { key: 'project_hardware_state_json' },
     field: 'value',
     kind: 'maps',
+  },
+  // Склад готовой продукции: три списка записей, каждый в своей строке settings.
+  ready_goods_stock: {
+    table: 'settings',
+    primaryKey: ['key'],
+    sourceId: 'ready_goods_stock_json',
+    keyRow: { key: 'ready_goods_stock_json' },
+    field: 'value',
+    kind: 'records',
+  },
+  ready_goods_history: {
+    table: 'settings',
+    primaryKey: ['key'],
+    sourceId: 'ready_goods_history_json',
+    keyRow: { key: 'ready_goods_history_json' },
+    field: 'value',
+    kind: 'records',
+  },
+  ready_goods_sales_records: {
+    table: 'settings',
+    primaryKey: ['key'],
+    sourceId: 'ready_goods_sales_records_json',
+    keyRow: { key: 'ready_goods_sales_records_json' },
+    field: 'value',
+    kind: 'records',
   },
 });
 

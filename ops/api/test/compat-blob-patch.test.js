@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  BLOB_TARGETS,
   mergeRecords,
   mergeMaps,
   releaseSupersededProjectHardwareReservations,
+  applyBlobPatchToValue,
   parseBlobValue,
 } from '../src/compat-blob-patch.js';
 import { executeBlobPatch } from '../src/routes/compat.js';
@@ -71,7 +73,13 @@ function fakeClient(rows) {
     async query(sql, params = []) {
       if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
       if (sql.includes('SELECT data')) {
-        return { rows: (rows[params[0]] || []).map((data) => ({ data: structuredClone(data) })) };
+        // Like Postgres, honour the `source_id = ANY(...)` narrow: settings rows
+        // are identified by `key`, every other legacy table by `id`.
+        const sourceIds = Array.isArray(params[1]) ? params[1] : null;
+        const stored = (rows[params[0]] || []).filter((data) => (
+          !sourceIds || sourceIds.includes(String(data.key ?? data.id))
+        ));
+        return { rows: stored.map((data) => ({ data: structuredClone(data) })) };
       }
       if (sql.includes('INSERT INTO compat_rows')) {
         writes.push({ table: params[0], sourceId: params[1], data: params[2] });
@@ -106,6 +114,74 @@ test('executeBlobPatch creates the settings row for project hardware state', asy
   assert.deepEqual(result.data.value, { checks: { '1:2': true } });
   assert.equal(client.writes[0].sourceId, 'project_hardware_state_json');
   assert.equal(client.writes[0].data.key, 'project_hardware_state_json');
+});
+
+const READY_GOODS_TARGETS = [
+  ['ready_goods_stock', 'ready_goods_stock_json'],
+  ['ready_goods_history', 'ready_goods_history_json'],
+  ['ready_goods_sales_records', 'ready_goods_sales_records_json'],
+];
+
+test('ready goods targets are record lists in their own settings row', () => {
+  for (const [target, key] of READY_GOODS_TARGETS) {
+    assert.deepEqual(BLOB_TARGETS[target], {
+      table: 'settings',
+      primaryKey: ['key'],
+      sourceId: key,
+      keyRow: { key },
+      field: 'value',
+      kind: 'records',
+    });
+  }
+});
+
+for (const [target, key] of READY_GOODS_TARGETS) {
+  test(`executeBlobPatch creates the settings row for ${target}`, async () => {
+    const client = fakeClient({ settings: [] });
+    const result = await executeBlobPatch(client, { target, patch: { upserts: [{ id: 7 }] } });
+    assert.deepEqual(result.data.value, [{ id: 7 }]);
+    assert.equal(client.writes.length, 1);
+    assert.equal(client.writes[0].table, 'settings');
+    assert.equal(client.writes[0].sourceId, key);
+    assert.equal(client.writes[0].data.key, key);
+    assert.equal(client.writes[0].data.value, '[{"id":7}]');
+  });
+}
+
+test('executeBlobPatch merges ready goods into the stored list and leaves other settings alone', async () => {
+  const client = fakeClient({
+    settings: [
+      { key: 'fot_per_hour', value: '600' },
+      { key: 'ready_goods_history_json', value: JSON.stringify([{ id: 100, type: 'manual_add' }]) },
+      { key: 'ready_goods_stock_json', value: JSON.stringify([{ id: 1, qty: 10 }, { id: 2, qty: 4 }]) },
+    ],
+  });
+  const result = await executeBlobPatch(client, {
+    target: 'ready_goods_stock',
+    patch: { upserts: [{ id: 1, qty: 9 }, { id: 3, qty: 5 }], removeIds: [2], prependIds: [] },
+  });
+  assert.deepEqual(result.data.value, [{ id: 1, qty: 9 }, { id: 3, qty: 5 }]);
+  assert.equal(client.writes.length, 1, 'only the stock row is written');
+  assert.equal(client.writes[0].data.key, 'ready_goods_stock_json');
+  assert.equal(typeof client.writes[0].data.value, 'string');
+  assert.deepEqual(JSON.parse(client.writes[0].data.value), [{ id: 1, qty: 9 }, { id: 3, qty: 5 }]);
+});
+
+test('only warehouse reservations release superseded project hardware rows', () => {
+  const rows = [
+    { id: 1, order_id: 7, item_id: 9, status: 'active', source: 'project_hardware', created_at: '2026-10-27T10:00:00.000Z' },
+    { id: 2, order_id: 7, item_id: 9, status: 'active', source: 'project_hardware', created_at: '2026-10-27T10:00:05.000Z' },
+  ];
+  const nowIso = '2026-10-27T11:00:00.000Z';
+  const reservations = applyBlobPatchToValue('warehouse_reservations', rows, { upserts: [] }, nowIso);
+  assert.equal(reservations[0].status, 'released');
+  for (const [target] of READY_GOODS_TARGETS) {
+    assert.deepEqual(
+      applyBlobPatchToValue(target, rows, { upserts: [] }, nowIso),
+      rows,
+      `${target} is never touched by the reservation release`,
+    );
+  }
 });
 
 test('executeBlobPatch rejects unknown targets', async () => {

@@ -84,6 +84,14 @@ const Factual = {
     ],
     MATERIAL_ROW_KEYS: new Set(['hardware_total', 'nfc_total', 'packaging_total']),
     MONEY_ONLY_ROW_KEYS: new Set(['design_printing', 'delivery_client', 'taxes', 'commercial', 'charity', 'other']),
+    // Строки «Факта», из которых складывается реальная себестоимость производства заказа
+    // (computeOrderRealCost). Налоги, коммерческий отдел, благотворительность и доставка клиенту
+    // относятся к продаже, а не к производству, поэтому сюда не входят.
+    REAL_COST_ROW_KEYS: [
+        'salary_production', 'salary_trim', 'salary_assembly', 'salary_packaging',
+        'indirect_production', 'hardware_total', 'nfc_total', 'packaging_total',
+        'design_printing', 'plastic', 'molds', 'other',
+    ],
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
     _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
@@ -1825,6 +1833,96 @@ async _loadFactSummaries() {
         };
         this._orderCache[orderId] = computed;
         return computed;
+    },
+
+    // ==========================================
+    // Real production cost of an order
+    // For use outside the «Факт» page: the ready-goods stock (cost of a piece put on sale) and the
+    // order card (real margin). The numbers are the page's own — nothing is rendered.
+    // ==========================================
+
+    // Cost rows of an order: the «Факт» value where there is one, otherwise the planned value.
+    // A «Факт» row is "empty" when it is 0 (e.g. waiting for FinTablo, nobody logged hours) — and
+    // plastic/molds, where «Факт» just copies the plan and marks it «план»: that is still the plan.
+    _buildRealCostBreakdown(planData, factData) {
+        const plan = planData || {};
+        const fact = factData || {};
+        const hints = this._getSourceHints(fact);
+        const rows = this.REAL_COST_ROW_KEYS.map(key => {
+            const def = this.ROWS.find(row => row.key === key);
+            const factKey = 'fact_' + key;
+            const planValue = round2(this._num(plan[def.planField]));
+            const factValue = round2(this._num(fact[factKey]));
+            const copiedPlan = hints[factKey] === 'план' && !this._isManualOverride(fact, factKey);
+            const hasFact = factValue > 0 && !copiedPlan;
+            return {
+                key,
+                label: def.label,
+                plan: planValue,
+                fact: factValue,
+                used: hasFact ? factValue : planValue,
+                source: hasFact ? 'fact' : 'plan',
+                isSalary: key.startsWith('salary_'),
+            };
+        });
+        const total = list => round2(list.reduce((sum, row) => sum + row.used, 0));
+        return {
+            rows,
+            planTotal: round2(rows.reduce((sum, row) => sum + row.plan, 0)),
+            realTotal: total(rows),
+            salaryReal: total(rows.filter(row => row.isSalary)),
+        };
+    },
+
+    // Hours turn into salary through the timesheet and employee rates. The «Факт» page loads both in
+    // load(); outside the page we fetch what is missing ourselves (or both again when `fresh`).
+    // A failed load is not noticed here: loadTimeEntries / loadEmployees do not reject — they fall
+    // back to the bootstrap, the copy cached in this browser or the defaults — so the cost is counted
+    // from a possibly stale (or empty) timesheet; an empty one reads as an order nobody logged hours
+    // on (hasTimesheet false, plan cost).
+    async _ensureRealCostSources(fresh = false) {
+        if (!this._orderCache || typeof this._orderCache !== 'object') this._orderCache = {};
+        const needEntries = fresh || !Array.isArray(this._entries) || this._entries.length === 0;
+        const needEmployees = fresh || !Array.isArray(this._employees) || this._employees.length === 0;
+        if (!needEntries && !needEmployees) return;
+        const [entries, employees] = await Promise.all([
+            needEntries ? loadTimeEntries() : this._entries,
+            needEmployees ? loadEmployees() : this._employees,
+        ]);
+        this._entries = entries || [];
+        this._employees = employees || [];
+    },
+
+    // Real production cost of one order: { rows, planTotal, realTotal, salaryReal } (see
+    // _buildRealCostBreakdown) plus hours — planned, and from the timesheet. `hasTimesheet` is false
+    // when nobody logged hours on the order: then the whole cost is the plan — realTotal = planTotal
+    // (spec: «Если табеля нет совсем — вся себестоимость плановая»), while the rows still show what
+    // «Факт» has (a FinTablo fact, say). The card header and the ready goods stock use realTotal.
+    // Resolves to null when the order does not exist. Cached per order like the page does; pass
+    // { fresh: true } to re-read the timesheet, rates and the order's sources — when the number is
+    // about to be stored, or FinTablo has caught up.
+    async computeOrderRealCost(orderId, options = {}) {
+        const id = Number(orderId);
+        if (!(id > 0)) return null;
+        const fresh = !!(options && options.fresh);
+        await this._ensureRealCostSources(fresh);
+        if (fresh) delete this._orderCache[id];
+
+        const computed = await this._ensureComputedOrder(id);
+        if (!computed) return null;
+        const planHours = computed.planHours || {};
+        const factData = computed.factData || {};
+        const sumHours = (source, field) => round2(this.HOUR_ROWS.reduce((sum, row) => sum + this._num(source[field(row)]), 0));
+        const hoursFact = sumHours(factData, row => 'fact_' + row.key);
+        const hasTimesheet = hoursFact > 0;
+        const breakdown = this._buildRealCostBreakdown(computed.planData, factData);
+        return {
+            ...breakdown,
+            realTotal: hasTimesheet ? breakdown.realTotal : breakdown.planTotal,
+            hoursPlan: sumHours(planHours, row => row.planField),
+            hoursFact,
+            hasTimesheet,
+        };
     },
 
     _applyHoursFromEntries(factData, orderId, planHours = {}, params = {}, orderRef = null) {

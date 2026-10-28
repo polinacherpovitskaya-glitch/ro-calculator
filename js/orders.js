@@ -959,6 +959,12 @@ const Orders = {
         const purposeBadge = isNonCommercial
             ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / внутренний образец'}</div>`
             : '';
+        // Доска считает по калькулятору, а не по «Факту» (для каждой карточки доски это слишком
+        // тяжело): маржа плановая и подписана, реальная — в карточке заказа. У «Переделки» и
+        // «Стока / образца» здесь убыток, а не маржа — подписи нет.
+        const marginHtml = isNonCommercial
+            ? '−' + formatRub(loss)
+            : `${formatPercent(margin)}<span title="Плановая маржа по калькулятору. Реальная — в карточке заказа." style="font-weight:400;color:var(--text-muted);"> план</span>`;
         const rawDeliverySchedule = Array.isArray(order.delivery_schedule) ? order.delivery_schedule : [];
         const deliveryValidation = normalizeDeliverySchedule(
             rawDeliverySchedule,
@@ -982,7 +988,7 @@ const Orders = {
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
                 <span class="badge badge-${payment.color}" style="font-size:9px">${payment.label}</span>
-                <span style="font-size:11px;font-weight:600;${isNonCommercial ? 'color:var(--red)' : (margin >= 30 ? 'color:var(--green)' : 'color:var(--red)')}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(margin)}</span>
+                <span style="font-size:11px;font-weight:600;${isNonCommercial ? 'color:var(--red)' : (margin >= 30 ? 'color:var(--green)' : 'color:var(--red)')}">${marginHtml}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                 <span style="font-size:11px;color:var(--text-muted)">${isNonCommercial ? 'выручка 0 ₽' : formatRub(revenue)}</span>
@@ -1020,7 +1026,7 @@ const Orders = {
         const actualStatus = newStatus === 'production' ? 'production_casting' : newStatus;
         if (order.status === actualStatus) return;
 
-        const guard = await this._ensureStatusTransitionAllowed(orderId, actualStatus);
+        const guard = await this._ensureStatusTransitionAllowed(orderId, actualStatus, { oldStatus: order.status });
         if (!guard.ok) {
             this.render();
             return;
@@ -1187,7 +1193,7 @@ const Orders = {
 
     async _ensureStatusTransitionAllowed(orderId, newStatus, options = {}) {
         if (newStatus !== 'completed') {
-            return { ok: true };
+            return this._ensureReturnFromCompletedAllowed(orderId, options);
         }
 
         if (typeof Warehouse === 'undefined'
@@ -1218,6 +1224,32 @@ const Orders = {
             message,
             summary,
         };
+    },
+
+    // Возврат из «Готово» снимает позиции заказа со склада готовой продукции. Если с них уже
+    // что-то продано, статус не меняется, а менеджер видит почему. options.oldStatus — статус,
+    // который видит экран: не «Готово» — возвращать нечего, склад не читается; не передан —
+    // решает склад (позиции есть только у заказа в «Готово»).
+    async _ensureReturnFromCompletedAllowed(orderId, options = {}) {
+        if (options.oldStatus && options.oldStatus !== 'completed') return { ok: true };
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.getOrderReadyGoodsSoldQty !== 'function') {
+            return { ok: true };
+        }
+
+        let soldQty = 0;
+        try {
+            soldQty = Number(await Warehouse.getOrderReadyGoodsSoldQty(orderId)) || 0;
+        } catch (error) {
+            console.error('Orders._ensureReturnFromCompletedAllowed failed:', error);
+            return { ok: true };
+        }
+        if (!(soldQty > 0)) return { ok: true };
+
+        const message = `Уже продано ${soldQty.toLocaleString('ru-RU')} шт. со склада — заказ нельзя вернуть из «Готово»`;
+        if (options.toast !== false && typeof App !== 'undefined' && App && typeof App.toast === 'function') {
+            App.toast(message);
+        }
+        return { ok: false, reason: 'ready_goods_sold', message, soldQty };
     },
 
     formatOrderDeadline(order) {
@@ -1256,7 +1288,7 @@ const Orders = {
     async onStatusChange(orderId, newStatus, oldStatus) {
         if (newStatus === oldStatus) return;
 
-        const guard = await this._ensureStatusTransitionAllowed(orderId, newStatus);
+        const guard = await this._ensureStatusTransitionAllowed(orderId, newStatus, { oldStatus });
         if (!guard.ok) {
             this.render();
             return;
@@ -1556,11 +1588,17 @@ const Orders = {
             }
         } catch (e) {
             console.warn('moveToReadyGoods warning:', e);
+            App.toast('Статус сохранён, но склад готовой продукции не обновился — нет связи с общей базой. Обновите страницу и проверьте склад готовой продукции.');
         }
     },
 
+    // «Готово» ставит на склад готовой продукции: B2C-заказ — весь тираж, клиентский — штуки
+    // «на продажу» (есть ли они, Warehouse.moveOrderToReadyGoods решает по строкам заказа).
+    // «Переделка», «Сток / образец» и «Сборка из остатков» ничего туда не ставят.
     _shouldSyncOrderToReadyGoods(order) {
-        return (order?.client_name || '').toUpperCase() === 'B2C';
+        if (isB2CClientName(order?.client_name)) return true;
+        const purpose = normalizeProductionPurpose(order?.production_purpose);
+        return purpose !== 'leftover_assembly' && !isNonCommercialProductionPurpose(purpose);
     },
 
     async _syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus) {
@@ -1578,6 +1616,11 @@ const Orders = {
                 }
             } catch (e) {
                 console.warn('rollbackReadyGoods warning:', e);
+                // Только тому заказу, у которого на складе есть (или могли быть) позиции: остальным
+                // предупреждать не о чем (Warehouse.removeOrderFromReadyGoods → orderHoldsPositions).
+                if (!(e && e.orderHoldsPositions === false)) {
+                    App.toast('Статус сохранён, но позиции заказа остались на складе готовой продукции — нет связи с общей базой. Обновите страницу и проверьте склад готовой продукции.');
+                }
             }
         }
     },

@@ -581,6 +581,8 @@ async function main() {
             'cords',
             'carabiners',
             '_totalSellPerUnit',
+            // разметка тиража нужна доске и карточке для честной выручки
+            'tirage_allocation',
         ].forEach(field => {
             assert.match(columns, new RegExp(`${field}:item_data->${field}`), `summary must project ${field}`);
         });

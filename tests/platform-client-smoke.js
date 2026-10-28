@@ -56,6 +56,14 @@ const context = vm.createContext({
       }
       return jsonResponse(200, { data: [{ name: 'molds/retry.txt' }] });
     }
+    if (url.endsWith('/api/compat/blob-patch')) {
+      // Same bodies as ops/api: an unknown target is a plain 400 with its own code.
+      const body = JSON.parse(options.body);
+      if (body.target === 'blob_from_the_future') {
+        return jsonResponse(400, { error: { code: 'INVALID_BLOB_TARGET', message: 'Неизвестный блоб: blob_from_the_future' } });
+      }
+      return jsonResponse(200, { data: { value: body.patch.upserts, updated_at: '2026-10-27T10:00:00.000Z' }, error: null });
+    }
     if (url.endsWith('/api/compat/query')) {
       const body = JSON.parse(options.body);
       if (body.action === 'select') {
@@ -139,6 +147,20 @@ async function main() {
   const validation = await client.from('validation_test').insert({ value: 'bad' });
   assert.equal(validation.error.status, 400);
   assert.equal(requests.length - validationBefore, 1, 'validation errors must not retry');
+
+  // js/supabase.js falls back to the whole write while the API does not know a blob
+  // yet; it recognises that by this error code, so the client must pass it through.
+  const blobBefore = requests.length;
+  const unknownBlob = await client.patchBlob('blob_from_the_future', { upserts: [{ id: 1 }] });
+  assert.equal(unknownBlob.data, null);
+  assert.equal(unknownBlob.error.code, 'INVALID_BLOB_TARGET');
+  assert.equal(unknownBlob.error.status, 400);
+  assert.equal(requests.length - blobBefore, 1, 'a refused blob patch must not retry');
+  const knownBlob = await client.patchBlob('ready_goods_stock', { upserts: [{ id: 7 }] });
+  assert.equal(knownBlob.error, null);
+  assert.deepEqual(plain(knownBlob.data.value), [{ id: 7 }]);
+  assert.equal(requests[requests.length - 1].url, 'https://api.example.test/api/compat/blob-patch');
+  assert.deepEqual(JSON.parse(requests[requests.length - 1].options.body), { target: 'ready_goods_stock', patch: { upserts: [{ id: 7 }] } });
 
   const atomicBefore = requests.length;
   const atomicSave = await client.saveOrderSnapshot({

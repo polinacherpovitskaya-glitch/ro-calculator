@@ -7251,50 +7251,59 @@ const Warehouse = {
         const payout = parseFloat(document.getElementById('rg-wo-payout').value) || 0;
         const notes = (document.getElementById('rg-wo-notes').value || '').trim();
 
-        // Deduct from ready goods
-        const allRg = (await loadReadyGoods()).map(entry => this._normalizeReadyGoodsItem(entry));
-        const rgItem = allRg.find(i => Number(i.id) === Number(item.id));
-        if (rgItem) {
-            rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
+        // The three writes go to the shared base one after another; remember whether
+        // any has landed so a failure half-way is not mistaken for "nothing happened".
+        let savedSomething = false;
+        try {
+            // Deduct from ready goods
+            const allRg = (await loadReadyGoods()).map(entry => this._normalizeReadyGoodsItem(entry));
+            const rgItem = allRg.find(i => Number(i.id) === Number(item.id));
+            if (rgItem) {
+                rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
+            }
+            await saveReadyGoods(allRg);
+            savedSomething = true;
+
+            // Record sale
+            const records = await loadSalesRecords();
+            records.push({
+                id: this._newReadyGoodsId(),
+                ready_goods_id: item.id,
+                product_name: item.product_name,
+                order_name: item.order_name || '',
+                marketplace_set: item.marketplace_set || '',
+                channel,
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty,
+                cost_per_unit: item.cost_per_unit || 0,
+                revenue,
+                payout,
+                notes,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveSalesRecords(records);
+
+            // History
+            const history = await loadReadyGoodsHistory();
+            history.push({
+                id: this._newReadyGoodsId(),
+                type: 'writeoff',
+                product_name: item.product_name,
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty: -qty,
+                channel,
+                revenue,
+                payout,
+                notes: `Продажа: ${channel === 'marketplace' ? 'маркетплейс' : channel === 'website' ? 'сайт' : 'другое'}. ${notes}`,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoodsHistory(history);
+        } catch (error) {
+            this._handleReadyGoodsSaveError(error, savedSomething, 'rg-writeoff-dialog');
+            return;
         }
-        await saveReadyGoods(allRg);
-
-        // Record sale
-        const records = await loadSalesRecords();
-        records.push({
-            id: Date.now(),
-            ready_goods_id: item.id,
-            product_name: item.product_name,
-            order_name: item.order_name || '',
-            marketplace_set: item.marketplace_set || '',
-            channel,
-            location_type: this._normalizeReadyGoodsLocation(item.location_type),
-            qty,
-            cost_per_unit: item.cost_per_unit || 0,
-            revenue,
-            payout,
-            notes,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveSalesRecords(records);
-
-        // History
-        const history = await loadReadyGoodsHistory();
-        history.push({
-            id: Date.now(),
-            type: 'writeoff',
-            product_name: item.product_name,
-            location_type: this._normalizeReadyGoodsLocation(item.location_type),
-            qty: -qty,
-            channel,
-            revenue,
-            payout,
-            notes: `Продажа: ${channel === 'marketplace' ? 'маркетплейс' : channel === 'website' ? 'сайт' : 'другое'}. ${notes}`,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoodsHistory(history);
 
         const dialog = document.getElementById('rg-writeoff-dialog');
         if (dialog) dialog.remove();
@@ -7369,33 +7378,41 @@ const Warehouse = {
         const locationType = this._normalizeReadyGoodsLocation(document.getElementById('rg-add-location').value);
         const setName = (document.getElementById('rg-add-set').value || '').trim();
 
-        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
-        rg.push({
-            id: Date.now(),
-            product_name: name,
-            order_name: 'Ручное добавление',
-            order_id: null,
-            marketplace_set: setName,
-            location_type: locationType,
-            qty,
-            cost_per_unit: cost,
-            added_at: new Date().toISOString(),
-            added_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoods(rg);
+        // Two writes to the shared base; see doWriteOff for why a landed one is remembered.
+        let savedSomething = false;
+        try {
+            const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
+            rg.push({
+                id: this._newReadyGoodsId(),
+                product_name: name,
+                order_name: 'Ручное добавление',
+                order_id: null,
+                marketplace_set: setName,
+                location_type: locationType,
+                qty,
+                cost_per_unit: cost,
+                added_at: new Date().toISOString(),
+                added_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoods(rg);
+            savedSomething = true;
 
-        const history = await loadReadyGoodsHistory();
-        history.push({
-            id: Date.now(),
-            type: 'manual_add',
-            product_name: name,
-            location_type: locationType,
-            qty,
-            notes: `Ручное добавление (${this._readyGoodsLocationLabel(locationType)}): ${name} × ${qty}`,
-            date: new Date().toISOString(),
-            created_by: App.getCurrentEmployeeName() || '',
-        });
-        await saveReadyGoodsHistory(history);
+            const history = await loadReadyGoodsHistory();
+            history.push({
+                id: this._newReadyGoodsId(),
+                type: 'manual_add',
+                product_name: name,
+                location_type: locationType,
+                qty,
+                notes: `Ручное добавление (${this._readyGoodsLocationLabel(locationType)}): ${name} × ${qty}`,
+                date: new Date().toISOString(),
+                created_by: App.getCurrentEmployeeName() || '',
+            });
+            await saveReadyGoodsHistory(history);
+        } catch (error) {
+            this._handleReadyGoodsSaveError(error, savedSomething, 'rg-add-dialog');
+            return;
+        }
 
         const dialog = document.getElementById('rg-add-dialog');
         if (dialog) dialog.remove();
@@ -7404,37 +7421,43 @@ const Warehouse = {
         this.renderReadyGoodsView();
     },
 
-    // Move products from a completed order to ready goods
+    // Move products from a completed order to ready goods. A B2C order moves its whole
+    // tirage, as it always did; any other order moves the «на продажу» part of its product
+    // lines (see «Тираж на продажу» below). Returns how many positions were added.
     async moveOrderToReadyGoods(orderId, orderName) {
         const data = await loadOrder(orderId);
-        if (!data || !data.items) return;
-        if ((data.order?.client_name || '').toUpperCase() !== 'B2C') return 0;
+        if (!data || !data.items) return 0;
+        if (isB2CClientName(data.order?.client_name)) {
+            return this._runReadyGoodsTask(() => this._moveB2COrderToReadyGoods(orderId, orderName, data));
+        }
+        const result = await this._runReadyGoodsTask(() => this._syncTiragePositions(orderId, orderName, data, { mode: 'transfer' }));
+        return result.added;
+    },
+
+    async _moveB2COrderToReadyGoods(orderId, orderName, data) {
+        // Only move product-type items (not hardware/packaging raw materials)
+        const products = data.items.filter(it => it.item_type === 'product' && (parseFloat(it.quantity) || 0) > 0);
+        if (products.length === 0) return 0;
         const locationType = this._resolveReadyGoodsLocation(data);
 
-        await Promise.all([
-            loadReadyGoods(),
-            loadReadyGoodsHistory(),
-            loadSalesRecords(),
-        ]);
-        if (!this._isReadyGoodsSharedAvailable()) return 0;
-
-        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
-        const history = await loadReadyGoodsHistory();
+        const { stock: rg, history } = await this._loadReadyGoodsForWrite();
+        // The tirage is already on the stock: the order went to «Готово» once more (the production
+        // plan, then a board that still showed the old status, a second click). Positions leave
+        // the stock when the order leaves «Готово», so a real new transfer always finds none.
+        if (rg.some(item => item && Number(item.order_id) === Number(orderId) && item.source !== 'tirage')) return 0;
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
         let addedCount = 0;
 
-        // Only move product-type items (not hardware/packaging raw materials)
-        data.items.filter(it => it.item_type === 'product').forEach(item => {
+        products.forEach(item => {
             const qty = parseFloat(item.quantity) || 0;
-            if (qty <= 0) return;
 
-            // Calculate unit cost: total cost / quantity
+            // cost_total of a product line is already the cost of one piece
             const costTotal = parseFloat(item.cost_total) || 0;
             const costPerUnit = qty > 0 ? Math.round(costTotal * 100) / 100 : 0;
 
             rg.push({
-                id: Date.now() + addedCount,
+                id: this._newReadyGoodsId(),
                 product_name: item.product_name || 'Товар',
                 order_name: orderName || 'Заказ',
                 order_id: orderId,
@@ -7447,7 +7470,7 @@ const Warehouse = {
             });
 
             history.push({
-                id: Date.now() + addedCount + 50000,
+                id: this._newReadyGoodsId(),
                 type: 'from_order',
                 product_name: item.product_name || 'Товар',
                 order_name: orderName,
@@ -7462,52 +7485,645 @@ const Warehouse = {
             addedCount++;
         });
 
-        if (addedCount > 0) {
-            await saveReadyGoods(rg);
-            await saveReadyGoodsHistory(history);
-        }
+        await saveReadyGoods(rg);
+        await saveReadyGoodsHistory(history);
         return addedCount;
     },
 
-    async removeOrderFromReadyGoods(orderId, orderName, nextStatus) {
-        const readyGoods = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
-        const history = await loadReadyGoodsHistory();
+    // The order left «Готово»: its positions leave the ready goods stock. A position that has
+    // already sold something stays with its sales — Orders._ensureStatusTransitionAllowed does
+    // not let such an order go back; this covers a sale that landed in between.
+    // When the base cannot be read it rejects with READY_GOODS_SHARED_UNAVAILABLE, and the error's
+    // orderHoldsPositions says whether the order has positions there to warn about: true / false,
+    // or null when neither the stock nor the order could be read.
+    removeOrderFromReadyGoods(orderId, orderName, nextStatus) {
+        return this._runReadyGoodsTask(() => this._removeOrderPositions(orderId, orderName, nextStatus));
+    },
+
+    async _removeOrderPositions(orderId, orderName, nextStatus) {
+        // Whether the order holds positions at all, the stock alone tells: an order without any
+        // (most orders) leaves «Готово» even when the history or the sales cannot be read.
+        const [stockRead, historyRead, salesRead] = await Promise.allSettled(
+            ['ready_goods', 'ready_goods_history', 'sales_records'].map(storeKey => this._readSharedReadyGoodsStore(storeKey)));
+        const failed = (reason, orderHoldsPositions) => {
+            if (reason && typeof reason === 'object') reason.orderHoldsPositions = orderHoldsPositions;
+            return reason;
+        };
+        if (stockRead.status === 'rejected') throw failed(stockRead.reason, await this._orderMayHoldReadyGoods(orderId));
+        const readyGoods = stockRead.value;
+        const orderPositions = readyGoods.filter(item => item && Number(item.order_id) === Number(orderId));
+        if (orderPositions.length === 0) return 0;
+        const unread = [historyRead, salesRead].find(read => read.status === 'rejected');
+        if (unread) throw failed(unread.reason, true);
+        const history = historyRead.value;
+        const sales = salesRead.value;
+        const soldByPosition = this._countOrderReadyGoodsSales(orderPositions, sales, orderId).byPosition;
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
-        const remaining = [];
-        let removedCount = 0;
+        const removed = new Set();
+        let keptSold = 0;
 
-        readyGoods.forEach(item => {
-            if (Number(item.order_id) === Number(orderId)) {
-                history.push({
-                    id: Date.now() + removedCount + 80000,
-                    type: 'return_to_order',
-                    product_name: item.product_name || 'Товар',
-                    order_name: item.order_name || orderName || 'Заказ',
-                    location_type: this._normalizeReadyGoodsLocation(item.location_type),
-                    qty: -(parseFloat(item.qty) || 0),
-                    cost_per_unit: parseFloat(item.cost_per_unit) || 0,
-                    notes: `Возврат из ${this._readyGoodsLocationLabel(item.location_type)}: ${App.statusLabel('completed')} → ${App.statusLabel(nextStatus)}`,
-                    date: nowIso,
-                    created_by: employee,
-                });
-                removedCount++;
+        orderPositions.forEach(item => {
+            if ((soldByPosition.get(String(item.id)) || 0) > 0) {
+                keptSold++;
                 return;
             }
-            remaining.push(item);
+            removed.add(item);
+            history.push({
+                id: this._newReadyGoodsId(),
+                type: 'return_to_order',
+                product_name: item.product_name || 'Товар',
+                order_name: item.order_name || orderName || 'Заказ',
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty: -(parseFloat(item.qty) || 0),
+                cost_per_unit: parseFloat(item.cost_per_unit) || 0,
+                notes: `Возврат из ${this._readyGoodsLocationLabel(item.location_type)}: ${App.statusLabel('completed')} → ${App.statusLabel(nextStatus)}`,
+                date: nowIso,
+                created_by: employee,
+            });
         });
 
-        if (removedCount > 0) {
-            await saveReadyGoods(remaining);
+        if (keptSold > 0) {
+            console.warn(`Ready goods: ${keptSold} position(s) of order ${orderId} already sold something and stay on the stock`);
+        }
+        if (removed.size > 0) {
+            this._removeFromList(readyGoods, removed);
+            await saveReadyGoods(readyGoods);
             await saveReadyGoodsHistory(history);
         }
-        return removedCount;
+        return removed.size;
+    },
+
+    // The stock could not be read: could the order hold positions there? A B2C order put its whole
+    // tirage on the stock at «Готово», another order its «на продажу» lines; an order with neither
+    // never had any. null — the order could not be read either.
+    async _orderMayHoldReadyGoods(orderId) {
+        let data = null;
+        try {
+            data = await loadOrder(orderId);
+        } catch (error) {
+            console.warn('Ready goods: the order could not be read:', error);
+        }
+        if (!data || !data.order || !Array.isArray(data.items)) return null;
+        if (isB2CClientName(data.order.client_name)) {
+            return data.items.some(item => item && item.item_type === 'product' && (parseFloat(item.quantity) || 0) > 0);
+        }
+        return this._getTirageLines(data).lines.some(line => line.stock > 0);
+    },
+
+    // Removes records from a list read for a write, in place: the save of the very list that was
+    // read is a patch against that read.
+    _removeFromList(list, records) {
+        for (let index = list.length - 1; index >= 0; index -= 1) {
+            if (records.has(list[index])) list.splice(index, 1);
+        }
+    },
+
+    // Order transfers, their sync, return and recalculation read the ready goods lists and patch
+    // them; in one tab they run one after another, so an earlier one's stale read never wins.
+    _runReadyGoodsTask(task) {
+        const run = (this._readyGoodsTaskQueue || Promise.resolve()).then(() => task());
+        this._readyGoodsTaskQueue = run.catch(() => undefined);
+        return run;
+    },
+
+    // Id of a new ready goods record (a stock position, a sale, a history row). Saves are patches
+    // and a record with the same id replaces the older one — also one that another tab created in
+    // the same millisecond. Milliseconds × 1000 plus a random 0–999 (stays below 2^53), and
+    // strictly growing within this tab. Tirage positions keep their own id (_tiragePositionId).
+    _newReadyGoodsId() {
+        let id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        if (this._lastReadyGoodsId && id <= this._lastReadyGoodsId) id = this._lastReadyGoodsId + 1;
+        this._lastReadyGoodsId = id;
+        return id;
+    },
+
+    // All three ready goods lists are read once before a write, and only on top of the shared base.
+    // They come back exactly as read — the same lists and records, not copies — and are changed in
+    // place: a save is a patch against the read its list and records came from (js/supabase.js),
+    // so a read of the same list elsewhere in this tab cannot become the patch's base. Between
+    // this read and the saves nothing else is awaited.
+    async _loadReadyGoodsForWrite() {
+        const [stock, history, sales] = await Promise.all([
+            this._readSharedReadyGoodsStore('ready_goods'),
+            this._readSharedReadyGoodsStore('ready_goods_history'),
+            this._readSharedReadyGoodsStore('sales_records'),
+        ]);
+        return { stock, history, sales };
+    },
+
+    // Reads one ready goods list ('ready_goods' | 'ready_goods_history' | 'sales_records') and
+    // rejects with READY_GOODS_SHARED_UNAVAILABLE unless it came from the shared base. A read that
+    // did not get there does not throw: the loader marks the store «shared-unavailable» and hands
+    // back an empty list. That mark is one for the whole tab, so it is checked right when this read
+    // is back — later, another screen's successful read of the same list has turned it back to
+    // «shared», and the empty list would pass for the stock (a patch from it removes every row).
+    async _readSharedReadyGoodsStore(storeKey) {
+        const loaders = { ready_goods: loadReadyGoods, ready_goods_history: loadReadyGoodsHistory, sales_records: loadSalesRecords };
+        const list = await loaders[storeKey]();
+        if (!this._isReadyGoodsStoreShared(storeKey)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        return list || [];
+    },
+
+    // Sales of an order's positions: a sale points at its position (ready_goods_id, as «Списать
+    // продажу» writes it) or at the order itself (order_id + order_item_number of the line).
+    // { total, byPosition: Map(position id -> qty), revenue } — revenue: ₽ of those sales.
+    _countOrderReadyGoodsSales(positions, sales, orderId) {
+        const idOf = value => (value === null || value === undefined || value === '' ? null : String(value));
+        const positionById = new Map();
+        (positions || []).forEach(item => {
+            const id = idOf(item && item.id);
+            if (id !== null) positionById.set(id, item);
+        });
+        const byPosition = new Map();
+        let total = 0;
+        let revenue = 0;
+        (sales || []).forEach(record => {
+            if (!record || typeof record !== 'object') return;
+            const qty = Math.max(0, parseFloat(record.qty) || 0);
+            if (!(qty > 0)) return;
+            const readyGoodsId = idOf(record.ready_goods_id);
+            let position = readyGoodsId !== null ? positionById.get(readyGoodsId) : undefined;
+            if (!position) {
+                if (idOf(record.order_id) === null || Number(record.order_id) !== Number(orderId)) return;
+                position = (positions || []).find(item => item && item.source === 'tirage'
+                    && Number(item.order_item_number) === Number(record.order_item_number));
+            }
+            total += qty;
+            revenue += Math.max(0, parseFloat(record.revenue) || 0);
+            if (position && idOf(position.id) !== null) {
+                byPosition.set(idOf(position.id), (byPosition.get(idOf(position.id)) || 0) + qty);
+            }
+        });
+        return { total: Math.round(total * 100) / 100, byPosition, revenue: Math.round(revenue * 100) / 100 };
+    },
+
+    // How many pieces were already sold from the order's positions on the ready goods stock.
+    async getOrderReadyGoodsSoldQty(orderId) {
+        const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
+        const positions = (stock || []).filter(item => item && Number(item.order_id) === Number(orderId));
+        if (positions.length === 0) return 0;
+        return this._countOrderReadyGoodsSales(positions, sales, orderId).total;
+    },
+
+    // What the order's «на продажу» positions hold now, for the «Тираж» block of the order card:
+    // { inStock: pieces on the stock, total: pieces that went on sale (stock + sold), frozen: ₽
+    // cost of the unsold pieces, soldQty: pieces sold, soldRevenue: ₽ of those sales }. An order
+    // without positions gives zeros. One read of the stock and one of the sales; nothing is written.
+    // Rejects with READY_GOODS_SHARED_UNAVAILABLE when either store could not be read: the empty
+    // list a failed read hands back would read as «nothing on the stock». Each store is checked
+    // when its own read is back (_readSharedReadyGoodsStore); the history is not read here, so it
+    // does not matter.
+    async getOrderTirageStockSummary(orderId) {
+        const [stock, sales] = await Promise.all([
+            this._readSharedReadyGoodsStore('ready_goods'),
+            this._readSharedReadyGoodsStore('sales_records'),
+        ]);
+        const positions = stock.filter(item => this._isOrderTiragePosition(item, orderId));
+        const empty = { inStock: 0, total: 0, frozen: 0, soldQty: 0, soldRevenue: 0 };
+        if (positions.length === 0) return empty;
+        const sold = this._countOrderReadyGoodsSales(positions, sales, orderId);
+        let inStock = 0;
+        let frozen = 0;
+        positions.forEach(item => {
+            const qty = Math.max(0, parseFloat(item.qty) || 0);
+            inStock += qty;
+            frozen += qty * (parseFloat(item.cost_per_unit) || 0);
+        });
+        const round = value => Math.round(value * 100) / 100;
+        return {
+            inStock: round(inStock),
+            total: round(inStock + sold.total),
+            frozen: round(frozen),
+            soldQty: sold.total,
+            soldRevenue: sold.revenue,
+        };
+    },
+
+    // ==========================================
+    // ТИРАЖ «НА ПРОДАЖУ» → ГОТОВАЯ ПРОДУКЦИЯ
+    // ==========================================
+    // Строка изделия клиентского заказа может отдать часть тиража «на продажу» (разметка тиража,
+    // js/calculator.js). Пока заказ в «Готово», эти штуки стоят на складе готовой продукции —
+    // одна позиция на строку: { source: 'tirage', order_id, order_item_number, qty, cost_per_unit,
+    // sale_price }, количество = «на продажу» − уже проданное с позиции. Себестоимость штуки
+    // фиксируется, когда позиция встаёт на склад: реальные затраты заказа («Факт») делятся между
+    // строками по плановой себестоимости строки (с её фурнитурой и упаковкой), затраты строки — на
+    // её платные штуки («клиенту» + «на продажу»), так стоимость бесплатных штук ложится на
+    // проданные. Пересчёт непроданных — recalcOrderReadyGoodsCost. У B2C-заказов, «Переделки»,
+    // «Стока / образца» и «Сборки из остатков» разметки нет.
+
+    _isOrderTiragePosition(item, orderId) {
+        return !!item && item.source === 'tirage' && Number(item.order_id) === Number(orderId);
+    },
+
+    // The id of a line's position comes from the line's key (or, for a line without one, from the
+    // order and the line number): two tabs (or a second click) moving one line write the very same
+    // position and the shared base keeps one, while two lines never share an id.
+    _tiragePositionId(orderId, line) {
+        const fromKey = /^[0-9a-z]{1,11}$/.test(line.lineKey || '') ? parseInt(line.lineKey, 36) : NaN;
+        if (Number.isSafeInteger(fromKey) && fromKey > 0) return fromKey;
+        const number = Number(line.itemNumber);
+        const id = Number(orderId) * 1000 + number;
+        return Number.isSafeInteger(id) && number >= 0 && number < 1000 ? id : this._newReadyGoodsId();
+    },
+
+    // Product lines of an order for the stock: «на продажу» and its price, the line's stable key
+    // (line_key of its split), the planned cost of the line (its pieces plus its hardware and
+    // packaging) and its paid pieces. Pendants share the order's cost but never go to the stock;
+    // orderLevelCost — hardware and packaging of the whole order (only the planned cost needs it,
+    // the real cost already holds it).
+    _getTirageLines(orderData) {
+        const order = orderData?.order || {};
+        const rows = (Array.isArray(orderData?.items) ? orderData.items : []).filter(row => row && typeof row === 'object');
+        const purpose = normalizeProductionPurpose(order.production_purpose);
+        const splitAllowed = !isB2CClientName(order.client_name)
+            && purpose !== 'leftover_assembly'
+            && !isNonCommercialProductionPurpose(purpose);
+        const typeOf = row => String(row.item_type || 'product').trim().toLowerCase();
+        const amount = value => Math.max(0, parseFloat(value) || 0);
+        const lines = [];
+        const lineByProductIndex = new Map();
+
+        // Hardware and packaging point at a product line by its place among the product rows.
+        rows.filter(row => typeOf(row) === 'product').forEach((row, productIndex) => {
+            const quantity = amount(row.quantity);
+            if (!(quantity > 0)) return;
+            const itemNumber = Number.isInteger(Number(row.item_number)) ? Number(row.item_number) : productIndex + 1;
+            // Saved rows keep printings as JSON and may carry the split as JSON as well.
+            const split = splitAllowed ? getItemTirageSplit({
+                ...row,
+                quantity,
+                sell_price_item: amount(row.sell_price_item),
+                sell_price_printing: amount(row.sell_price_printing),
+                printings: parseOrderCalcJson(row.printings, []),
+                tirage_allocation: parseOrderCalcJson(row.tirage_allocation, {}),
+            }) : null;
+            const line = {
+                key: `product:${itemNumber}`,
+                itemNumber,
+                lineKey: split && split.line_key ? split.line_key : null,
+                productName: row.product_name || 'Товар',
+                stock: split ? split.stock : 0,
+                salePrice: split ? split.stock_price : 0,
+                paidQty: split ? split.client + split.stock : quantity,
+                planCost: amount(row.cost_total) * quantity,
+            };
+            lines.push(line);
+            lineByProductIndex.set(productIndex, line);
+        });
+
+        let orderLevelCost = 0;
+        rows.forEach(row => {
+            const type = typeOf(row);
+            if (type !== 'hardware' && type !== 'packaging') return;
+            const cost = amount(row.cost_total) * amount(row.quantity);
+            const parent = type === 'hardware' ? row.hardware_parent_item_index : row.packaging_parent_item_index;
+            const line = parent === null || parent === undefined || parent === '' ? null : lineByProductIndex.get(Number(parent));
+            if (line) line.planCost += cost;
+            else orderLevelCost += cost;
+        });
+        rows.filter(row => typeOf(row) === 'pendant').forEach((row, index) => {
+            const quantity = amount(row.quantity);
+            if (!(quantity > 0)) return;
+            lines.push({ key: `pendant:${index}`, stock: 0, paidQty: quantity, planCost: amount(row.cost_total) * quantity });
+        });
+        return { lines, orderLevelCost };
+    },
+
+    // Each position of the order and the line it belongs to: by the line's key (line_key of the
+    // split ↔ order_line_key of the position), so renumbered lines keep their positions; a position
+    // without a key (older data) — by the line number. A line that is gone — null.
+    _matchTiragePositions(positions, lines) {
+        const productLines = lines.filter(line => line.itemNumber !== undefined);
+        const byKey = new Map(productLines.filter(line => line.lineKey).map(line => [line.lineKey, line]));
+        const byNumber = new Map(productLines.map(line => [line.itemNumber, line]));
+        const matched = new Map();
+        positions.forEach(item => {
+            const line = item.order_line_key ? byKey.get(item.order_line_key) : byNumber.get(Number(item.order_item_number));
+            matched.set(item, line || null);
+        });
+        return matched;
+    },
+
+    // The order's real production cost from «Факт», read with a fresh timesheet because the number
+    // is about to be stored; null when «Факт» cannot tell (no answer, an error, nothing in it).
+    async _getOrderRealProductionCost(orderId) {
+        if (typeof Factual === 'undefined' || !Factual || typeof Factual.computeOrderRealCost !== 'function') return null;
+        try {
+            const real = await Factual.computeOrderRealCost(orderId, { fresh: true });
+            const realTotal = Number(real && real.realTotal);
+            return Number.isFinite(realTotal) && realTotal > 0 ? realTotal : null;
+        } catch (error) {
+            console.error('Ready goods: «Факт» could not count the real cost of the order:', error);
+            return null;
+        }
+    },
+
+    // Cost of one paid piece per line (allocateRealCostToRows) out of the order's production cost.
+    _allocateTirageUnitCosts(tirage, productionCost) {
+        return allocateRealCostToRows(
+            tirage.lines.map(line => ({ key: line.key, planCost: line.planCost, paidQty: line.paidQty })),
+            productionCost,
+        );
+    },
+
+    // What a new position is frozen at: the real cost from «Факт»; when «Факт» cannot tell — the
+    // planned cost of the order, split the same way (a later «Пересчитать себестоимость» fixes it).
+    async _getTirageUnitCosts(orderId, tirage) {
+        const realCost = await this._getOrderRealProductionCost(orderId);
+        const plannedCost = tirage.lines.reduce((sum, line) => sum + line.planCost, 0) + tirage.orderLevelCost;
+        return this._allocateTirageUnitCosts(tirage, realCost === null ? plannedCost : realCost);
+    },
+
+    // Reads the lists for a write: the order's positions, the line of each, what each sold, and
+    // the lines for sale that have no position yet.
+    async _readTiragePositions(orderId, tirage) {
+        const stores = await this._loadReadyGoodsForWrite();
+        const positions = stores.stock.filter(item => this._isOrderTiragePosition(item, orderId));
+        const matched = this._matchTiragePositions(positions, tirage.lines);
+        const withPosition = new Set([...matched.values()].filter(Boolean));
+        return {
+            stores,
+            positions,
+            matched,
+            soldByPosition: this._countOrderReadyGoodsSales(positions, stores.sales, orderId).byPosition,
+            newLines: tirage.lines.filter(line => line.stock > 0 && !withPosition.has(line)),
+        };
+    },
+
+    // Makes the order's «на продажу» positions match its lines: a new line goes on the stock, a
+    // position holds «на продажу» minus what it sold, a position whose line is no longer on sale (or
+    // gone) and that sold nothing leaves. mode 'transfer' (the order goes to «Готово») only creates
+    // and reconciles the quantity; mode 'sync' (a completed order was saved) also follows the line's
+    // number, price and name, and refuses — writing nothing — when «на продажу» would drop below
+    // what is sold.
+    async _syncTiragePositions(orderId, orderName, orderData, { mode = 'transfer' } = {}) {
+        const result = { added: 0, changed: 0, removed: 0, blocked: false, message: '' };
+        const tirage = this._getTirageLines(orderData);
+        const forSale = tirage.lines.filter(line => line.stock > 0);
+        // A transfer with nothing for sale does not even read the stock.
+        if (mode === 'transfer' && forSale.length === 0) return result;
+
+        // A new position's cost comes from «Факт», which takes a while: it is counted before the
+        // lists are read, so between the read and the patch built on it only the saves are awaited.
+        // A transfer nearly always creates positions; a sync counts the cost only when a line turns
+        // out to be new, and then reads the lists again.
+        let unitCosts = mode === 'transfer' ? await this._getTirageUnitCosts(orderId, tirage) : null;
+        let state;
+        for (;;) {
+            state = await this._readTiragePositions(orderId, tirage);
+            if (forSale.length === 0 && state.positions.length === 0) return result;
+            if (mode === 'sync') {
+                // Checked before the order was written; a sale may have landed since.
+                const breach = this._tirageSoldFloorMessage(state);
+                if (breach) return { ...result, blocked: true, message: breach };
+            }
+            if (state.newLines.length === 0 || unitCosts) break;
+            unitCosts = await this._getTirageUnitCosts(orderId, tirage);
+        }
+
+        const { stores, positions, matched, soldByPosition, newLines } = state;
+        const soldOf = item => soldByPosition.get(String(item.id)) || 0;
+        const count = value => Number(value || 0).toLocaleString('ru-RU');
+        const name = orderName || orderData?.order?.order_name || 'Заказ';
+        const nowIso = new Date().toISOString();
+        const employee = App.getCurrentEmployeeName() || '';
+        const addHistory = (entry) => {
+            stores.history.push({
+                id: this._newReadyGoodsId(),
+                order_name: name,
+                order_id: Number(orderId),
+                location_type: 'our',
+                date: nowIso,
+                created_by: employee,
+                ...entry,
+            });
+        };
+
+        const takenIds = new Set(stores.stock.map(item => String(item && item.id)));
+        newLines.forEach(line => {
+            let id = this._tiragePositionId(orderId, line);
+            // An id that another record of the stock already has is never reused.
+            if (takenIds.has(String(id))) id = this._newReadyGoodsId();
+            takenIds.add(String(id));
+            const position = {
+                id,
+                product_name: line.productName,
+                order_name: name,
+                order_id: Number(orderId),
+                order_item_number: line.itemNumber,
+                order_line_key: line.lineKey,
+                source: 'tirage',
+                location_type: 'our',
+                qty: line.stock,
+                cost_per_unit: Number(unitCosts[line.key]) || 0,
+                sale_price: line.salePrice,
+                added_at: nowIso,
+                added_by: employee,
+            };
+            stores.stock.push(position);
+            addHistory({
+                type: 'from_order',
+                product_name: line.productName,
+                qty: line.stock,
+                cost_per_unit: position.cost_per_unit,
+                ready_goods_id: position.id,
+                notes: `Из заказа «${name}» → ${this._readyGoodsLocationLabel('our')}: ${line.productName} × ${line.stock} (на продажу)`,
+            });
+            result.added++;
+        });
+
+        const removed = new Set();
+        positions.forEach(item => {
+            const line = matched.get(item);
+            const stock = line ? line.stock : 0;
+            const sold = soldOf(item);
+            const currentQty = parseFloat(item.qty) || 0;
+            if (stock === 0 && sold === 0) {
+                removed.add(item);
+                addHistory({
+                    type: 'tirage_sync',
+                    product_name: item.product_name || 'Товар',
+                    qty: -currentQty,
+                    cost_per_unit: parseFloat(item.cost_per_unit) || 0,
+                    ready_goods_id: item.id,
+                    notes: `Разметка тиража «${name}»: ${item.product_name || 'Товар'} больше не на продажу — снято со склада`,
+                });
+                result.removed++;
+                return;
+            }
+            let changed = false;
+            const targetQty = Math.max(0, stock - sold);
+            if (currentQty !== targetQty) {
+                addHistory({
+                    type: 'tirage_sync',
+                    product_name: item.product_name || 'Товар',
+                    qty: targetQty - currentQty,
+                    cost_per_unit: parseFloat(item.cost_per_unit) || 0,
+                    ready_goods_id: item.id,
+                    notes: `Разметка тиража «${name}»: ${item.product_name || 'Товар'} на складе ${count(currentQty)} → ${count(targetQty)}`,
+                });
+                item.qty = targetQty;
+                changed = true;
+            }
+            if (mode === 'sync' && line) {
+                if (Number(item.order_item_number) !== line.itemNumber) { item.order_item_number = line.itemNumber; changed = true; }
+                if (line.lineKey && item.order_line_key !== line.lineKey) { item.order_line_key = line.lineKey; changed = true; }
+                if (item.sale_price !== line.salePrice) { item.sale_price = line.salePrice; changed = true; }
+                if (item.product_name !== line.productName) { item.product_name = line.productName; changed = true; }
+            }
+            if (changed) result.changed++;
+        });
+
+        if (result.added + result.changed + result.removed === 0) return result;
+        if (removed.size > 0) this._removeFromList(stores.stock, removed);
+        await saveReadyGoods(stores.stock);
+        await saveReadyGoodsHistory(stores.history);
+        return result;
+    },
+
+    // «На продажу» of a line may not drop below what its position already sold: the message for
+    // the first position that would, or ''. A line that is gone counts as 0 for sale.
+    _tirageSoldFloorMessage({ positions, matched, soldByPosition }) {
+        const count = value => Number(value || 0).toLocaleString('ru-RU');
+        for (const item of positions) {
+            const line = matched.get(item);
+            const stock = line ? line.stock : 0;
+            const sold = soldByPosition.get(String(item.id)) || 0;
+            if (stock < sold) {
+                const name = line ? line.productName : (item.product_name || 'Товар');
+                return `Заказ не сохранён: у «${name}» на продажу ${count(stock)} шт., а со склада уже продано ${count(sold)} шт. Меньше проданного поставить нельзя.`;
+            }
+        }
+        return '';
+    },
+
+    // Before a completed order is written (orderData = { order, items } about to be written): would
+    // its split put «на продажу» below what is already sold? Reads the stock and the sales, writes
+    // nothing. { ok: false, blocked: true, message } — do not save. Lists that could not be read
+    // block nothing: the sync after the save reports the stock.
+    async checkOrderReadyGoodsSoldFloor(orderId, orderData = null) {
+        const data = orderData || await loadOrder(orderId);
+        if (!data || !data.order || data.order.status !== 'completed') return { ok: true, message: '' };
+        if (isB2CClientName(data.order.client_name)) return { ok: true, message: '' };
+        const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
+        const positions = (stock || []).filter(item => this._isOrderTiragePosition(item, orderId));
+        if (positions.length === 0) return { ok: true, message: '' };
+        const message = this._tirageSoldFloorMessage({
+            positions,
+            matched: this._matchTiragePositions(positions, this._getTirageLines(data).lines),
+            soldByPosition: this._countOrderReadyGoodsSales(positions, sales, orderId).byPosition,
+        });
+        return message ? { ok: false, blocked: true, message } : { ok: true, message: '' };
+    },
+
+    // A completed order was saved: its stock follows the split it was saved with (see above;
+    // orderData = { order, items } that were written, without it — the saved order). Repeating it
+    // is harmless, so the next save heals a failed one. { ok: false, blocked: true, message }: a sale
+    // landed after the check and «на продажу» is now below it — nothing is written.
+    // { ok: false, message }: the ready goods base could not be read or written.
+    async syncOrderReadyGoodsToTirage(orderId, orderData = null) {
+        const data = orderData || await loadOrder(orderId);
+        if (!data || !data.order || data.order.status !== 'completed') return { ok: true, message: '' };
+        // A B2C order moved its whole tirage; its positions do not follow a split.
+        if (isB2CClientName(data.order.client_name)) return { ok: true, message: '' };
+        try {
+            const result = await this._runReadyGoodsTask(() => this._syncTiragePositions(orderId, data.order.order_name, data, { mode: 'sync' }));
+            if (result.blocked) return { ok: false, blocked: true, message: result.message };
+            return { ok: true, message: '', added: result.added, changed: result.changed, removed: result.removed };
+        } catch (error) {
+            console.error('Warehouse.syncOrderReadyGoodsToTirage failed:', error);
+            return { ok: false, message: 'Склад готовой продукции не обновился — нет связи с общей базой. Сохраните заказ ещё раз, когда связь вернётся.' };
+        }
+    },
+
+    // «Пересчитать себестоимость» (FinTablo caught up): the unsold pieces of the order's «на
+    // продажу» positions get today's real cost; recorded sales keep theirs. Returns how many
+    // positions were updated. Rejects with READY_GOODS_REAL_COST_UNAVAILABLE — nothing changed —
+    // when «Факт» cannot tell the real cost: the plan must not overwrite a real cost frozen earlier.
+    async recalcOrderReadyGoodsCost(orderId) {
+        const data = await loadOrder(orderId);
+        if (!data || !data.items) return 0;
+        return this._runReadyGoodsTask(() => this._recalcTiragePositionsCost(orderId, data));
+    },
+
+    async _recalcTiragePositionsCost(orderId, data) {
+        const tirage = this._getTirageLines(data);
+        // «Факт» first: between the read of the lists and their patch only the saves are awaited.
+        const realCost = await this._getOrderRealProductionCost(orderId);
+        if (realCost === null) throw new Error('READY_GOODS_REAL_COST_UNAVAILABLE');
+        const unitCosts = this._allocateTirageUnitCosts(tirage, realCost);
+        const stores = await this._loadReadyGoodsForWrite();
+        const positions = stores.stock.filter(item => this._isOrderTiragePosition(item, orderId) && (parseFloat(item.qty) || 0) > 0);
+        if (positions.length === 0) return 0;
+
+        const matched = this._matchTiragePositions(positions, tirage.lines);
+        const name = data.order?.order_name || 'Заказ';
+        const nowIso = new Date().toISOString();
+        const employee = App.getCurrentEmployeeName() || '';
+        let updated = 0;
+        positions.forEach(item => {
+            const line = matched.get(item);
+            const next = line ? Number(unitCosts[line.key]) || 0 : 0;
+            const current = parseFloat(item.cost_per_unit) || 0;
+            if (!(next > 0) || next === current) return;
+            stores.history.push({
+                id: this._newReadyGoodsId(),
+                type: 'cost_recalc',
+                product_name: item.product_name || 'Товар',
+                order_name: name,
+                order_id: Number(orderId),
+                ready_goods_id: item.id,
+                location_type: this._normalizeReadyGoodsLocation(item.location_type),
+                qty: 0,
+                cost_per_unit: next,
+                notes: `Себестоимость «${item.product_name || 'Товар'}» пересчитана: ${this._formatMoney(current)} → ${this._formatMoney(next)} за шт., непродано ${item.qty} шт.`,
+                date: nowIso,
+                created_by: employee,
+            });
+            item.cost_per_unit = next;
+            updated++;
+        });
+
+        if (updated > 0) {
+            await saveReadyGoods(stores.stock);
+            await saveReadyGoodsHistory(stores.history);
+        }
+        return updated;
+    },
+
+    // Ready goods are saved to the shared base only. When a save does not get there
+    // the user has to hear about it, and nothing on screen may look as if it had
+    // worked. `savedSomething`: an earlier write of the same operation had landed.
+    _handleReadyGoodsSaveError(error, savedSomething, dialogId) {
+        console.error('Ready goods save failed:', error);
+        if (!savedSomething) {
+            // Nothing was written: the dialog stays as it is, so the user can try again.
+            App.toast('Не удалось сохранить готовую продукцию — нет связи с общей базой. Попробуйте ещё раз.');
+            return;
+        }
+        // Part of the operation is already in the base and a plain retry would repeat
+        // it (the goods would leave the stock twice): drop the dialog and show what
+        // is really saved.
+        const dialog = document.getElementById(dialogId);
+        if (dialog) dialog.remove();
+        // Дольше обычного: прочитать и пойти проверять остатки надо успеть.
+        App.toast('Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.', 8000);
+        this.renderStats();
+        this.renderReadyGoodsView();
     },
 
     _isReadyGoodsSharedAvailable() {
         const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
         const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
         return sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
+    },
+
+    _isReadyGoodsStoreShared(storeKey) {
+        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
+        const item = sourceStatus ? sourceStatus[storeKey] : null;
+        return !!item && item.source === 'shared-settings';
     },
 
     _getSeedPhotoMapBySku() {

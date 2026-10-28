@@ -4147,11 +4147,20 @@ async function smokeReadyGoodsRollback(context) {
             };
         `, context);
 
+        // Клиентский заказ тоже идёт на склад: есть ли у него штуки «на продажу», решает
+        // Warehouse.moveOrderToReadyGoods по строкам. Переделка, сток/образец и сборка из
+        // остатков туда не попадают.
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(42, { order_name: 'Smoke Order', client_name: 'Acme' }, 'delivery', 'completed')`, context);
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(77, { order_name: 'B2C Stock', client_name: 'B2C' }, 'delivery', 'completed')`, context);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(43, { order_name: 'Rework', client_name: 'Acme', production_purpose: 'rework' }, 'delivery', 'completed')`, context);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(44, { order_name: 'Sample', client_name: 'Acme', production_purpose: 'stock_sample' }, 'delivery', 'completed')`, context);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(45, { order_name: 'Leftovers', production_purpose: 'leftover_assembly' }, 'delivery', 'completed')`, context);
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(42, { order_name: 'Smoke Order' }, 'completed', 'delivery')`, context);
 
-        assert.deepEqual(clone(context.__moveCalls), [{ orderId: 77, orderName: 'B2C Stock' }]);
+        assert.deepEqual(clone(context.__moveCalls), [
+            { orderId: 42, orderName: 'Smoke Order' },
+            { orderId: 77, orderName: 'B2C Stock' },
+        ]);
         assert.deepEqual(clone(context.__removeCalls), [{ orderId: 42, orderName: 'Smoke Order', nextStatus: 'delivery' }]);
     } finally {
         vm.runInContext(`
@@ -4237,6 +4246,162 @@ async function smokeReadyGoodsSalesAndManualAdd(context) {
     assert.match(readyGoodsHtml, /Наш склад/);
     assert.match(readyGoodsHtml, /Склад партнёра/);
     assert.match(readyGoodsHtml, /Со склада/);
+}
+
+// Ready goods live only in the shared base. A save that does not reach it must be
+// reported to the user and must not leave the screen looking as if it had worked.
+async function smokeReadyGoodsWritersReportFailedSave(context) {
+    const FAILED = 'Не удалось сохранить готовую продукцию — нет связи с общей базой. Попробуйте ещё раз.';
+    const PARTIAL = 'Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.';
+    const names = ['getReadyGoodsSourceStatus', 'loadReadyGoods', 'saveReadyGoods', 'loadReadyGoodsHistory', 'saveReadyGoodsHistory', 'loadSalesRecords', 'saveSalesRecords'];
+    const originals = Object.fromEntries(names.map(name => [name, context[name]]));
+    const writeOffDialog = context.document.getElementById('rg-writeoff-dialog');
+    const addDialog = context.document.getElementById('rg-add-dialog');
+    const originalRemove = [writeOffDialog.remove, addDialog.remove];
+
+    context.__failing = new Set();
+    context.__toasts = [];
+    context.__renders = [];
+    context.__removed = [];
+    const failable = (name, apply) => async (value) => {
+        if (context.__failing.has(name)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        apply(clone(value));
+    };
+    context.getReadyGoodsSourceStatus = () => ({
+        ready_goods: { source: 'shared-settings' },
+        ready_goods_history: { source: 'shared-settings' },
+        sales_records: { source: 'shared-settings' },
+    });
+    context.loadReadyGoods = async () => clone(context.__readyGoods);
+    context.saveReadyGoods = failable('stock', items => { context.__readyGoods = items; });
+    context.loadReadyGoodsHistory = async () => clone(context.__readyGoodsHistory);
+    context.saveReadyGoodsHistory = failable('history', history => { context.__readyGoodsHistory = history; });
+    context.loadSalesRecords = async () => clone(context.__salesRecords);
+    context.saveSalesRecords = failable('sales', records => { context.__salesRecords = records; });
+    writeOffDialog.remove = () => { context.__removed.push('writeoff'); };
+    addDialog.remove = () => { context.__removed.push('add'); };
+    context.__toastDurations = [];
+    vm.runInContext(`
+        globalThis.__origToast = App.toast;
+        globalThis.__origRenderStats = Warehouse.renderStats;
+        globalThis.__origRenderView = Warehouse.renderReadyGoodsView;
+        App.toast = (message, duration) => {
+            globalThis.__toasts.push(String(message || ''));
+            globalThis.__toastDurations.push(duration === undefined ? null : duration);
+        };
+        Warehouse.renderStats = () => { globalThis.__renders.push('stats'); };
+        Warehouse.renderReadyGoodsView = () => { globalThis.__renders.push('view'); };
+    `, context);
+
+    const reset = (...failing) => {
+        context.__readyGoods = [{
+            id: 11, product_name: 'Ready Smoke Product', order_name: 'Smoke Order', order_id: 42,
+            location_type: 'our', qty: 7, cost_per_unit: 19, added_at: '2026-03-15T00:00:00.000Z',
+        }];
+        context.__readyGoodsHistory = [];
+        context.__salesRecords = [];
+        context.__failing = new Set(failing);
+        context.__toasts = [];
+        context.__toastDurations = [];
+        context.__renders = [];
+        context.__removed = [];
+    };
+    const fillWriteOff = () => {
+        context.document.getElementById('rg-wo-product').value = '0';
+        context.document.getElementById('rg-wo-qty').value = '3';
+        context.document.getElementById('rg-wo-channel').value = 'marketplace';
+        context.document.getElementById('rg-wo-revenue').value = '1500';
+        context.document.getElementById('rg-wo-payout').value = '1200';
+        context.document.getElementById('rg-wo-notes').value = 'outage test';
+    };
+    const fillAdd = () => {
+        context.document.getElementById('rg-add-name').value = 'Outage Product';
+        context.document.getElementById('rg-add-qty').value = '5';
+        context.document.getElementById('rg-add-cost').value = '10';
+        context.document.getElementById('rg-add-location').value = 'our';
+        context.document.getElementById('rg-add-set').value = '';
+    };
+    const state = () => ({
+        stockQty: context.__readyGoods.map(item => item.qty),
+        sales: context.__salesRecords.length,
+        history: context.__readyGoodsHistory.length,
+    });
+
+    try {
+        // Write-off: the very first write fails, nothing reached the base.
+        reset('stock');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [FAILED], 'write-off: the failure is shown, not a success');
+        assert.deepEqual(clone(context.__removed), [], 'write-off: the dialog stays open for another try');
+        assert.deepEqual(clone(context.__renders), [], 'write-off: the screen is not redrawn as if it had worked');
+        assert.deepEqual(state(), { stockQty: [7], sales: 0, history: 0 });
+
+        // The same click once the base is back goes through.
+        context.__failing.clear();
+        context.__toasts = [];
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.equal(context.__toasts.length, 1);
+        assert.match(context.__toasts[0], /^Списано 3 шт/);
+        assert.deepEqual(clone(context.__removed), ['writeoff']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [4], sales: 1, history: 1 });
+
+        // Write-off: the stock is already off the shelf when the sale record fails. A plain
+        // "try again" would take the goods off twice, so the screen shows the real state.
+        reset('sales');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000], 'write-off: the partial failure stays long enough to read');
+        assert.deepEqual(clone(context.__removed), ['writeoff'], 'write-off: no stale dialog to retry from');
+        assert.deepEqual(clone(context.__renders), ['stats', 'view'], 'write-off: the screen shows what is really saved');
+        assert.deepEqual(state(), { stockQty: [4], sales: 0, history: 0 });
+
+        reset('history');
+        fillWriteOff();
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000]);
+        assert.deepEqual(state(), { stockQty: [4], sales: 1, history: 0 });
+
+        // Manual add: same rules.
+        reset('stock');
+        fillAdd();
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.deepEqual(clone(context.__toasts), [FAILED], 'manual add: the failure is shown, not a success');
+        assert.deepEqual(clone(context.__removed), [], 'manual add: the dialog stays open for another try');
+        assert.deepEqual(clone(context.__renders), []);
+        assert.deepEqual(state(), { stockQty: [7], sales: 0, history: 0 });
+
+        context.__failing.clear();
+        context.__toasts = [];
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.equal(context.__toasts.length, 1);
+        assert.match(context.__toasts[0], /^Добавлено 5 шт/);
+        assert.deepEqual(clone(context.__removed), ['add']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [7, 5], sales: 0, history: 1 });
+
+        reset('history');
+        fillAdd();
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000], 'manual add: the same');
+        assert.deepEqual(clone(context.__removed), ['add']);
+        assert.deepEqual(clone(context.__renders), ['stats', 'view']);
+        assert.deepEqual(state(), { stockQty: [7, 5], sales: 0, history: 0 });
+    } finally {
+        names.forEach(name => { context[name] = originals[name]; });
+        delete context.__toastDurations;
+        writeOffDialog.remove = originalRemove[0];
+        addDialog.remove = originalRemove[1];
+        vm.runInContext(`
+            App.toast = globalThis.__origToast;
+            Warehouse.renderStats = globalThis.__origRenderStats;
+            Warehouse.renderReadyGoodsView = globalThis.__origRenderView;
+        `, context);
+    }
 }
 
 async function smokeChinaShipmentMetadata(context) {
@@ -5027,6 +5192,7 @@ async function smokeProductionPlanCompletedGuard(context) {
         globalThis.__planLoadCount = 0;
         App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
         Orders._syncWarehouseByStatus = async () => { throw new Error('status sync should not run when production plan completed is blocked'); };
+        Orders._syncReadyGoodsByStatus = async () => { throw new Error('ready goods sync should not run when production plan completed is blocked'); };
         Orders.addChangeRecord = async () => { throw new Error('change record should not run when production plan completed is blocked'); };
         ProductionPlan.load = async () => { globalThis.__planLoadCount += 1; };
         ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
@@ -5069,8 +5235,10 @@ async function smokeProductionPlanCompletedGuard(context) {
         globalThis.__toasts = [];
         globalThis.__planLoadCount = 0;
         globalThis.__warehouseSyncCalls = [];
+        globalThis.__readyGoodsSyncCalls = [];
         globalThis.__changeRecordCalls = [];
         Orders._syncWarehouseByStatus = async (...args) => { globalThis.__warehouseSyncCalls.push(args); };
+        Orders._syncReadyGoodsByStatus = async (...args) => { globalThis.__readyGoodsSyncCalls.push(args); };
         Orders.addChangeRecord = async (...args) => { globalThis.__changeRecordCalls.push(args); };
         ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
     `, context);
@@ -5082,6 +5250,11 @@ async function smokeProductionPlanCompletedGuard(context) {
     assert.equal(vm.runInContext(`globalThis.__planLoadCount`, context), 1);
     assert.equal((clone(vm.runInContext(`globalThis.__warehouseSyncCalls`, context)) || []).length, 1);
     assert.equal((clone(vm.runInContext(`globalThis.__changeRecordCalls`, context)) || []).length, 1);
+    // Готовая продукция синхронизируется и при смене статуса из плана производства.
+    const readyGoodsSyncCalls = clone(vm.runInContext(`globalThis.__readyGoodsSyncCalls`, context)) || [];
+    assert.equal(readyGoodsSyncCalls.length, 1);
+    assert.equal(readyGoodsSyncCalls[0][0], 91);
+    assert.deepEqual(readyGoodsSyncCalls[0].slice(2), ['delivery', 'completed']);
 }
 
 async function smokePendantWarehouseDemandSync(context) {
@@ -9230,6 +9403,2074 @@ async function smokeCustomCompositeToggleSafety(context) {
     assert.equal(restored.builtin_assembly_name, 'Сборка частей');
 }
 
+// Строка счёта по значку и названию: количество штук или null, если строки нет.
+function invoiceRowQty(html, icon, name) {
+    const row = String(html || '').split('<tr').find(chunk => chunk.includes(icon) && chunk.includes(name));
+    if (!row) return null;
+    const match = row.match(/>([\d\s.,]+) шт</);
+    return match ? Number(match[1].replace(/\s/g, '').replace(',', '.')) : NaN;
+}
+
+// Calculator.loadOrder без отрисовки; заглушки снимаются, даже если загрузка упала.
+async function loadCalculatorOrderQuietly(context, orderId) {
+    await vm.runInContext(`(async () => {
+        const originals = {
+            renderItemBlock: Calculator.renderItemBlock,
+            renderHardwareRow: Calculator.renderHardwareRow,
+            renderPackagingRow: Calculator.renderPackagingRow,
+            renderExtraCosts: Calculator.renderExtraCosts,
+            _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+            recalculate: Calculator.recalculate,
+            showOrderHistory: Calculator.showOrderHistory,
+            _ensureWhPickerData: Calculator._ensureWhPickerData,
+        };
+        try {
+            Calculator.renderItemBlock = () => {};
+            Calculator.renderHardwareRow = () => {};
+            Calculator.renderPackagingRow = () => {};
+            Calculator.renderExtraCosts = () => {};
+            Calculator._renderPerItemHwPkg = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.showOrderHistory = () => {};
+            Calculator._ensureWhPickerData = async () => ({});
+            await Calculator.loadOrder(${Number(orderId)});
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context);
+}
+
+// Разметка тиража строки: сохраняется в item_data, переживает загрузку, а счёт и КП
+// выставляются только на часть «клиенту».
+async function smokeTirageAllocationPersistsAndInvoices(context) {
+    const lemonAllocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900, partner_note: 'художница' };
+    const collected = clone(await vm.runInContext(`(() => {
+        const empty = Calculator.getEmptyItem(1);
+        const lemon = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            result: { ...getEmptyCostResult(), costTotal: 971.35 },
+            tirage_allocation: ${JSON.stringify(lemonAllocation)},
+        });
+        const plainLine = Object.assign(Calculator.getEmptyItem(2), { product_name: 'Груша', quantity: 50, sell_price_item: 1000 });
+        const allClient = Object.assign(Calculator.getEmptyItem(3), {
+            product_name: 'Слива', quantity: 10, sell_price_item: 100, tirage_allocation: { client: 10, partner_note: 'никому' },
+        });
+        const noOwnPrice = Object.assign(Calculator.getEmptyItem(4), {
+            product_name: 'Айва', quantity: 20, sell_price_item: 700, tirage_allocation: { stock: 5 },
+        });
+        Calculator.items = [lemon, plainLine, allClient, noOwnPrice];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        return {
+            emptyHasKey: Object.prototype.hasOwnProperty.call(empty, 'tirage_allocation'),
+            emptyValue: empty.tirage_allocation,
+            saved: Calculator._collectItemsForSave(),
+            expected: normalizeTirageAllocation(${JSON.stringify(lemonAllocation)}, 100, 5900).allocation,
+        };
+    })()`, context));
+
+    assert.equal(collected.emptyHasKey, true, 'loadOrder copies only keys of getEmptyItem, so the allocation must be one of them');
+    assert.equal(collected.emptyValue, null);
+    const savedProducts = collected.saved.filter(row => row.item_type === 'product');
+    assert.deepEqual(savedProducts[0].tirage_allocation, collected.expected, 'the normalized allocation is saved with the row');
+    assert.deepEqual(savedProducts[0].tirage_allocation,
+        { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 5900, partner_note: 'художница', gift_note: '' });
+    assert.equal(savedProducts[1].tirage_allocation, null, 'a line without a split saves null');
+    assert.equal(savedProducts[2].tirage_allocation, null, 'everything to the client is no split');
+    assert.deepEqual(savedProducts[3].tirage_allocation,
+        { client: 15, stock: 5, partner: 0, gift: 0, sample: 0, stock_price: 0, partner_note: '', gift_note: '' },
+        'an unset sale price stays 0 = the line price, so it follows later price changes');
+
+    const originalLoadOrder = context.loadOrder;
+    context.__tirageLoadData = {
+        order: { id: 9201, order_name: 'Лимон', status: 'draft' },
+        items: clone(collected.saved),
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__tirageLoadData);
+    try {
+        await loadCalculatorOrderQuietly(context, 9201);
+        const restored = clone(vm.runInContext('Calculator.items.map(item => item.tirage_allocation)', context));
+        assert.equal(restored[0].partner_note, 'художница', 'the split survives reopening the order');
+        assert.deepEqual(restored[0], collected.expected);
+        assert.equal(restored[1], null);
+        assert.equal(restored[2], null);
+        assert.equal(restored[3].stock_price, 0);
+
+        // Разметка, записанная строкой JSON (старые/чужие записи), тоже читается.
+        context.__tirageLoadData.items[0].tirage_allocation = JSON.stringify(lemonAllocation);
+        await loadCalculatorOrderQuietly(context, 9201);
+        assert.deepEqual(clone(vm.runInContext('Calculator.items[0].tirage_allocation', context)), collected.expected);
+        context.__tirageLoadData.items[0].tirage_allocation = '{не json';
+        await loadCalculatorOrderQuietly(context, 9201);
+        assert.equal(vm.runInContext('Calculator.items[0].tirage_allocation', context), null, 'a broken allocation is no split');
+    } finally {
+        context.loadOrder = originalLoadOrder;
+    }
+
+    // Смета для заказчика: строки изделия, его печати и фурнитуры — только на «клиенту».
+    const invoice = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            printings: [{ name: 'УФ', qty: 100, price: 5, sell_price: 20 }],
+            result: { ...getEmptyCostResult(), costTotal: 971.35, costPrinting: 5.3, costPrintingDetails: [5.3] },
+            tirage_allocation: { stock: 0, partner: 60, partner_note: 'художница' },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            source: 'custom', name: 'Карабин', qty: 100, price: 5, sell_price: 10, result: { costPerUnit: 5, hoursHardware: 0 },
+        })];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [{ name: 'Доставка', amount: 1000 }];
+        Calculator.pendants = [];
+        const contentEl = document.getElementById('calc-pricing-content');
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        const html40 = contentEl.innerHTML;
+        const summary40 = calculateOrderSummary(Calculator.items, Calculator.hardwareItems, [], Calculator.extraCosts, App.params, [], {});
+        line.tirage_allocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900 };
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        const html0 = contentEl.innerHTML;
+        return { html40, html0, revenue40: summary40.totalRevenue, revenue40Text: formatRub(summary40.totalRevenue) };
+    })()`, context));
+    assert.equal(invoiceRowQty(invoice.html40, '&#9670;', 'Лимон'), 40, 'the product row bills only the client part');
+    assert.equal(invoiceRowQty(invoice.html40, '&#9998;', 'УФ'), 40, 'printing follows the client part');
+    assert.equal(invoiceRowQty(invoice.html40, '&#9881;', 'Карабин'), 40, 'line hardware follows the client part');
+    assert.equal(invoice.revenue40, 40 * 5900 + 40 * 20 + 40 * 10 + 1000);
+    assert.ok(invoice.html40.includes(invoice.revenue40Text), 'the customer total equals the calculator revenue');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9670;', 'Лимон'), null, 'client 0: no product row');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9998;', 'УФ'), null, 'client 0: no printing row');
+    assert.equal(invoiceRowQty(invoice.html0, '&#9881;', 'Карабин'), null, 'client 0: no hardware row of that line');
+    assert.equal(invoiceRowQty(invoice.html0, '&#10010;', 'Доставка'), 1, 'other rows stay');
+
+    // КП — тоже только «клиенту».
+    const kpCalls = clone(await vm.runInContext(`(async () => {
+        const originalGenerate = KPGenerator.generate;
+        const calls = [];
+        KPGenerator.generate = async (...args) => { calls.push(JSON.parse(JSON.stringify(args[2]))); };
+        try {
+            document.getElementById('calc-order-name').value = 'КП с разметкой';
+            const line = Calculator.items[0];
+            line.tirage_allocation = { stock: 0, partner: 60 };
+            await Calculator.generateKP();
+            line.tirage_allocation = { stock: 30, partner: 50, gift: 20, stock_price: 5900 };
+            await Calculator.generateKP();
+            return calls;
+        } finally {
+            KPGenerator.generate = originalGenerate;
+            document.getElementById('calc-order-name').value = '';
+        }
+    })()`, context));
+    assert.equal(kpCalls.length, 2);
+    assert.deepEqual(kpCalls[0].filter(item => item.type === 'product').map(item => item.qty), [40]);
+    assert.deepEqual(kpCalls[0].filter(item => item.type === 'printing').map(item => item.qty), [40]);
+    assert.equal(kpCalls[1].some(item => item.type === 'product' || item.type === 'printing'), false, 'client 0: nothing to bill for the line');
+    assert.equal(kpCalls[1].some(item => item.type === 'extra'), true);
+
+    // В счёте — целые штуки: 120 открыток на строку из 100 штук, клиенту 33 → 40, а не 39.6.
+    const postcards = String(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+            result: { ...getEmptyCostResult(), costTotal: 971.35 },
+            tirage_allocation: { partner: 67 },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(0), {
+            source: 'custom', name: 'Открытка', qty: 120, price: 15, sell_price: 30, result: { costPerUnit: 15, hoursPackaging: 0 },
+        })];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        const contentEl = document.getElementById('calc-pricing-content');
+        Calculator.renderOrderInvoice(App.params, '', contentEl);
+        return contentEl.innerHTML;
+    })()`, context));
+    assert.equal(invoiceRowQty(postcards, '&#9670;', 'Лимон'), 33);
+    assert.equal(invoiceRowQty(postcards, '&#9744;', 'Открытка'), 40, 'the client share of an attachment is billed in whole pieces');
+
+    // Изменение тиража перенормализует разметку от того, что ввёл менеджер, и пишет под строкой, что урезано.
+    const qty = clone(await vm.runInContext(`(() => {
+        const originals = { recalculate: Calculator.recalculate, scheduleAutosave: Calculator.scheduleAutosave };
+        try {
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            const line = Object.assign(Calculator.getEmptyItem(1), {
+                product_name: 'Лимон', quantity: 100, sell_price_item: 5900,
+                tirage_allocation: ${JSON.stringify(lemonAllocation)},
+            });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            const snap = () => JSON.parse(JSON.stringify(line.tirage_allocation));
+            const noticeEl = document.getElementById('item-tirage-reduced-0');
+            Calculator.onNumChange(0, 'quantity', 60);
+            const at60 = snap();
+            const notice60 = noticeEl.textContent;
+            const block60 = Calculator.renderTirageBlock(0);
+            Calculator.onNumChange(0, 'quantity', 100);
+            const back100 = snap();
+            const notice100 = noticeEl.textContent;
+            // «60» набирают поверх «100» по одной цифре: на миг тираж становится 6
+            Calculator.onNumChange(0, 'quantity', '6');
+            Calculator.onNumChange(0, 'quantity', '60');
+            const typed60 = snap();
+            Calculator.onNumChange(0, 'quantity', 120);
+            const at120 = snap();
+            return { at60, notice60, block60, back100, notice100, typed60, at120 };
+        } finally {
+            Object.assign(Calculator, originals);
+        }
+    })()`, context));
+    const partsSum = allocation => allocation.client + allocation.stock + allocation.partner + allocation.gift + allocation.sample;
+    assert.equal(partsSum(qty.at60), 60, 'the parts always add up to the tirage');
+    assert.deepEqual([qty.at60.client, qty.at60.stock, qty.at60.partner, qty.at60.gift, qty.at60.sample], [0, 0, 50, 10, 0]);
+    assert.equal(qty.at60.partner_note, 'художница');
+    assert.equal(qty.notice60, 'Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10');
+    assert.match(qty.block60, /Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10/);
+    assert.deepEqual([qty.back100.client, qty.back100.stock, qty.back100.partner, qty.back100.gift], [0, 30, 50, 20],
+        'going back to the old tirage restores what the manager entered');
+    assert.equal(qty.notice100, '');
+    assert.deepEqual(qty.typed60, qty.at60, 'typing a new tirage digit by digit does not eat the split');
+    assert.deepEqual([qty.at120.client, qty.at120.stock, qty.at120.partner, qty.at120.gift], [20, 30, 50, 20], 'extra pieces go to the client');
+}
+
+// Блок «Тираж» под строкой изделия: свёрнутый вид, поля, ограничения ввода и когда он скрыт.
+async function smokeTirageBlockUi(context) {
+    const ui = clone(await vm.runInContext(`(() => {
+        const originals = {
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+        };
+        try {
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            Calculator._renderPerItemHwPkg = () => {};
+            Calculator.resetForm();
+            const line = Object.assign(Calculator.getEmptyItem(1), { product_name: 'Лимон', quantity: 100, sell_price_item: 5900 });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            const plainCollapsed = Calculator.renderTirageBlock(0);
+            Calculator.toggleTirageBlock(0);
+            const plainOpen = Calculator.renderTirageBlock(0);
+
+            Calculator.onTirageChange(0, 'stock', '30');
+            Calculator.onTirageChange(0, 'partner', '50');
+            Calculator.onTirageChange(0, 'gift', '999');
+            const giftInput = document.getElementById('item-tirage-gift-0').value;
+            Calculator.onTirageChange(0, 'stock', '45');
+            const stockInput = document.getElementById('item-tirage-stock-0').value;
+            Calculator.onTirageTextChange(0, 'partner_note', 'художница');
+            const afterEdits = JSON.parse(JSON.stringify(line.tirage_allocation));
+            const clientShown = document.getElementById('item-tirage-client-0').textContent;
+            const summaryShown = document.getElementById('item-tirage-summary-0').textContent;
+            Calculator.toggleTirageBlock(0);
+            const splitCollapsed = Calculator.renderTirageBlock(0);
+
+            Calculator.onTirageTextChange(0, 'stock_price', '6500');
+            const ownPrice = line.tirage_allocation.stock_price;
+            const ownPriceSummary = document.getElementById('item-tirage-summary-0').textContent;
+            Calculator.onTirageTextChange(0, 'stock_price', '');
+            const clearedPrice = line.tirage_allocation.stock_price;
+
+            line.printings = [{ name: 'УФ', qty: 100, price: 5, sell_price: 20 }];
+            Calculator.toggleTirageBlock(0);
+            const printedOpen = Calculator.renderTirageBlock(0);
+
+            globalThis.__originalRenderItemBlock.call(Calculator, 0);
+            const card = document.getElementById('item-block-0').outerHTML;
+
+            const hiddenFor = {};
+            [['rework', ''], ['stock_sample', ''], ['leftover_assembly', ''], ['commercial', 'B2C'], ['commercial', ' b2c ']]
+                .forEach(([purpose, client]) => {
+                    document.getElementById('calc-production-purpose').value = purpose;
+                    document.getElementById('calc-client-name').value = client;
+                    hiddenFor[purpose + '|' + client] = Calculator.renderTirageBlock(0);
+                });
+            document.getElementById('calc-production-purpose').value = 'commercial';
+            document.getElementById('calc-client-name').value = 'ООО Лимон';
+            const shownForClient = Calculator.renderTirageBlock(0);
+            return {
+                plainCollapsed, plainOpen, giftInput, stockInput, afterEdits, clientShown, summaryShown, splitCollapsed,
+                ownPrice, ownPriceSummary, clearedPrice, printedOpen, card, hiddenFor, shownForClient,
+            };
+        } finally {
+            Object.assign(Calculator, originals);
+            Calculator.resetForm();
+        }
+    })()`, context));
+
+    assert.match(ui.plainCollapsed, /Тираж:/);
+    assert.match(ui.plainCollapsed, /весь — клиенту/);
+    assert.match(ui.plainCollapsed, /▸ разметить/);
+    assert.match(ui.plainCollapsed, /id="item-tirage-body-0"[^>]*display:none/, 'collapsed by default');
+    assert.doesNotMatch(ui.plainOpen, /id="item-tirage-body-0"[^>]*display:none/, 'opens right under the line');
+    ['stock', 'partner', 'gift', 'sample'].forEach(part => {
+        assert.match(ui.plainOpen, new RegExp(`<input[^>]*id="item-tirage-${part}-0"`), `${part} has a quantity field`);
+    });
+    ['stock-price', 'partner-note', 'gift-note'].forEach(field => {
+        assert.match(ui.plainOpen, new RegExp(`<input[^>]*id="item-tirage-${field}-0"`), `${field} field`);
+    });
+    assert.doesNotMatch(ui.plainOpen, /<input[^>]*id="item-tirage-client-0"/, 'the client part is only shown, never typed');
+    assert.match(ui.plainOpen, /id="item-tirage-client-0"[^>]*>100 шт</, 'the client gets the rest');
+    assert.match(ui.plainOpen, /id="item-tirage-stock-price-0"[^>]*placeholder="5900"/, 'default sale price = the line price');
+
+    assert.equal(ui.giftInput, '20', 'a part cannot take more than what is left');
+    assert.equal(ui.stockInput, '30', 'raising a part over the rest stops at the rest');
+    // With its first split the line got its stable key (the ready goods stock finds the line's
+    // position by it); the rest is the split as typed.
+    const { line_key: lineKeyAfterEdits, ...splitAfterEdits } = ui.afterEdits;
+    assert.match(String(lineKeyAfterEdits || ''), /^[0-9a-z]+$/, 'the split line has a key');
+    assert.deepEqual(splitAfterEdits,
+        { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 0, partner_note: 'художница', gift_note: '' });
+    assert.equal(ui.clientShown, '0 шт');
+    assert.match(ui.summaryShown, /^клиенту 0 · на продажу 30 по 5\s900 ₽ · партнёру 50 · в подарок 20$/);
+    assert.match(ui.splitCollapsed, /клиенту 0 · на продажу 30 по 5\s900 ₽ · партнёру 50 · в подарок 20/);
+    assert.match(ui.splitCollapsed, /▸ изменить/);
+    assert.equal(ui.ownPrice, 6500);
+    assert.match(ui.ownPriceSummary, /на продажу 30 по 6\s500 ₽/);
+    assert.equal(ui.clearedPrice, 0, 'an empty sale price falls back to the line price');
+    assert.match(ui.printedOpen, /id="item-tirage-stock-price-0"[^>]*placeholder="5920"/, 'default sale price includes printing');
+    assert.match(ui.printedOpen, /value="художница"/);
+
+    const qtyAt = ui.card.indexOf("Calculator.onNumChange(0, 'quantity'");
+    const blockAt = ui.card.indexOf('id="item-tirage-0"');
+    assert.ok(qtyAt > 0 && blockAt > qtyAt, 'the block sits under the tirage field');
+    assert.ok(blockAt < ui.card.indexOf('item-advanced-details'), 'and above the advanced options');
+
+    Object.entries(ui.hiddenFor).forEach(([key, html]) => {
+        assert.match(html, /id="item-tirage-0"[^>]*display:none/, `hidden for ${key}`);
+    });
+    assert.doesNotMatch(ui.shownForClient, /id="item-tirage-0"[^>]*display:none/);
+}
+
+// Сводка калькулятора и «Финдиректор» при разметке: честная выручка, «ожидаем, если продадим»,
+// «Отдаём бесплатно» и «план» у маржи.
+async function smokeTirageCalculatorSummary(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        // В заглушке DOM у элементов нет родителя, а пересчёт прячет строку подитога через него.
+        const subtotalEl = document.getElementById('c-0-subtotal');
+        subtotalEl.parentElement = { style: {} };
+        try {
+            Calculator.resetForm();
+            const line = Object.assign(Calculator.getEmptyItem(1), {
+                product_name: 'Лимон', quantity: 100, pieces_per_hour: 100, weight_grams: 10, sell_price_item: 5900,
+                is_blank_mold: false, base_mold_in_stock: true,
+                tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 },
+            });
+            Calculator.items = [line];
+            Calculator.hardwareItems = [];
+            Calculator.packagingItems = [];
+            Calculator.extraCosts = [];
+            Calculator.pendants = [];
+            const read = id => ({ text: document.getElementById(id).textContent, display: document.getElementById(id).style.display });
+            Calculator._doRecalculate(App.params);
+            const summary = Calculator.getPurposeAwareOrderSummary(App.params);
+            const split = {
+                totalRevenue: summary.totalRevenue,
+                revenueText: formatRub(summary.totalRevenue),
+                freeText: 'Отдаём бесплатно: 70 шт. на ' + formatRub(Math.round(summary.freeCost)) + ' себестоимости',
+                sumRevenue: read('sum-revenue').text,
+                finRevenue: read('fin-revenue').text,
+                revenueNote: read('sum-revenue-note'),
+                freeNote: read('sum-free-note'),
+                marginLabel: read('sum-margin-label').text,
+            };
+            line.tirage_allocation = null;
+            Calculator._doRecalculate(App.params);
+            const plain = {
+                revenueNote: read('sum-revenue-note'),
+                freeNote: read('sum-free-note'),
+                marginLabel: read('sum-margin-label').text,
+            };
+            return { split, plain };
+        } finally {
+            delete subtotalEl.parentElement;
+            Calculator.resetForm();
+        }
+    })()`, context));
+
+    assert.equal(state.split.totalRevenue, 177000);
+    assert.equal(state.split.sumRevenue, state.split.revenueText);
+    assert.equal(state.split.finRevenue, state.split.revenueText, 'the fin director block shows the same honest revenue');
+    assert.deepEqual(state.split.revenueNote, { text: 'ожидаем, если продадим 30 шт.', display: '' });
+    assert.deepEqual(state.split.freeNote, { text: state.split.freeText, display: '' });
+    assert.equal(state.split.marginLabel, 'Маржа · план');
+    assert.equal(state.plain.revenueNote.display, 'none');
+    assert.equal(state.plain.freeNote.display, 'none');
+    assert.equal(state.plain.marginLabel, 'Маржа · план');
+    // Подписи под суммами — читаемым текстом, не мельче 14 px (мелкий текст калькулятора — частая жалоба).
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    ['sum-revenue-note', 'sum-free-note'].forEach(id => {
+        const tag = indexHtml.match(new RegExp(`<div id="${id}"[^>]*>`));
+        assert.ok(tag, `${id} is in index.html`);
+        assert.match(tag[0], /font-size:14px/, `${id}: 14 px`);
+    });
+}
+
+// B2C-заказ (клиент «B2C», как у Orders._shouldSyncOrderToReadyGoods) разметку не использует:
+// весь тираж уходит на склад готовой продукции. Сохранённая разметка не меняет деньги, счёт и КП,
+// при сохранении стирается, а под строкой вместо блока — короткая пометка.
+async function smokeTirageB2CIgnoresSplit(context) {
+    const rows = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-client-name').value = 'ООО Лимон';
+        const line = Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, pieces_per_hour: 100, weight_grams: 10, sell_price_item: 5900,
+            tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 },
+        });
+        Calculator.items = [line];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            source: 'custom', name: 'Карабин', qty: 100, price: 5, sell_price: 10,
+        })];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        const saved = Calculator._collectItemsForSave();
+        Calculator.resetForm();
+        return saved;
+    })()`, context));
+    assert.ok(rows.find(row => row.item_type === 'product').tirage_allocation, 'fixture: the split is saved for a regular client');
+
+    const originalLoadOrder = context.loadOrder;
+    context.loadOrder = async () => ({
+        order: { id: 9301, order_name: 'B2C партия', client_name: 'b2c', status: 'draft' },
+        items: clone(rows),
+        repaired_duplicates: false,
+    });
+    let state;
+    try {
+        await loadCalculatorOrderQuietly(context, 9301);
+        state = clone(await vm.runInContext(`(async () => {
+            const subtotalEl = document.getElementById('c-0-subtotal');
+            subtotalEl.parentElement = { style: {} };
+            const originals = {
+                _renderPerItemHwPkg: Calculator._renderPerItemHwPkg,
+                recalculate: Calculator.recalculate,
+                scheduleAutosave: Calculator.scheduleAutosave,
+            };
+            const originalGenerate = KPGenerator.generate;
+            try {
+                Calculator._renderPerItemHwPkg = () => {};
+                Calculator.recalculate = () => {};
+                Calculator.scheduleAutosave = () => {};
+                const line = Calculator.items[0];
+                const keptInForm = JSON.parse(JSON.stringify(line.tirage_allocation));
+                Calculator._doRecalculate(App.params);
+                const b2cSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                const read = id => ({ text: document.getElementById(id).textContent, display: document.getElementById(id).style.display });
+                const screen = {
+                    sumRevenue: read('sum-revenue').text,
+                    finRevenue: read('fin-revenue').text,
+                    revenueNote: read('sum-revenue-note').display,
+                    freeNote: read('sum-free-note').display,
+                    b2cNote: read('item-tirage-b2c-0').display,
+                    block: read('item-tirage-0').display,
+                };
+                const saved = Calculator._collectItemsForSave();
+                const contentEl = document.getElementById('calc-pricing-content');
+                Calculator.renderOrderInvoice(App.params, '', contentEl);
+                const invoiceHtml = contentEl.innerHTML;
+                let kpItems = null;
+                KPGenerator.generate = async (...args) => { kpItems = JSON.parse(JSON.stringify(args[2])); };
+                document.getElementById('calc-order-name').value = 'B2C партия';
+                await Calculator.generateKP();
+                globalThis.__originalRenderItemBlock.call(Calculator, 0);
+                const card = document.getElementById('item-block-0').outerHTML;
+
+                // То же заказ без разметки — эталон
+                line.tirage_allocation = null;
+                const plainSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                globalThis.__originalRenderItemBlock.call(Calculator, 0);
+                const plainCard = document.getElementById('item-block-0').outerHTML;
+                line.tirage_allocation = keptInForm;
+
+                // Клиента исправили — разметка снова работает и снова сохраняется
+                document.getElementById('calc-client-name').value = 'ООО Лимон';
+                const regularSummary = Calculator.getPurposeAwareOrderSummary(App.params);
+                const regularSaved = Calculator._collectItemsForSave();
+                Calculator._refreshTirageBlocks();
+                const regularScreen = { b2cNote: read('item-tirage-b2c-0').display, block: read('item-tirage-0').display };
+                return {
+                    keptInForm, b2cSummary, plainSummary, screen, saved, invoiceHtml, kpItems, card, plainCard,
+                    regularStockRevenue: regularSummary.stockRevenue, regularSaved, regularScreen,
+                    revenueText: formatRub(plainSummary.totalRevenue),
+                };
+            } finally {
+                delete subtotalEl.parentElement;
+                KPGenerator.generate = originalGenerate;
+                Object.assign(Calculator, originals);
+                Calculator.resetForm();
+            }
+        })()`, context));
+    } finally {
+        context.loadOrder = originalLoadOrder;
+    }
+
+    const b2cNoteText = 'Для B2C разметка не используется — весь тираж уходит на склад готовой продукции';
+    assert.equal(state.keptInForm.stock, 30, 'the loaded split stays in the form (the note needs it)');
+    assert.deepEqual(state.b2cSummary, state.plainSummary, 'a B2C order with a saved split gives the unsplit summary');
+    assert.equal(state.b2cSummary.totalRevenue, 100 * 5900 + 100 * 10);
+    assert.equal(state.screen.sumRevenue, state.revenueText);
+    assert.equal(state.screen.finRevenue, state.revenueText, 'the fin director block ignores the split too');
+    assert.deepEqual([state.screen.revenueNote, state.screen.freeNote], ['none', 'none']);
+    assert.deepEqual([state.screen.block, state.screen.b2cNote], ['none', ''], 'the note replaces the block');
+    assert.equal(state.saved.find(row => row.item_type === 'product').tirage_allocation, null, 'B2C saves no split');
+    assert.equal(invoiceRowQty(state.invoiceHtml, '&#9670;', 'Лимон'), 100, 'B2C bills the whole tirage');
+    assert.equal(invoiceRowQty(state.invoiceHtml, '&#9881;', 'Карабин'), 100);
+    assert.deepEqual(state.kpItems.filter(item => item.type === 'product').map(item => item.qty), [100]);
+    assert.ok(state.card.includes(b2cNoteText), 'the short line is under the product line');
+    assert.doesNotMatch(state.card, /id="item-tirage-b2c-0"[^>]*display:none/, 'and it is visible when the card is drawn');
+    assert.match(state.card, /id="item-tirage-0"[^>]*display:none/);
+    assert.match(state.plainCard, /id="item-tirage-b2c-0"[^>]*display:none/, 'no note when there is nothing to ignore');
+    assert.equal(state.regularStockRevenue, 177000, 'with a regular client the split counts again');
+    assert.equal(state.regularSaved.find(row => row.item_type === 'product').tirage_allocation.stock, 30);
+    assert.deepEqual([state.regularScreen.block, state.regularScreen.b2cNote], ['', 'none']);
+}
+
+// Сохранение пропускает пустые строки изделий — индексы родителя у фурнитуры и упаковки должны
+// указывать на сохранённые позиции, иначе доля «клиенту» уходит не той строке.
+async function smokeSaveRemapsParentIndexesPastEmptyRows(context) {
+    const saved = clone(await vm.runInContext(`(() => {
+        const pear = Object.assign(Calculator.getEmptyItem(1), { product_name: 'Груша', quantity: 50, sell_price_item: 1000, pieces_per_hour: 100, weight_grams: 10 });
+        const empty = Calculator.getEmptyItem(2);
+        const lemon = Object.assign(Calculator.getEmptyItem(3), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
+            tirage_allocation: { stock: 0, partner: 60 },
+        });
+        Calculator.items = [pear, empty, lemon];
+        const hw = (parent, name, sell) => Object.assign(Calculator.getEmptyHardware(parent), {
+            source: 'custom', name, qty: 100, price: 5, sell_price: sell, result: { costPerUnit: 5, hoursHardware: 0 },
+        });
+        Calculator.hardwareItems = [hw(2, 'Карабин лимона', 10), hw(0, 'Карабин груши', 10), hw(null, 'Общий карабин', 10), hw(1, 'Карабин пустой строки', 30)];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(2), {
+            source: 'custom', name: 'Коробка лимона', qty: 100, price: 3, sell_price: 0, result: { costPerUnit: 3, hoursPackaging: 0 },
+        })];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        return Calculator._collectItemsForSave();
+    })()`, context));
+
+    assert.deepEqual(saved.filter(row => row.item_type === 'product').map(row => row.product_name), ['Груша', 'Лимон']);
+    const hardwareParents = Object.fromEntries(saved
+        .filter(row => row.item_type === 'hardware')
+        .map(row => [row.product_name, row.hardware_parent_item_index]));
+    assert.deepEqual(hardwareParents, {
+        'Карабин лимона': 1,
+        'Карабин груши': 0,
+        'Общий карабин': null,
+        'Карабин пустой строки': null,
+    });
+    assert.equal(saved.find(row => row.item_type === 'packaging').packaging_parent_item_index, 1);
+
+    // По сохранённым строкам (так считают доска и карточка) фурнитура лимона продаётся на его
+    // 40 клиентских штук, а фурнитура несохранённой пустой строки становится общей.
+    const snapshot = clone(vm.runInContext(`getOrderLiveCalculatorSnapshot({}, ${JSON.stringify(saved)}, App.params, [])`, context));
+    assert.equal(snapshot.revenue, 50 * 1000 + 40 * 5900 + 40 * 10 + 100 * 10 + 100 * 10 + 100 * 30);
+}
+
+// ==========================================
+// Тираж «на продажу» → склад готовой продукции
+// ==========================================
+
+const READY_GOODS_STUB_NAMES = ['getReadyGoodsSourceStatus', 'loadReadyGoods', 'saveReadyGoods', 'loadReadyGoodsHistory', 'saveReadyGoodsHistory', 'loadSalesRecords', 'saveSalesRecords'];
+
+// Склад готовой продукции в памяти. Каждый список пишется так, как его пишет общая база:
+// запись — изменения относительно последнего чтения этого списка вкладкой (новые и изменённые
+// строки по id, удалённые — только те, что она видела и убрала), поэтому лишняя позиция заказа
+// видна как лишняя строка, а запись с чужим id заменяет чужую строку. staleNext[list] — следующее
+// чтение отдаёт старую копию (вкладка, прочитавшая склад до чужой записи). server — та же база
+// для ещё одной вкладки. Возвращает базу; заглушки — в контексте вкладки.
+function useReadyGoodsBase(context, initial = {}, server = null) {
+    const base = server || {
+        lists: { stock: clone(initial.stock || []), history: clone(initial.history || []), sales: clone(initial.sales || []) },
+        staleNext: {},
+        loads: { stock: 0, history: 0, sales: 0 },
+        saves: { stock: 0, history: 0, sales: 0 },
+        // shared = false — общей базы нет совсем; unavailable — нет для этих списков (и чтение
+        // это видит); failSaves — читается, но запись в эти списки не проходит.
+        shared: true,
+        unavailable: new Set(),
+        failSaves: new Set(),
+    };
+    // Что эта вкладка последний раз прочитала или записала.
+    const seenByTab = {};
+    const isShared = list => base.shared && !base.unavailable.has(list);
+    const idOf = row => (row && row.id !== null && row.id !== undefined && row.id !== '' ? String(row.id) : null);
+    const snapshot = rows => new Map(rows.filter(row => idOf(row)).map(row => [idOf(row), JSON.stringify(row)]));
+    const load = list => async () => {
+        base.loads[list] += 1;
+        const rows = clone(base.staleNext[list] || base.lists[list]);
+        delete base.staleNext[list];
+        seenByTab[list] = snapshot(rows);
+        return rows;
+    };
+    const save = list => async (rows) => {
+        if (!isShared(list) || base.failSaves.has(list)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        const seen = seenByTab[list] || new Map();
+        const present = new Set(rows.map(idOf).filter(Boolean));
+        const next = base.lists[list].filter(row => !(idOf(row) && seen.has(idOf(row)) && !present.has(idOf(row))));
+        rows.forEach(row => {
+            const id = idOf(row);
+            if (id && seen.get(id) === JSON.stringify(row)) return;
+            const index = id ? next.findIndex(other => idOf(other) === id) : -1;
+            if (index >= 0) next[index] = clone(row);
+            else next.push(clone(row));
+        });
+        base.lists[list] = next;
+        seenByTab[list] = snapshot(rows);
+        base.saves[list] += 1;
+    };
+    context.getReadyGoodsSourceStatus = () => {
+        const source = list => ({ source: isShared(list) ? 'shared-settings' : 'shared-unavailable' });
+        return { ready_goods: source('stock'), ready_goods_history: source('history'), sales_records: source('sales') };
+    };
+    context.loadReadyGoods = load('stock');
+    context.saveReadyGoods = save('stock');
+    context.loadReadyGoodsHistory = load('history');
+    context.saveReadyGoodsHistory = save('history');
+    context.loadSalesRecords = load('sales');
+    context.saveSalesRecords = save('sales');
+    return base;
+}
+
+// «Лимон» так, как его возвращает loadOrder: строка изделия с разметкой в item_data.
+const LEMON_TIRAGE = { client: 0, stock: 30, partner: 50, gift: 20, sample: 0, stock_price: 5900, partner_note: 'художница', gift_note: '' };
+function lemonOrderData(orderId, { order = {}, tirage = {} } = {}) {
+    return {
+        order: { id: orderId, order_name: 'Лимон', client_name: 'Художница Маша', status: 'completed', production_purpose: 'commercial', ...order },
+        items: [{
+            id: orderId * 1000 + 1, order_id: orderId, item_number: 1, item_type: 'product', product_name: 'Лимон',
+            quantity: 100, cost_total: 971.35, sell_price_item: 5900, sell_price_printing: 0, printings: '[]',
+            tirage_allocation: { ...LEMON_TIRAGE, ...tirage },
+        }],
+    };
+}
+
+// Позиция склада без id и даты: остальное — ровно то, что обещает перенос.
+function tiragePositionView(position) {
+    const { id, added_at, ...rest } = position;
+    return rest;
+}
+
+// Штуки «на продажу» встают на склад готовой продукции при «Готово» по реальной себестоимости,
+// не задваиваются, не уходят с проданным при возврате заказа, а себестоимость непроданных
+// пересчитывается без записей продаж.
+async function smokeTirageReadyGoodsTransfer(context) {
+    const ROLLBACK_BLOCKED = 'Уже продано 5 шт. со склада — заказ нельзя вернуть из «Готово»';
+    const TRANSFER_FAILED = 'Статус сохранён, но склад готовой продукции не обновился — нет связи с общей базой. Обновите страницу и проверьте склад готовой продукции.';
+    const ROLLBACK_FAILED = 'Статус сохранён, но позиции заказа остались на складе готовой продукции — нет связи с общей базой. Обновите страницу и проверьте склад готовой продукции.';
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const orders = {};
+    const addOrder = data => { orders[data.order.id] = data; };
+    context.loadOrder = async (orderId) => clone(orders[Number(orderId)] || null);
+    context.__realCosts = {};
+    context.__realCostCalls = [];
+    context.Factual = {
+        async computeOrderRealCost(orderId, options) {
+            context.__realCostCalls.push({ orderId: Number(orderId), options: clone(options === undefined ? null : options) });
+            const value = context.__realCosts[Number(orderId)];
+            if (value instanceof Error) throw value;
+            return value === undefined || value === null ? null : clone(value);
+        },
+    };
+    context.__toasts = [];
+    vm.runInContext(`
+        globalThis.__tirageOriginals = {
+            toast: App.toast,
+            renderStats: Warehouse.renderStats,
+            renderReadyGoodsView: Warehouse.renderReadyGoodsView,
+        };
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.renderStats = () => {};
+        Warehouse.renderReadyGoodsView = () => {};
+    `, context);
+    const move = (orderId, orderName = 'Лимон') => vm.runInContext(`Warehouse.moveOrderToReadyGoods(${orderId}, ${JSON.stringify(orderName)})`, context);
+    const positionsOf = orderId => base.lists.stock.filter(row => Number(row.order_id) === orderId);
+    const counters = () => clone({ loads: base.loads, saves: base.saves, realCostCalls: context.__realCostCalls.length });
+
+    try {
+        // 1. «Готово»: 30 «на продажу» — одна позиция, себестоимость штуки = реальные затраты
+        // заказа на его платные штуки (121 000 / 30), цена продажи из разметки.
+        context.__realCosts[9301] = { realTotal: 121000 };
+        addOrder(lemonOrderData(9301));
+        assert.equal(await move(9301), 1);
+        assert.equal(positionsOf(9301).length, 1);
+        const lemon = positionsOf(9301)[0];
+        assert.deepEqual(Object.keys(lemon).sort(), [
+            'added_at', 'added_by', 'cost_per_unit', 'id', 'location_type', 'order_id', 'order_item_number',
+            'order_line_key', 'order_name', 'product_name', 'qty', 'sale_price', 'source',
+        ]);
+        assert.deepEqual(tiragePositionView(lemon), {
+            product_name: 'Лимон', order_name: 'Лимон', order_id: 9301, order_item_number: 1, order_line_key: null, source: 'tirage',
+            location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900, added_by: 'Smoke',
+        });
+        assert.match(lemon.added_at, /^\d{4}-\d\d-\d\dT/);
+        assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9301, options: { fresh: true } }], 'the frozen cost reads a fresh timesheet');
+        const transferEntries = base.lists.history.filter(entry => entry.type === 'from_order');
+        assert.equal(transferEntries.length, 1);
+        assert.equal(transferEntries[0].qty, 30);
+        assert.equal(transferEntries[0].cost_per_unit, 4033.33);
+        assert.equal(transferEntries[0].product_name, 'Лимон');
+
+        // 2. Повторный перевод (доска, потом план производства) позицию не задваивает.
+        assert.equal(await move(9301), 0);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9301, { id: 9301, order_name: 'Лимон' }, 'delivery', 'completed')`, context);
+        assert.equal(positionsOf(9301).length, 1);
+        assert.equal(positionsOf(9301)[0].qty, 30);
+        assert.equal(base.lists.history.filter(entry => entry.type === 'from_order').length, 1);
+
+        // 3. Вторая вкладка прочитала склад до первой записи: её перенос пишет ту же позицию.
+        context.__realCosts[9302] = { realTotal: 121000 };
+        addOrder(lemonOrderData(9302));
+        const stockBeforeTransfer = clone(base.lists.stock);
+        assert.equal(await move(9302), 1);
+        base.staleNext.stock = stockBeforeTransfer;
+        await move(9302);
+        assert.equal(positionsOf(9302).length, 1, 'two tabs moving one order to «Готово» leave one position');
+
+        // 4. Пока ничего не продано, заказ можно вернуть из «Готово».
+        context.__toasts = [];
+        const allowed = clone(await vm.runInContext(`Orders._ensureStatusTransitionAllowed(9301, 'production_casting')`, context));
+        assert.equal(allowed.ok, true);
+        assert.deepEqual(clone(context.__toasts), []);
+
+        // 5. Продажа 5 штук — так же, как «Списать продажу» на складе.
+        const forSale = base.lists.stock.filter(row => (parseFloat(row.qty) || 0) > 0);
+        context.document.getElementById('rg-wo-product').value = String(forSale.findIndex(row => Number(row.order_id) === 9301));
+        context.document.getElementById('rg-wo-qty').value = '5';
+        context.document.getElementById('rg-wo-channel').value = 'website';
+        context.document.getElementById('rg-wo-revenue').value = '29500';
+        context.document.getElementById('rg-wo-payout').value = '29000';
+        context.document.getElementById('rg-wo-notes').value = 'сайт';
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.equal(positionsOf(9301)[0].qty, 25);
+        assert.equal(base.lists.sales.length, 1);
+        assert.equal(base.lists.sales[0].ready_goods_id, lemon.id);
+        const saleBefore = clone(base.lists.sales[0]);
+        assert.equal(await vm.runInContext('Warehouse.getOrderReadyGoodsSoldQty(9301)', context), 5);
+        assert.equal(await vm.runInContext('Warehouse.getOrderReadyGoodsSoldQty(9302)', context), 0);
+
+        // 6. С проданного вернуть заказ из «Готово» нельзя; менеджер видит почему.
+        context.__toasts = [];
+        const blocked = clone(await vm.runInContext(`Orders._ensureStatusTransitionAllowed(9301, 'production_casting')`, context));
+        assert.equal(blocked.ok, false);
+        assert.equal(blocked.message, ROLLBACK_BLOCKED);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_BLOCKED]);
+        const quietBlocked = clone(await vm.runInContext(`Orders._ensureStatusTransitionAllowed(9301, 'cancelled', { toast: false })`, context));
+        assert.equal(quietBlocked.ok, false, 'any status outside «Готово» is a return');
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_BLOCKED]);
+        // Смена статуса не из «Готово» склад не читает.
+        const beforeOther = counters();
+        const other = clone(await vm.runInContext(`Orders._ensureStatusTransitionAllowed(9301, 'production_hardware', { oldStatus: 'production_casting' })`, context));
+        assert.equal(other.ok, true);
+        assert.deepEqual(counters(), beforeOther);
+
+        // 7. И напрямую позиция с продажами не снимается: проданное остаётся при ней.
+        assert.equal(await vm.runInContext(`Warehouse.removeOrderFromReadyGoods(9301, 'Лимон', 'production_casting')`, context), 0);
+        assert.equal(positionsOf(9301).length, 1);
+        assert.equal(positionsOf(9301)[0].qty, 25);
+
+        // 8. Пересчёт: себестоимость меняется только у непроданных штук, продажи — как были.
+        context.__realCosts[9301] = { realTotal: 150000 };
+        context.__realCostCalls = [];
+        assert.equal(await vm.runInContext('Warehouse.recalcOrderReadyGoodsCost(9301)', context), 1);
+        assert.equal(positionsOf(9301)[0].cost_per_unit, 5000);
+        assert.equal(positionsOf(9301)[0].qty, 25);
+        assert.deepEqual(clone(base.lists.sales), [saleBefore], 'recorded sales keep their cost');
+        assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9301, options: { fresh: true } }]);
+        assert.equal(await vm.runInContext('Warehouse.recalcOrderReadyGoodsCost(9301)', context), 0, 'nothing to update the second time');
+        // «Факт» не ответил или упал: пересчёт отказывается — плановая себестоимость не затирает
+        // замороженную реальную, позиции и история как были, ничего не записано.
+        const beforeRefusal = clone({ stock: base.lists.stock, history: base.lists.history, saves: base.saves });
+        const recalcError = console.error;
+        console.error = () => {};
+        try {
+            for (const unavailable of [null, new Error('timesheet unavailable')]) {
+                context.__realCosts[9301] = unavailable;
+                const outcome = await vm.runInContext(`Warehouse.recalcOrderReadyGoodsCost(9301).then(count => 'updated ' + count, error => error.message)`, context);
+                assert.equal(outcome, 'READY_GOODS_REAL_COST_UNAVAILABLE', `«Факт» ${unavailable === null ? 'gave nothing' : 'threw'}: refused`);
+                assert.deepEqual(clone({ stock: base.lists.stock, history: base.lists.history, saves: base.saves }), beforeRefusal, 'nothing changes');
+            }
+        } finally {
+            console.error = recalcError;
+        }
+        context.__realCosts[9301] = { realTotal: 150000 };
+
+        // 9. Возврат без продаж снимает позиции только этого заказа.
+        context.__toasts = [];
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9302, { id: 9302, order_name: 'Лимон' }, 'completed', 'production_casting')`, context);
+        assert.equal(positionsOf(9302).length, 0);
+        assert.equal(positionsOf(9301).length, 1);
+        const returned = base.lists.history.filter(entry => entry.type === 'return_to_order');
+        assert.equal(returned.length, 1);
+        assert.equal(returned[0].qty, -30);
+        assert.deepEqual(clone(context.__toasts), ['1 товар(ов) убрано из Готовой продукции']);
+
+        // 10. B2C — как раньше: весь тираж каждой строки по её себестоимости, разметка не действует.
+        addOrder({
+            order: { id: 9303, order_name: 'B2C партия', client_name: 'B2C', status: 'completed' },
+            items: [
+                { id: 9303001, order_id: 9303, item_number: 1, item_type: 'product', product_name: 'Брелок', quantity: 10, cost_total: 120, sell_price_item: 300, tirage_allocation: { stock: 3, gift: 2 } },
+                { id: 9303100, order_id: 9303, item_number: 100, item_type: 'hardware', product_name: 'Карабин', quantity: 10, cost_total: 5, hardware_parent_item_index: 0 },
+            ],
+        });
+        assert.equal(await move(9303, 'B2C партия'), 1);
+        assert.equal(positionsOf(9303).length, 1);
+        assert.deepEqual(tiragePositionView(positionsOf(9303)[0]), {
+            product_name: 'Брелок', order_name: 'B2C партия', order_id: 9303, marketplace_set: '',
+            location_type: 'our', qty: 10, cost_per_unit: 120, added_by: 'Smoke',
+        });
+        // The production plan moves it to «Готово» as well, and a stale board (old status in hand)
+        // does it once more: the tirage is on the stock once, not twice.
+        const b2cHistory = () => base.lists.history.filter(entry => entry.type === 'from_order' && entry.order_name === 'B2C партия').length;
+        assert.equal(await move(9303, 'B2C партия'), 0);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9303, { id: 9303, order_name: 'B2C партия' }, 'delivery', 'completed')`, context);
+        assert.deepEqual(positionsOf(9303).map(row => row.qty), [10], 'one position, the tirage once');
+        assert.equal(b2cHistory(), 1, 'one transfer in the history');
+        // Back from «Готово» the positions leave; the next «Готово» moves the tirage again.
+        assert.equal(await vm.runInContext(`Warehouse.removeOrderFromReadyGoods(9303, 'B2C партия', 'delivery')`, context), 1);
+        assert.equal(positionsOf(9303).length, 0);
+        assert.equal(await move(9303, 'B2C партия'), 1);
+        assert.deepEqual(positionsOf(9303).map(row => row.qty), [10]);
+
+        // 11. Без разметки, «Переделка», «Сборка из остатков» — ничего не переносится, и склад
+        // даже не читается.
+        addOrder({ ...lemonOrderData(9304, { order: { client_name: 'ООО Груша' } }), items: [{ ...lemonOrderData(9304).items[0], tirage_allocation: null }] });
+        addOrder(lemonOrderData(9305, { order: { production_purpose: 'rework' } }));
+        addOrder(lemonOrderData(9306, { order: { production_purpose: 'leftover_assembly' } }));
+        const beforeSkipped = counters();
+        assert.equal(await move(9304), 0);
+        assert.equal(await move(9305), 0);
+        assert.equal(await move(9306), 0);
+        assert.deepEqual(counters(), beforeSkipped);
+        assert.deepEqual([9304, 9305, 9306].map(id => positionsOf(id).length), [0, 0, 0]);
+
+        // 12. Несколько строк: реальные затраты делятся по плановой себестоимости строк (вместе с
+        // фурнитурой строки), затраты строки — на её платные штуки. Груша: (100·50 + 10·50) из
+        // 10 000 → 20 000 × 0,55 / 10 = 1 100 ₽. Цена продажи не задана — цена строки с печатью.
+        const pearAndPlum = orderId => ({
+            order: { id: orderId, order_name: 'Груша и слива', client_name: 'Сад', status: 'completed' },
+            items: [
+                { item_number: 1, item_type: 'product', product_name: 'Груша', quantity: 50, cost_total: 100, sell_price_item: 1000,
+                    printings: JSON.stringify([{ name: 'УФ', qty: 50, price: 5, sell_price: 20 }]),
+                    tirage_allocation: JSON.stringify({ stock: 10, gift: 40 }) },
+                { item_number: 2, item_type: 'product', product_name: 'Слива', quantity: 100, cost_total: 45, sell_price_item: 90, tirage_allocation: null },
+                { item_number: 100, item_type: 'hardware', product_name: 'Карабин груши', quantity: 50, cost_total: 10, hardware_parent_item_index: 0 },
+                { item_number: 200, item_type: 'packaging', product_name: 'Общая коробка', quantity: 100, cost_total: 2, packaging_parent_item_index: null },
+                { item_number: 300, item_type: 'extra_cost', product_name: 'Доп. доход', quantity: 1, cost_total: 999, sell_price_item: 999 },
+            ],
+        });
+        context.__realCosts[9307] = { realTotal: 20000 };
+        addOrder(pearAndPlum(9307));
+        addOrder(pearAndPlum(9308));
+        // Оба переноса — в одну миллисекунду: запись истории патчем заменила бы строку с тем же
+        // id, поэтому у каждой записи свой id.
+        const realNow = Date.now;
+        Date.now = () => 1761552000000;
+        try {
+            assert.equal(await move(9307, 'Груша и слива'), 1);
+            // Без «Факта» — плановая себестоимость заказа (строки, их фурнитура и общая упаковка),
+            // разделённая так же: 10 200 × 0,55 / 10 = 561 ₽.
+            assert.equal(await move(9308, 'Груша и слива'), 1);
+        } finally {
+            Date.now = realNow;
+        }
+        assert.deepEqual(positionsOf(9307).map(tiragePositionView), [{
+            product_name: 'Груша', order_name: 'Груша и слива', order_id: 9307, order_item_number: 1, order_line_key: null, source: 'tirage',
+            location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1020, added_by: 'Smoke',
+        }]);
+        assert.equal(positionsOf(9308)[0].cost_per_unit, 561);
+        assert.deepEqual(
+            [9307, 9308].map(id => base.lists.history.filter(entry => entry.type === 'from_order' && Number(entry.order_id) === id).length),
+            [1, 1],
+            'both transfers keep their history entry',
+        );
+
+        // 13. Нет связи с общей базой: перенос и возврат не молчат.
+        addOrder(lemonOrderData(9309));
+        base.shared = false;
+        context.__toasts = [];
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9309, { id: 9309, order_name: 'Лимон' }, 'delivery', 'completed')`, context);
+        assert.equal(positionsOf(9309).length, 0);
+        assert.deepEqual(clone(context.__toasts), [TRANSFER_FAILED]);
+        const back = orderId => vm.runInContext(`Orders._syncReadyGoodsByStatus(${orderId}, { id: ${orderId}, order_name: 'Заказ' }, 'completed', 'delivery')`, context);
+        context.__toasts = [];
+        await back(9308);
+        assert.equal(positionsOf(9308).length, 1);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED]);
+        // Склад не прочитался: о позициях, которые остались, говорим заказу, у которого они могли
+        // быть (B2C — весь тираж; клиентский — штуки «на продажу»). Заказ без «на продажу» и
+        // «Переделка» ничего на склад не ставили — им предупреждать не о чем.
+        context.__toasts = [];
+        await back(9303);
+        assert.equal(positionsOf(9303).length, 1);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED], 'B2C: its tirage is on the stock');
+        for (const orderId of [9304, 9305]) {
+            context.__toasts = [];
+            await back(orderId);
+            assert.deepEqual(clone(context.__toasts), [], `${orderId}: no warning about positions it never had`);
+        }
+        // Не прочитался и сам заказ — сказать нельзя, предупреждаем.
+        context.__toasts = [];
+        await back(9399);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED], 'an order that cannot be read either: warned');
+        base.shared = true;
+        // Склад прочитался, а история — нет: у заказа без позиций снимать нечего, и предупреждения
+        // нет; у заказа с позициями они остаются, и менеджер это видит.
+        base.unavailable.add('history');
+        context.__toasts = [];
+        assert.equal(await vm.runInContext(`Warehouse.removeOrderFromReadyGoods(9304, 'Лимон', 'delivery')`, context), 0);
+        await back(9304);
+        assert.deepEqual(clone(context.__toasts), [], 'the stock says the order has nothing there');
+        await back(9308);
+        assert.equal(positionsOf(9308).length, 1);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED]);
+        // Общей базы нет только для истории: перенос не пишет ничего — и остатки тоже, чтобы
+        // позиция не встала на склад без записи о том, откуда она.
+        context.__toasts = [];
+        const stockSavesBefore = base.saves.stock;
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9309, { id: 9309, order_name: 'Лимон' }, 'delivery', 'completed')`, context);
+        assert.equal(positionsOf(9309).length, 0);
+        assert.equal(base.saves.stock, stockSavesBefore, 'no half-written transfer');
+        assert.deepEqual(clone(context.__toasts), [TRANSFER_FAILED]);
+        base.unavailable.clear();
+    } finally {
+        Object.assign(context, originals);
+        delete context.Factual;
+        vm.runInContext(`
+            App.toast = globalThis.__tirageOriginals.toast;
+            Warehouse.renderStats = globalThis.__tirageOriginals.renderStats;
+            Warehouse.renderReadyGoodsView = globalThis.__tirageOriginals.renderReadyGoodsView;
+        `, context);
+    }
+}
+
+// Заказ уже в «Готово», разметку меняют: позиции на складе подстраиваются под неё, но не ниже
+// уже проданного.
+async function smokeTirageReadyGoodsSyncToSplit(context) {
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder'].map(name => [name, context[name]]));
+    const position = {
+        id: 9401001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9401, order_item_number: 1, source: 'tirage',
+        location_type: 'our', qty: 25, cost_per_unit: 4033.33, sale_price: 5900, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    const sale = { id: 1, ready_goods_id: 9401001, product_name: 'Лимон', order_name: 'Лимон', channel: 'website', location_type: 'our', qty: 5, cost_per_unit: 4033.33, revenue: 29500, payout: 29000 };
+    const base = useReadyGoodsBase(context, { stock: [position], sales: [sale] });
+    const saved = lemonOrderData(9401);
+    context.loadOrder = async () => clone(saved);
+    context.__realCostCalls = [];
+    context.Factual = {
+        async computeOrderRealCost(orderId, options) {
+            context.__realCostCalls.push({ orderId: Number(orderId), options: clone(options === undefined ? null : options) });
+            return { realTotal: 140000 };
+        },
+    };
+    const sync = data => vm.runInContext(`Warehouse.syncOrderReadyGoodsToTirage(9401${data ? `, ${JSON.stringify(data)}` : ''})`, context);
+    const lemonQty = () => base.lists.stock.filter(row => Number(row.order_id) === 9401).map(row => row.qty);
+
+    try {
+        // «На продажу» подняли до 40: на складе 40 − 5 проданных.
+        const raised = clone(await sync(lemonOrderData(9401, { tirage: { stock: 40, partner: 40 } })));
+        assert.equal(raised.ok, true);
+        assert.deepEqual(lemonQty(), [35]);
+        assert.equal(base.lists.stock[0].cost_per_unit, 4033.33, 'the frozen cost stays');
+        assert.deepEqual(clone(context.__realCostCalls), [], 'an existing position needs no new cost');
+
+        // Меньше проданного — нельзя: ничего не пишется, менеджер видит почему.
+        const savesBefore = clone(base.saves);
+        const lowered = clone(await sync(lemonOrderData(9401, { tirage: { stock: 3 } })));
+        assert.deepEqual(lowered, {
+            ok: false,
+            blocked: true,
+            message: 'Заказ не сохранён: у «Лимон» на продажу 3 шт., а со склада уже продано 5 шт. Меньше проданного поставить нельзя.',
+        });
+        assert.deepEqual(lemonQty(), [35]);
+        assert.deepEqual(clone(base.saves), savesBefore);
+        // Та же проверка до записи заказа — только чтение остатков и продаж.
+        const historyLoadsBefore = base.loads.history;
+        const check = data => vm.runInContext(`Warehouse.checkOrderReadyGoodsSoldFloor(9401, ${JSON.stringify(data)})`, context);
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { tirage: { stock: 3 } }))), lowered);
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { tirage: { stock: 40, partner: 40 } }))), { ok: true, message: '' });
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { order: { status: 'delivery' }, tirage: { stock: 3 } }))), { ok: true, message: '' });
+        assert.deepEqual(clone(base.saves), savesBefore, 'the check writes nothing');
+        assert.equal(base.loads.history, historyLoadsBefore, 'the check does not read the history');
+        // Строку убрали совсем — то же самое.
+        const dropped = clone(await sync({ ...lemonOrderData(9401), items: [] }));
+        assert.equal(dropped.blocked, true);
+        assert.match(dropped.message, /у «Лимон» на продажу 0 шт\., а со склада уже продано 5 шт\./);
+
+        // Ровно проданное: на складе 0, позиция остаётся при своих продажах.
+        assert.equal(clone(await sync(lemonOrderData(9401, { tirage: { stock: 5 } }))).ok, true);
+        assert.deepEqual(lemonQty(), [0]);
+
+        // Без данных — по сохранённому заказу (30 на продажу).
+        assert.equal(clone(await sync()).ok, true);
+        assert.deepEqual(lemonQty(), [25]);
+
+        // Цену продажи и название строки поменяли — позиция следует за строкой; себестоимость прежняя.
+        const renamed = lemonOrderData(9401, { tirage: { stock_price: 6500 } });
+        renamed.items[0].product_name = 'Лимон большой';
+        assert.equal(clone(await sync(renamed)).ok, true);
+        assert.deepEqual(tiragePositionView(base.lists.stock.find(row => Number(row.order_id) === 9401)), {
+            product_name: 'Лимон большой', order_name: 'Лимон', order_id: 9401, order_item_number: 1, source: 'tirage',
+            location_type: 'our', qty: 25, cost_per_unit: 4033.33, sale_price: 6500, added_by: 'Smoke',
+        });
+
+        // Новая строка «на продажу» встаёт на склад по реальной себестоимости заказа: Груша — 1 000
+        // плановых из 98 135, её доля 140 000 × 1 000 / 98 135 на 4 платные штуки.
+        const withPear = lemonOrderData(9401);
+        withPear.items.push({
+            item_number: 2, item_type: 'product', product_name: 'Груша', quantity: 10, cost_total: 100, sell_price_item: 700,
+            printings: '[]', tirage_allocation: { stock: 4, gift: 6 },
+        });
+        assert.equal(clone(await sync(withPear)).ok, true);
+        const pear = base.lists.stock.find(row => Number(row.order_id) === 9401 && row.order_item_number === 2);
+        assert.deepEqual(tiragePositionView(pear), {
+            product_name: 'Груша', order_name: 'Лимон', order_id: 9401, order_item_number: 2, order_line_key: null, source: 'tirage',
+            location_type: 'our', qty: 4, cost_per_unit: 356.65, sale_price: 700, added_by: 'Smoke',
+        });
+        assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9401, options: { fresh: true } }]);
+        // Разметку строки сняли, а с неё ничего не продано — позиция уходит со склада.
+        assert.equal(clone(await sync(lemonOrderData(9401))).ok, true);
+        assert.equal(base.lists.stock.some(row => Number(row.order_id) === 9401 && row.order_item_number === 2), false);
+
+        // Два сохранения одного заказа в одной вкладке (автосохранение и кнопка): склад — как
+        // просило последнее, даже если первое ждёт «Факт» (новой строке нужна себестоимость).
+        const lemonWithPear = (stock, partner) => {
+            const data = lemonOrderData(9401, { tirage: { stock, partner } });
+            data.items.push({ ...withPear.items[1] });
+            return data;
+        };
+        let releaseFirstCost = null;
+        let costCalls = 0;
+        context.Factual = {
+            async computeOrderRealCost() {
+                costCalls += 1;
+                if (costCalls === 1) await new Promise(resolve => { releaseFirstCost = resolve; });
+                return { realTotal: 140000 };
+            },
+        };
+        const earlier = sync(lemonWithPear(40, 40));
+        const later = sync(lemonWithPear(45, 35));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        releaseFirstCost();
+        await Promise.all([earlier, later]);
+        assert.deepEqual(
+            base.lists.stock.filter(row => Number(row.order_id) === 9401 && row.order_item_number === 1).map(row => row.qty),
+            [40],
+            'the later save wins: 45 on sale − 5 sold',
+        );
+        assert.equal(base.lists.stock.filter(row => Number(row.order_id) === 9401 && row.order_item_number === 2).length, 1);
+        assert.equal(clone(await sync(lemonOrderData(9401))).ok, true);
+
+        // Заказ не в «Готово» — склад не трогается и не читается.
+        const loadsBefore = clone(base.loads);
+        assert.equal(clone(await sync(lemonOrderData(9401, { order: { status: 'delivery' }, tirage: { stock: 1 } }))).ok, true);
+        assert.deepEqual(clone(base.loads), loadsBefore);
+    } finally {
+        Object.assign(context, originals);
+        delete context.Factual;
+    }
+}
+
+// Калькулятор: заказ в «Готово» с «на продажу» меньше проданного не сохраняется ни вручную, ни
+// автосохранением. Остальное — сначала записывается заказ, потом склад подстраивается под его
+// разметку; если склад не записался, менеджер узнаёт об этом, а следующее сохранение догоняет.
+async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
+    const BLOCKED = 'Заказ не сохранён: у «Лимон» на продажу 3 шт., а со склада уже продано 5 шт. Меньше проданного поставить нельзя.';
+    const SYNC_FAILED = 'Заказ сохранён, но склад готовой продукции не обновился — сохраните ещё раз';
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'saveOrder'].map(name => [name, context[name]]));
+    const position = {
+        id: 9402001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9402, order_item_number: 1, source: 'tirage',
+        location_type: 'our', qty: 25, cost_per_unit: 4033.33, sale_price: 5900, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    const base = useReadyGoodsBase(context, { stock: [position], sales: [{ id: 2, ready_goods_id: 9402001, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33 }] });
+    context.__orderStatus = 'completed';
+    context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Лимон', client_name: 'Художница Маша', status: context.__orderStatus }, items: [] });
+    context.__writes = [];
+    context.__orderWriteFails = false;
+    context.saveOrder = async (order, items) => {
+        if (context.__orderWriteFails) throw new Error('нет связи');
+        context.__writes.push({ status: order.status, items: clone(items), stockAtWrite: clone(base.lists.stock) });
+        return order.id;
+    };
+    context.Factual = { async computeOrderRealCost() { return { realTotal: 121000 }; } };
+    context.__toasts = [];
+    vm.runInContext(`
+        globalThis.__tirageSaveOriginals = {
+            toast: App.toast,
+            syncProjectHardwareOrderState: Warehouse.syncProjectHardwareOrderState,
+            prepare: Calculator._prepareColorAttachmentsForSave,
+        };
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.syncProjectHardwareOrderState = async () => ({});
+        Calculator._prepareColorAttachmentsForSave = async () => {};
+    `, context);
+    const setForm = (stock, status) => vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'Лимон';
+        document.getElementById('calc-client-name').value = 'Художница Маша';
+        App.editingOrderId = 9402;
+        localStorage.setItem('ro_calc_editing_order_id', '9402');
+        Calculator._currentOrderStatus = ${JSON.stringify(status)};
+        Calculator.items = [Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
+            tirage_allocation: { stock: ${Number(stock)}, partner: ${80 - Number(stock)}, gift: 20, stock_price: 5900, partner_note: 'художница' },
+        })];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+    })()`, context);
+    const lemonQty = () => base.lists.stock.filter(row => Number(row.order_id) === 9402).map(row => row.qty);
+    const autosaveStatus = () => String(context.document.getElementById('calc-autosave-status').textContent || '');
+
+    try {
+        // «На продажу» 3 при 5 проданных: ни ручное сохранение, ни автосохранение не проходят.
+        setForm(3, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 0, 'the order is not saved');
+        assert.ok(context.__toasts.includes(BLOCKED), 'the manager sees why');
+        assert.deepEqual(lemonQty(), [25]);
+        setForm(3, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 0, 'autosave does not save it either');
+        assert.equal(autosaveStatus(), BLOCKED);
+
+        // 40 на продажу: сначала записывается заказ, потом склад подстраивается (40 − 5).
+        context.__toasts = [];
+        setForm(40, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 1);
+        assert.equal(context.__writes[0].status, 'completed');
+        assert.deepEqual(context.__writes[0].stockAtWrite.map(row => row.qty), [25], 'the order is written before the stock');
+        assert.deepEqual(lemonQty(), [35]);
+        assert.ok(context.__toasts.includes('Заказ сохранен'));
+        const stockSaves = base.saves.stock;
+        setForm(40, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 2);
+        assert.equal(base.saves.stock, stockSaves, 'the same split writes nothing to the stock');
+
+        // Заказ записан, а склад — нет: менеджер узнаёт об этом.
+        base.failSaves.add('stock');
+        context.__toasts = [];
+        setForm(42, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 3, 'the order is saved');
+        assert.deepEqual(lemonQty(), [35]);
+        assert.ok(context.__toasts.includes(SYNC_FAILED), 'the manager hears the stock did not follow');
+        assert.equal(context.__toasts.includes('Заказ сохранен'), false);
+        setForm(43, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 4, 'autosave saves the order too');
+        assert.deepEqual(lemonQty(), [35]);
+        assert.equal(autosaveStatus(), SYNC_FAILED);
+        // Следующее сохранение догоняет склад.
+        base.failSaves.clear();
+        context.__toasts = [];
+        setForm(43, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 5);
+        assert.deepEqual(lemonQty(), [38]);
+        assert.ok(context.__toasts.includes('Заказ сохранен'));
+
+        // Заказ не записался — склад не трогается.
+        context.__orderWriteFails = true;
+        const stockSavesBeforeFailedWrite = base.saves.stock;
+        context.__toasts = [];
+        setForm(44, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.ok(context.__toasts.some(message => message.startsWith('Ошибка сохранения')));
+        setForm(44, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(autosaveStatus(), 'Ошибка автосохранения');
+        assert.equal(context.__writes.length, 5);
+        assert.deepEqual(lemonQty(), [38], 'the stock follows only a saved order');
+        assert.equal(base.saves.stock, stockSavesBeforeFailedWrite);
+        context.__orderWriteFails = false;
+
+        // Заказ не в «Готово»: склад не читается.
+        context.__orderStatus = 'production_casting';
+        const stockLoads = base.loads.stock;
+        setForm(3, 'production_casting');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 6);
+        assert.equal(base.loads.stock, stockLoads);
+    } finally {
+        await vm.runInContext('Calculator.resetForm()', context);
+        Object.assign(context, originals);
+        delete context.Factual;
+        vm.runInContext(`
+            App.toast = globalThis.__tirageSaveOriginals.toast;
+            Warehouse.syncProjectHardwareOrderState = globalThis.__tirageSaveOriginals.syncProjectHardwareOrderState;
+            Calculator._prepareColorAttachmentsForSave = globalThis.__tirageSaveOriginals.prepare;
+        `, context);
+    }
+}
+
+// Позиция «на продажу» принадлежит строке, а не её номеру: удаление и копирование строк меняют
+// номера всех строк заказа, а позиция остаётся при своей строке (ключ строки в разметке тиража).
+async function smokeTiragePositionsFollowTheirLine(context) {
+    const BLOCKED = 'Заказ не сохранён: у «Лимон» на продажу 0 шт., а со склада уже продано 5 шт. Меньше проданного поставить нельзя.';
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'saveOrder'].map(name => [name, context[name]]));
+    const lemonPosition = {
+        id: 1, product_name: 'Лимон', order_name: 'Сад', order_id: 9801, order_item_number: 1, order_line_key: 'lemonkey',
+        source: 'tirage', location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    const pearPosition = {
+        id: 2, product_name: 'Груша', order_name: 'Сад', order_id: 9801, order_item_number: 2, order_line_key: 'pearkey',
+        source: 'tirage', location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1000, added_at: '2026-10-20T10:00:00.000Z', added_by: 'Smoke',
+    };
+    let base = null;
+    context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: [] });
+    context.__writes = [];
+    context.saveOrder = async (order, items) => { context.__writes.push(clone(items)); return order.id; };
+    context.__toasts = [];
+    vm.runInContext(`
+        globalThis.__lineKeyOriginals = {};
+        ['renderItemBlock', 'rerenderAllHardware', 'rerenderAllPackaging', 'recalculate', '_updateItemsEmptyState', 'scheduleAutosave', '_prepareColorAttachmentsForSave']
+            .forEach(name => { globalThis.__lineKeyOriginals[name] = Calculator[name]; Calculator[name] = name === '_prepareColorAttachmentsForSave' ? async () => {} : () => {}; });
+        globalThis.__lineKeyOriginals.toast = App.toast;
+        globalThis.__lineKeyOriginals.syncProjectHardwareOrderState = Warehouse.syncProjectHardwareOrderState;
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.syncProjectHardwareOrderState = async () => ({});
+    `, context);
+    const setForm = () => vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'Сад';
+        document.getElementById('calc-client-name').value = 'Сад';
+        App.editingOrderId = 9801;
+        localStorage.setItem('ro_calc_editing_order_id', '9801');
+        Calculator._currentOrderStatus = 'completed';
+        Calculator.items = [
+            Object.assign(Calculator.getEmptyItem(1), { product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
+                tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900, line_key: 'lemonkey' } }),
+            Object.assign(Calculator.getEmptyItem(2), { product_name: 'Груша', quantity: 20, sell_price_item: 1000, pieces_per_hour: 100, weight_grams: 10,
+                tirage_allocation: { stock: 10, gift: 10, line_key: 'pearkey' } }),
+        ];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+    })()`, context);
+    const orderPositions = () => base.lists.stock.filter(row => Number(row.order_id) === 9801);
+
+    try {
+        // Удалили строку №1 «Лимон»: «Груша» стала №1, но её позиция — та же (количество и
+        // себестоимость её), а позиция «Лимона» без продаж уходит со склада.
+        base = useReadyGoodsBase(context, { stock: [lemonPosition, pearPosition] });
+        setForm();
+        await vm.runInContext('Calculator.removeItem(0); Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 1);
+        assert.deepEqual(context.__writes[0].filter(row => row.item_type === 'product').map(row => `${row.item_number}:${row.product_name}`), ['1:Груша']);
+        assert.deepEqual(orderPositions().map(tiragePositionView), [{
+            product_name: 'Груша', order_name: 'Сад', order_id: 9801, order_item_number: 1, order_line_key: 'pearkey', source: 'tirage',
+            location_type: 'our', qty: 10, cost_per_unit: 1100, sale_price: 1000, added_by: 'Smoke',
+        }]);
+        assert.equal(orderPositions()[0].id, 2, 'the pear keeps its own position');
+        assert.ok(base.lists.history.some(entry => entry.product_name === 'Лимон' && /больше не на продажу/.test(entry.notes)));
+
+        // С проданными 5 «Лимонами» удалить его строку нельзя — ни автосохранением, ни вручную.
+        base = useReadyGoodsBase(context, {
+            stock: [{ ...lemonPosition, qty: 25 }, pearPosition],
+            sales: [{ id: 5, ready_goods_id: 1, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33 }],
+        });
+        context.__writes = [];
+        context.__toasts = [];
+        setForm();
+        await vm.runInContext('Calculator.removeItem(0); Calculator._doAutosave()', context);
+        assert.equal(String(context.document.getElementById('calc-autosave-status').textContent || ''), BLOCKED);
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.ok(context.__toasts.includes(BLOCKED));
+        assert.equal(context.__writes.length, 0, 'the order is not saved');
+        assert.deepEqual(orderPositions().map(row => `${row.product_name}:${row.qty}:${row.order_item_number}`), ['Лимон:25:1', 'Груша:10:2']);
+
+        // Перенос при «Готово» записывает ключ строки в позицию, и id позиции — от ключа. Если такой
+        // id уже у другой записи склада, позиция получает свой.
+        setForm();
+        const savedRows = clone(vm.runInContext('Calculator._collectItemsForSave()', context));
+        context.loadOrder = async () => ({ order: { id: 9802, order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: clone(savedRows) });
+        const manualTwin = { id: parseInt('pearkey', 36), product_name: 'Ручная', order_id: null, qty: 3, cost_per_unit: 10, location_type: 'our' };
+        base = useReadyGoodsBase(context, { stock: [manualTwin] });
+        assert.equal(await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9802, 'Сад')`, context), 2);
+        const moved = base.lists.stock.filter(row => Number(row.order_id) === 9802);
+        assert.deepEqual(moved.map(row => `${row.product_name}:${row.order_line_key}:${row.qty}`), ['Лимон:lemonkey:30', 'Груша:pearkey:10']);
+        assert.equal(moved[0].id, parseInt('lemonkey', 36), 'the position id comes from the line key');
+        assert.notEqual(moved[1].id, manualTwin.id, 'an id another record has is never reused');
+        assert.deepEqual(base.lists.stock.find(row => row.product_name === 'Ручная'), manualTwin, 'the other record survives');
+        context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Сад', client_name: 'Сад', status: 'completed' }, items: [] });
+
+        // Копия строки с разметкой — новая строка со своим ключом.
+        setForm();
+        const cloned = clone(await vm.runInContext(`(() => {
+            Calculator.cloneItem(0);
+            return {
+                keys: Calculator.items.map(item => item.tirage_allocation && item.tirage_allocation.line_key),
+                baseKey: Calculator.items[1]._tirageBase ? Calculator.items[1]._tirageBase.line_key : Calculator.items[1].tirage_allocation.line_key,
+                saved: Calculator._collectItemsForSave().filter(row => row.item_type === 'product').map(row => row.tirage_allocation && row.tirage_allocation.line_key),
+            };
+        })()`, context));
+        assert.equal(cloned.keys[0], 'lemonkey');
+        assert.equal(typeof cloned.keys[1], 'string');
+        assert.ok(cloned.keys[1] && cloned.keys[1] !== 'lemonkey', 'the copy gets a key of its own');
+        assert.equal(cloned.baseKey, cloned.keys[1]);
+        assert.equal(new Set(cloned.saved).size, 3, 'no two saved lines share a key');
+
+        // Ключ выдаётся, когда у строки впервые появляется разметка, и дальше не меняется.
+        const keys = clone(await vm.runInContext(`(() => {
+            Calculator.resetForm();
+            Calculator.items = [
+                Object.assign(Calculator.getEmptyItem(1), { product_name: 'Слива', quantity: 100, sell_price_item: 300 }),
+                Object.assign(Calculator.getEmptyItem(2), { product_name: 'Айва', quantity: 50, sell_price_item: 400 }),
+            ];
+            const keyOf = idx => (Calculator.items[idx].tirage_allocation || {}).line_key || '';
+            const steps = {};
+            Calculator.onTirageTextChange(1, 'partner_note', 'кому-то');
+            steps.noteOnly = keyOf(1);
+            Calculator.onTirageChange(0, 'stock', '30');
+            steps.first = keyOf(0);
+            Calculator.onTirageChange(0, 'gift', '5');
+            steps.edited = keyOf(0);
+            Calculator.items[0].quantity = 20;
+            Calculator._renormalizeItemTirage(Calculator.items[0]);
+            steps.cut = keyOf(0);
+            steps.cutStock = Calculator.items[0].tirage_allocation.stock;
+            Calculator.onTirageChange(1, 'gift', '3');
+            steps.second = keyOf(1);
+            steps.saved = Calculator._collectItemsForSave().filter(row => row.item_type === 'product').map(row => row.tirage_allocation.line_key);
+            return steps;
+        })()`, context));
+        assert.equal(keys.noteOnly, '', 'no split, no key');
+        assert.ok(keys.first, 'the first split gives the line a key');
+        assert.equal(keys.edited, keys.first);
+        assert.equal(keys.cut, keys.first, 'a smaller tirage keeps the key');
+        assert.equal(keys.cutStock, 15);
+        assert.ok(keys.second && keys.second !== keys.first);
+        assert.deepEqual(keys.saved, [keys.first, keys.second], 'the keys are saved with the lines');
+
+        // Две строки размечены в одну миллисекунду (и случайная часть совпала): ключи всё равно разные.
+        const realNow = Date.now;
+        const realRandom = Math.random;
+        Date.now = () => 1761552000000;
+        Math.random = () => 0.5;
+        let sameMsKeys;
+        try {
+            sameMsKeys = clone(vm.runInContext(`(() => {
+                Calculator.items = [
+                    Object.assign(Calculator.getEmptyItem(1), { product_name: 'Слива', quantity: 10, sell_price_item: 300 }),
+                    Object.assign(Calculator.getEmptyItem(2), { product_name: 'Айва', quantity: 10, sell_price_item: 400 }),
+                ];
+                Calculator.onTirageChange(0, 'stock', '2');
+                Calculator.onTirageChange(1, 'stock', '3');
+                return Calculator.items.map(item => item.tirage_allocation.line_key);
+            })()`, context));
+        } finally {
+            Date.now = realNow;
+            Math.random = realRandom;
+        }
+        assert.notEqual(sameMsKeys[0], sameMsKeys[1]);
+    } finally {
+        await vm.runInContext('Calculator.resetForm()', context);
+        Object.assign(context, originals);
+        vm.runInContext(`
+            Object.entries(globalThis.__lineKeyOriginals).forEach(([name, value]) => {
+                if (name === 'toast') App.toast = value;
+                else if (name === 'syncProjectHardwareOrderState') Warehouse.syncProjectHardwareOrderState = value;
+                else Calculator[name] = value;
+            });
+        `, context);
+    }
+}
+
+// Ещё одна вкладка с тем же складом готовой продукции (своё чтение списков).
+function createReadyGoodsTab(server) {
+    const tab = createContext();
+    runScript(tab, 'js/warehouse.js');
+    stubRuntime(tab);
+    useReadyGoodsBase(tab, null, server);
+    vm.runInContext('Warehouse.renderStats = () => {}; Warehouse.renderReadyGoodsView = () => {};', tab);
+    return tab;
+}
+
+// Новые записи готовой продукции — позиции, продажи, история — пишутся патчами, и запись с тем же
+// id заменяет прежнюю. Записи, созданные в одну миллисекунду (в этой вкладке или в соседних),
+// получают разные id и все остаются в общей базе.
+async function smokeReadyGoodsRecordsCreatedInOneMillisecondKeepTheirIds(context) {
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const b2cOrder = (id, name, quantity) => ({
+        order: { id, order_name: name, client_name: 'B2C', status: 'completed' },
+        items: [{ id: id * 1000 + 1, order_id: id, item_number: 1, item_type: 'product', product_name: name, quantity, cost_total: 50 }],
+    });
+    const orders = { 9601: b2cOrder(9601, 'Брелок', 4), 9602: b2cOrder(9602, 'Значок', 6) };
+    context.loadOrder = async (orderId) => clone(orders[Number(orderId)] || null);
+    vm.runInContext(`
+        globalThis.__sameMsOriginals = { toast: App.toast, renderStats: Warehouse.renderStats, renderReadyGoodsView: Warehouse.renderReadyGoodsView };
+        App.toast = () => {};
+        Warehouse.renderStats = () => {};
+        Warehouse.renderReadyGoodsView = () => {};
+    `, context);
+    const fillAdd = (doc, name) => {
+        doc.getElementById('rg-add-name').value = name;
+        doc.getElementById('rg-add-qty').value = '2';
+        doc.getElementById('rg-add-cost').value = '10';
+        doc.getElementById('rg-add-location').value = 'our';
+        doc.getElementById('rg-add-set').value = '';
+    };
+    const fillWriteOff = doc => {
+        doc.getElementById('rg-wo-product').value = '0';
+        doc.getElementById('rg-wo-qty').value = '1';
+        doc.getElementById('rg-wo-channel').value = 'website';
+        doc.getElementById('rg-wo-revenue').value = '300';
+        doc.getElementById('rg-wo-payout').value = '300';
+        doc.getElementById('rg-wo-notes').value = '';
+    };
+    const realNow = Date.now;
+    const realRandom = Math.random;
+    Date.now = () => 1761552000000;
+    Math.random = () => 0;
+    try {
+        // B2C-партии, добавление вручную и продажи — всё в одну миллисекунду в этой вкладке.
+        await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9601, 'B2C 1')`, context);
+        await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9602, 'B2C 2')`, context);
+        fillAdd(context.document, 'Ручная 1');
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        fillAdd(context.document, 'Ручная 2');
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        fillWriteOff(context.document);
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        fillWriteOff(context.document);
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(base.lists.stock.map(row => `${row.product_name}:${row.qty}`), ['Брелок:2', 'Значок:6', 'Ручная 1:2', 'Ручная 2:2']);
+        assert.deepEqual(base.lists.history.map(entry => entry.type), ['from_order', 'from_order', 'manual_add', 'manual_add', 'writeoff', 'writeoff']);
+        assert.equal(base.lists.sales.length, 2, 'both sales are recorded');
+
+        // Две другие вкладки добавляют вручную в ту же миллисекунду: у каждой своя позиция.
+        const randoms = [0.25, 0.75];
+        for (const [index, tab] of [createReadyGoodsTab(base), createReadyGoodsTab(base)].entries()) {
+            Math.random = () => randoms[index];
+            fillAdd(tab.document, `Вкладка ${index + 1}`);
+            await vm.runInContext('Warehouse.doAddReadyGoods()', tab);
+        }
+        assert.deepEqual(base.lists.stock.slice(4).map(row => row.product_name), ['Вкладка 1', 'Вкладка 2']);
+        ['stock', 'history', 'sales'].forEach(list => {
+            const ids = base.lists[list].map(row => row.id);
+            assert.ok(ids.every(id => Number.isSafeInteger(id)), `${list}: numeric ids below 2^53`);
+        });
+    } finally {
+        Date.now = realNow;
+        Math.random = realRandom;
+        Object.assign(context, originals);
+        vm.runInContext(`
+            App.toast = globalThis.__sameMsOriginals.toast;
+            Warehouse.renderStats = globalThis.__sameMsOriginals.renderStats;
+            Warehouse.renderReadyGoodsView = globalThis.__sameMsOriginals.renderReadyGoodsView;
+        `, context);
+    }
+}
+
+// План производства меняет статус так же, как доска: «Готово» переносит «на продажу» на склад,
+// возврат с проданным запрещён, без продаж — снимает позицию.
+async function smokeProductionPlanStatusSyncsReadyGoods(context) {
+    if (!vm.runInContext(`typeof ProductionPlan !== 'undefined'`, context)) {
+        runScript(context, 'js/production_plan.js');
+    }
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'updateOrderStatus'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const order = lemonOrderData(9501, { order: { status: 'delivery' } });
+    context.loadOrder = async () => clone(order);
+    context.__statusWrites = [];
+    context.updateOrderStatus = async (orderId, status) => { context.__statusWrites.push({ orderId: Number(orderId), status: String(status) }); };
+    context.Factual = { async computeOrderRealCost() { return { realTotal: 121000 }; } };
+    context.__toasts = [];
+    context.__warehouseSyncs = [];
+    context.__changeRecords = [];
+    vm.runInContext(`
+        globalThis.__planReadyGoodsOriginals = {
+            toast: App.toast,
+            syncWarehouse: Orders._syncWarehouseByStatus,
+            addChangeRecord: Orders.addChangeRecord,
+            load: ProductionPlan.load,
+            allRows: ProductionPlan.allRows,
+        };
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Orders._syncWarehouseByStatus = async (...args) => { globalThis.__warehouseSyncs.push(args); };
+        Orders.addChangeRecord = async (...args) => { globalThis.__changeRecords.push(args); };
+        ProductionPlan.load = async () => {};
+        ProductionPlan.allRows = [{ id: 9501, status: 'delivery', orderName: 'Лимон' }];
+    `, context);
+    const positions = () => base.lists.stock.filter(row => Number(row.order_id) === 9501);
+
+    try {
+        await vm.runInContext('ProductionPlan.goNextStage(9501)', context);
+        assert.deepEqual(clone(context.__statusWrites), [{ orderId: 9501, status: 'completed' }]);
+        assert.deepEqual(positions().map(row => row.qty), [30], '«на продажу» is on the stock after «Готово» from the plan');
+        assert.equal(context.__warehouseSyncs.length, 1);
+        assert.deepEqual(clone(context.__warehouseSyncs[0]).slice(0, 4), [9501, 'delivery', 'completed', 'Лимон']);
+        assert.equal(context.__changeRecords.length, 1);
+        assert.ok(context.__toasts.includes('1 товар(ов) → Готовая продукция'));
+        assert.equal(vm.runInContext('ProductionPlan.allRows[0].status', context), 'completed');
+
+        // Продали 5: план производства не вернёт заказ из «Готово».
+        base.lists.sales = [{ id: 3, ready_goods_id: positions()[0].id, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33 }];
+        base.lists.stock = base.lists.stock.map(row => (Number(row.order_id) === 9501 ? { ...row, qty: 25 } : row));
+        context.__toasts = [];
+        await vm.runInContext(`ProductionPlan.setOrderStageStatus(9501, 'production_casting')`, context);
+        assert.equal(context.__statusWrites.length, 1, 'the status is not written');
+        assert.deepEqual(clone(context.__toasts), ['Уже продано 5 шт. со склада — заказ нельзя вернуть из «Готово»']);
+        assert.deepEqual(positions().map(row => row.qty), [25]);
+
+        // Без продаж возврат из плана снимает позицию.
+        base.lists.sales = [];
+        await vm.runInContext(`ProductionPlan.setOrderStageStatus(9501, 'production_casting')`, context);
+        assert.deepEqual(clone(context.__statusWrites)[1], { orderId: 9501, status: 'production_casting' });
+        assert.deepEqual(positions(), []);
+    } finally {
+        Object.assign(context, originals);
+        delete context.Factual;
+        vm.runInContext(`
+            App.toast = globalThis.__planReadyGoodsOriginals.toast;
+            Orders._syncWarehouseByStatus = globalThis.__planReadyGoodsOriginals.syncWarehouse;
+            Orders.addChangeRecord = globalThis.__planReadyGoodsOriginals.addChangeRecord;
+            ProductionPlan.load = globalThis.__planReadyGoodsOriginals.load;
+            ProductionPlan.allRows = globalThis.__planReadyGoodsOriginals.allRows;
+        `, context);
+    }
+}
+
+// ==========================================
+// Карточка заказа: честная шапка и блок «Тираж»
+// ==========================================
+
+// Видимый текст разметки: без тегов, неразрывные пробелы обычные, лишние пробелы схлопнуты.
+function visibleText(html) {
+    return String(html || '').replace(/<[^>]*>/g, ' ').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Параметры, при которых «Лимон» считается ровно как в плане: себестоимость штуки 971,35 ₽ (форма на
+// 97 135 ₽ на 100 штук), 12,1 ч на тираж (2,1 ч запуска + 100 шт. при 10 шт./ч), удержания 7% + 6,5% + 1%.
+const LEMON_CARD_PARAMS = {
+    wasteFactor: 1, fotPerHour: 0, indirectPerHour: 0, indirectCostMode: 'none',
+    plasticCostPerKg: 0, moldBaseCost: 97135, designCost: 0, cuttingSpeed: 0, nfcTagCost: 0, nfcWriteSpeed: 0,
+    taxRate: 0.07, commercialRate: 0.065, charityRate: 0.01, vatRate: 0.05,
+    setupHoursBlank: 0.5, setupHoursCustom: 1, plasticHours: 100, packagingHours: 100,
+    deliveryCostMoscow: 0, printingDeliveryCost: 0,
+};
+
+// Реальная себестоимость «Лимона» так, как её отдаёт Factual.computeOrderRealCost: 121 000 ₽ при
+// плановых 97 135 ₽, часы 12,1 по плану и 18 по табелю.
+function lemonRealCost(overrides = {}) {
+    const row = (key, label, plan, fact, isSalary = false) => ({
+        key, label, plan, fact, used: fact > 0 ? fact : plan, source: fact > 0 ? 'fact' : 'plan', isSalary,
+    });
+    return {
+        rows: [
+            row('salary_production', 'ЗП выливание', 30000, 42000, true),
+            row('salary_trim', 'ЗП срезание', 5000, 0, true),
+            row('indirect_production', 'Косвенные', 12000, 20000),
+            row('hardware_total', 'Фурнитура', 25000, 28865),
+            row('plastic', 'Пластик / материалы', 15135, 0),
+            row('molds', 'Молды', 10000, 0),
+            row('nfc_total', 'NFC', 0, 0),
+        ],
+        planTotal: 97135, realTotal: 121000, salaryReal: 47000, hoursPlan: 12.1, hoursFact: 18, hasTimesheet: true,
+        ...overrides,
+    };
+}
+
+// Без табеля вся себестоимость заказа плановая — так её отдаёт Factual.computeOrderRealCost.
+const NO_TIMESHEET_NOTE = 'Табеля по заказу нет — вся себестоимость взята по плану.';
+const FACT_ROWS_ASIDE_NOTE = 'Факт по статьям — для справки, в итог не входит.';
+
+// Табеля нет, но ФинТабло уже дал факт по фурнитуре: статья его показывает, итог — план.
+function lemonNoTimesheetWithFinTabloFact() {
+    const cost = lemonPlanOnlyCost();
+    return {
+        ...cost,
+        rows: cost.rows.map(row => (row.key === 'hardware_total' ? { ...row, fact: 28865, used: 28865, source: 'fact' } : row)),
+        realTotal: cost.planTotal,
+    };
+}
+
+// По заказу нет табеля: «Факт» берёт плановое значение каждой статьи.
+function lemonPlanOnlyCost() {
+    const cost = lemonRealCost();
+    return {
+        ...cost,
+        rows: cost.rows.map(row => ({ ...row, fact: 0, used: row.plan, source: 'plan' })),
+        realTotal: 97135, salaryReal: 35000, hoursFact: 0, hasTimesheet: false,
+    };
+}
+
+// Шапка карточки показывает честные деньги («Лимон»: 177 000 ₽ ожидаем, реальная маржа 17,1% против
+// плановых 30,6%), блок «Тираж» — разметку строк и склад готовой продукции, доска — плановую маржу
+// с подписью «план».
+async function smokeOrderCardTirageAndRealMargin(context) {
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const orders = {};
+    const addOrder = data => { orders[data.order.id] = data; return data; };
+    context.loadOrder = async (orderId) => clone(orders[Number(orderId)] || null);
+    context.__realCosts = {};
+    context.__realCostCalls = [];
+    context.Factual = {
+        async computeOrderRealCost(orderId, options) {
+            context.__realCostCalls.push({ orderId: Number(orderId), options: clone(options === undefined ? null : options) });
+            const value = context.__realCosts[Number(orderId)];
+            if (value instanceof Error) throw value;
+            return value === undefined || value === null ? null : clone(value);
+        },
+    };
+    context.__toasts = [];
+    const dom = id => context.document.getElementById(id);
+    const domBefore = Object.fromEntries(['od-stats', 'od-tab-info', 'od-tirage-slot'].map(id => [id, dom(id).innerHTML]));
+    vm.runInContext(`
+        globalThis.__cardOriginals = {
+            params: App.params,
+            canAccess: App.canAccess,
+            isAdmin: App.isAdmin,
+            toast: App.toast,
+            metaByOrderId: Orders.metaByOrderId,
+            ensureAllowed: Orders._ensureStatusTransitionAllowed,
+            finishTransition: Orders._finishStatusTransition,
+            updateOrderStatus: typeof updateOrderStatus === 'undefined' ? undefined : updateOrderStatus,
+            prompt: typeof prompt === 'undefined' ? undefined : prompt,
+            card: Object.fromEntries(['currentOrder', 'currentItems', 'currentFinancial', 'currentRealCost', 'realCostState',
+                'realCostDetailsOpen', 'tirageStock', 'tirageRecalcBusy'].map(key => [key, OrderDetail[key]])),
+        };
+        App.params = ${JSON.stringify(LEMON_CARD_PARAMS)};
+        App.canAccess = () => false;
+        App.isAdmin = () => false;
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+    `, context);
+    const run = code => vm.runInContext(code, context);
+    const open = ({ order, items }) => run(`
+        OrderDetail.currentOrder = ${JSON.stringify(order)};
+        OrderDetail.currentItems = ${JSON.stringify(items)};
+        OrderDetail._beginHonestNumbers();
+    `);
+    const statsText = () => visibleText(dom('od-stats').innerHTML);
+    const render = () => { run('OrderDetail.renderStats()'); return statsText(); };
+    // «Лимон» из loadOrder + поля, по которым калькулятор считает штуку.
+    const cardData = (orderId, options) => {
+        const data = lemonOrderData(orderId, { ...options, order: { payment_status: 'paid_100', ...(options && options.order) } });
+        data.items[0] = { ...data.items[0], pieces_per_hour: 10, weight_grams: 0, setup_hours_override: 2.1, is_blank_mold: false, base_mold_in_stock: false };
+        return data;
+    };
+    // Мелкий текст в новых подписях и блоке не допускается (14 px и крупнее).
+    const noSmallText = (html, label) => assert.ok(!/font-size:\s*1[0-3]px/.test(html), `${label}: no 10–13px text`);
+
+    try {
+        const lemon = addOrder(cardData(9601));
+        open(lemon);
+
+        // 1. «Факт» ещё считает: цифры плановые и подписаны «план», на месте себестоимости — «считаем».
+        const loading = render();
+        assert.ok(loading.includes('Выручка 177 000 ₽ ожидаем, если продадим 30 шт.'), loading);
+        assert.ok(loading.includes('Маржа 30,6% план'), loading);
+        assert.ok(loading.includes('Себестоимость … считаем по факту'), loading);
+        assert.ok(loading.includes('Часы 12.1 ч'), loading);
+        assert.ok(loading.includes('Оплата Оплачено 100%'), loading);
+        assert.ok(loading.includes('Отдаём бесплатно: 70 шт. на 67 995 ₽ себестоимости'), loading);
+        assert.deepEqual(clone(context.__realCostCalls), [], 'the card reads nothing until it asks');
+        noSmallText(dom('od-stats').innerHTML, 'header while loading');
+
+        // 2. «Факт» ответил: реальная маржа (54 200 − (121 000 − 97 135)) / 177 000 = 17,14%, рядом плановая;
+        // себестоимость 121 000 ₽ против плановых 97 135 ₽; часы по плану и по табелю.
+        context.__realCosts[9601] = lemonRealCost();
+        await run('OrderDetail.loadRealCost()');
+        assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9601, options: { fresh: true } }], 'one read with a fresh timesheet');
+        const expectedRealMargin = Math.round((54200 - (121000 - 97135)) * 100 / 177000 * 100) / 100;
+        assert.equal(expectedRealMargin, 17.14);
+        assert.equal(run('OrderDetail.computeRealMargin(54200, 177000, 121000, 97135)'), expectedRealMargin);
+        assert.equal(run('OrderDetail.computeRealMargin(54200, 0, 121000, 97135)'), null, 'no revenue — no margin');
+        assert.equal(run('OrderDetail.computeRealMargin(null, 177000, 121000, 97135)'), null, 'unknown earnings — no margin');
+        const ready = statsText();
+        assert.ok(ready.includes('Выручка 177 000 ₽ ожидаем, если продадим 30 шт.'), ready);
+        assert.ok(ready.includes('Маржа 17,1% план 30,6%'), ready);
+        assert.ok(ready.includes('Себестоимость 121 000 ₽ план 97 135 ₽'), ready);
+        assert.ok(ready.includes('Часы 12.1 ч план 12.1 · табель 18'), ready);
+        assert.ok(ready.includes('Отдаём бесплатно: 70 шт. на 67 995 ₽ себестоимости'), ready);
+        noSmallText(dom('od-stats').innerHTML, 'header with the real cost');
+        render();
+        assert.equal(context.__realCostCalls.length, 1, 'redrawing the header does not read «Факт» again');
+
+        // 3. Разбивка — по клику, прямо под карточками. Зарплатные строки и «Косвенные» — тогда же, когда
+        // их показывает страница «Факт» (App.isAdmin()); общая сумма и реальная маржа видны всем.
+        assert.ok(!statsText().includes('Фурнитура'), 'closed until clicked');
+        run('OrderDetail.toggleRealCostDetails()');
+        const opened = statsText();
+        assert.ok(opened.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), opened);
+        assert.ok(opened.includes('Пластик / материалы 15 135 ₽ 15 135 ₽ по плану'), opened);
+        assert.ok(opened.includes('Итого 97 135 ₽ 121 000 ₽'), opened);
+        assert.ok(opened.includes('Маржа 17,1% план 30,6%'), 'the real margin stays visible to everyone');
+        assert.ok(!opened.includes('NFC'), 'a row with nothing in it is not listed');
+        assert.ok(!opened.includes('ЗП'), 'no salary rows for those who cannot see them on «Факт»');
+        assert.ok(!opened.includes('Косвенные'), 'nor the indirect row');
+        assert.ok(opened.includes('Зарплата и косвенные скрыты: их видят только администраторы.'), 'the missing rows are explained');
+        assert.ok(!opened.includes('Табеля по заказу нет'), 'there is a timesheet');
+        noSmallText(dom('od-stats').innerHTML, 'real cost details');
+        // Доступ к странице «Факт» администратором не делает: у строк тот же замок, что у страницы.
+        run(`App.canAccess = () => true`);
+        run('OrderDetail.renderStats()');
+        const factualPageOnly = statsText();
+        assert.ok(!factualPageOnly.includes('ЗП') && !factualPageOnly.includes('Косвенные'), factualPageOnly);
+        run(`App.canAccess = () => false; App.isAdmin = () => true`);
+        run('OrderDetail.renderStats()');
+        const openedAsAdmin = statsText();
+        assert.ok(openedAsAdmin.includes('ЗП выливание 30 000 ₽ 42 000 ₽ по факту'), openedAsAdmin);
+        assert.ok(openedAsAdmin.includes('ЗП срезание 5 000 ₽ 5 000 ₽ по плану'), openedAsAdmin);
+        assert.ok(openedAsAdmin.includes('Косвенные 12 000 ₽ 20 000 ₽ по факту'), openedAsAdmin);
+        assert.ok(!openedAsAdmin.includes('Зарплата и косвенные скрыты'), 'nothing is hidden from them');
+        run('OrderDetail.toggleRealCostDetails()');
+        assert.ok(!statsText().includes('Фурнитура'), 'closes on the second click');
+        context.__cardCost = lemonRealCost();
+        const withoutSalary = visibleText(run('OrderDetail.renderRealCostDetails(__cardCost, false)'));
+        const withSalary = visibleText(run('OrderDetail.renderRealCostDetails(__cardCost, true)'));
+        assert.ok(!withoutSalary.includes('ЗП'), withoutSalary);
+        assert.ok(!withoutSalary.includes('Косвенные'), withoutSalary);
+        assert.ok(withoutSalary.includes('Фурнитура'), withoutSalary);
+        assert.ok(withSalary.includes('ЗП выливание'), withSalary);
+        assert.ok(withSalary.includes('Косвенные'), withSalary);
+        run(`App.isAdmin = () => false`);
+
+        // 4. Табеля нет: себестоимость плановая, и шапка так и говорит (по статьям — тоже).
+        context.__realCosts[9601] = lemonPlanOnlyCost();
+        await run('OrderDetail.loadRealCost()');
+        const noSheet = statsText();
+        assert.ok(noSheet.includes('Маржа 30,6% по плану'), noSheet);
+        assert.ok(noSheet.includes('Себестоимость 97 135 ₽ по плану'), noSheet);
+        assert.ok(noSheet.includes('Часы 12.1 ч план 12.1 · табеля нет'), noSheet);
+        run('OrderDetail.toggleRealCostDetails()');
+        const noSheetRowsHidden = statsText();
+        assert.ok(noSheetRowsHidden.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetRowsHidden);
+        assert.ok(!noSheetRowsHidden.includes('ЗП') && !noSheetRowsHidden.includes('Косвенные'), noSheetRowsHidden);
+        assert.ok(noSheetRowsHidden.includes(NO_TIMESHEET_NOTE), noSheetRowsHidden);
+        assert.ok(!noSheetRowsHidden.includes(FACT_ROWS_ASIDE_NOTE), 'every row is the plan — nothing to explain');
+        run(`App.isAdmin = () => true`);
+        run('OrderDetail.renderStats()');
+        const noSheetRows = statsText();
+        assert.ok(noSheetRows.includes('ЗП выливание 30 000 ₽ 30 000 ₽ по плану'), noSheetRows);
+        assert.ok(noSheetRows.includes('Косвенные 12 000 ₽ 12 000 ₽ по плану'), noSheetRows);
+        assert.ok(!noSheetRows.includes('по факту'), noSheetRows);
+        assert.ok(noSheetRows.includes(NO_TIMESHEET_NOTE), noSheetRows);
+        run('OrderDetail.toggleRealCostDetails()');
+        run(`App.isAdmin = () => false`);
+
+        // 4a. Табеля нет, а ФинТабло уже дал факт по фурнитуре. Вся себестоимость — план (спека): шапка
+        // и реальная маржа по плану; в разбивке статья показывает факт, итог — план, и это сказано.
+        context.__realCosts[9601] = lemonNoTimesheetWithFinTabloFact();
+        await run('OrderDetail.loadRealCost()');
+        const noSheetFact = statsText();
+        assert.ok(noSheetFact.includes('Маржа 30,6% по плану'), noSheetFact);
+        assert.ok(noSheetFact.includes('Себестоимость 97 135 ₽ по плану'), noSheetFact);
+        run('OrderDetail.toggleRealCostDetails()');
+        const noSheetFactRows = statsText();
+        assert.ok(noSheetFactRows.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), noSheetFactRows);
+        assert.ok(noSheetFactRows.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetFactRows);
+        assert.ok(noSheetFactRows.includes(`${NO_TIMESHEET_NOTE} ${FACT_ROWS_ASIDE_NOTE}`), noSheetFactRows);
+        run('OrderDetail.toggleRealCostDetails()');
+
+        // 5. «Факт» не ответил: шапка остаётся плановой, подписана «план», карточки себестоимости нет.
+        context.__realCosts[9601] = new Error('timesheet unavailable');
+        open(lemon);
+        const warn = console.warn;
+        console.warn = () => {};
+        try {
+            await run('OrderDetail.loadRealCost()');
+        } finally {
+            console.warn = warn;
+        }
+        const failed = render();
+        assert.ok(failed.includes('Маржа 30,6% план'), failed);
+        assert.ok(!failed.includes('Себестоимость'), failed);
+        assert.equal(run('OrderDetail.currentRealCost'), null);
+
+        // 6. Доска считает плановую маржу и говорит об этом; у «Переделки» там убыток, а не маржа.
+        const lemonFinancial = clone(run(`Orders.buildFinancialMeta(${JSON.stringify(lemon.order)}, ${JSON.stringify(lemon.items)})`));
+        assert.equal(lemonFinancial.marginPercent, 30.62);
+        run(`Orders.metaByOrderId = { 9601: { financial: ${JSON.stringify(lemonFinancial)} } }`);
+        const board = visibleText(run(`Orders.renderBoardCard(${JSON.stringify(lemon.order)})`));
+        assert.ok(board.includes('30,6% план'), board);
+        assert.ok(board.includes('177 000 ₽'), board);
+        const reworkOrder = { ...lemon.order, id: 9610, production_purpose: 'rework' };
+        run(`Orders.metaByOrderId = { 9610: { financial: ${JSON.stringify({ revenue: 0, marginPercent: 0, hours: 12.1, purpose: 'rework', loss: 97135 })} } }`);
+        const reworkBoard = visibleText(run(`Orders.renderBoardCard(${JSON.stringify(reworkOrder)})`));
+        assert.ok(reworkBoard.includes('−97 135 ₽'), reworkBoard);
+        assert.ok(!reworkBoard.includes('план'), reworkBoard);
+
+        // 7. Блок «Тираж» на вкладке «Информация»: разметка строки; пока на складе ничего нет — ни строки
+        // склада, ни кнопки.
+        open(lemon);
+        const block = visibleText(run('OrderDetail.renderTirageInfo()'));
+        assert.ok(block.includes('Тираж'), block);
+        assert.ok(block.includes('Лимон'), block);
+        assert.ok(block.includes('клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 (художница) · в подарок 20'), block);
+        assert.ok(!block.includes('На складе'), block);
+        assert.ok(!block.includes('Пересчитать себестоимость'), block);
+        noSmallText(run('OrderDetail.renderTirageInfo()'), 'tirage block');
+        run('OrderDetail.renderInfoTab()');
+        assert.ok(dom('od-tab-info').innerHTML.includes('id="od-tirage-slot"'));
+        assert.ok(visibleText(dom('od-tab-info').innerHTML).includes('клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 (художница) · в подарок 20'));
+        // Примечания к «партнёру» и «в подарок» — свободный текст, он экранируется.
+        const noted = cardData(9611, { tirage: { partner_note: '<b>Маша</b>', gift_note: 'клиентам', sample: 3, stock: 0, partner: 40, gift: 10 } });
+        open(noted);
+        const notedHtml = run('OrderDetail.renderTirageInfo()');
+        assert.ok(!notedHtml.includes('<b>Маша</b>'), 'a note is never markup');
+        assert.ok(visibleText(notedHtml).includes('клиенту 47 · партнёру 40 (&lt;b&gt;Маша&lt;/b&gt;) · в подарок 10 (клиентам) · образцы 3'), visibleText(notedHtml));
+        open(lemon);
+
+        // 8. Заказ ушёл в «Готово»: 30 «Лимонов» встали на склад по реальной себестоимости (121 000 / 30).
+        context.__realCosts[9601] = lemonRealCost();
+        assert.equal(await run(`Warehouse.moveOrderToReadyGoods(9601, 'Лимон')`), 1);
+        const savesBefore = clone(base.saves);
+        const loadsBefore = clone(base.loads);
+        assert.deepEqual(clone(await run('Warehouse.getOrderTirageStockSummary(9601)')),
+            { inStock: 30, total: 30, frozen: 120999.9, soldQty: 0, soldRevenue: 0 });
+        assert.deepEqual(clone(base.saves), savesBefore, 'the summary writes nothing');
+        assert.deepEqual(
+            [base.loads.stock - loadsBefore.stock, base.loads.sales - loadsBefore.sales, base.loads.history - loadsBefore.history],
+            [1, 1, 0], 'one read of the stock and one of the sales');
+        assert.deepEqual(clone(await run('Warehouse.getOrderTirageStockSummary(9999)')),
+            { inStock: 0, total: 0, frozen: 0, soldQty: 0, soldRevenue: 0 }, 'an order without positions');
+        await run('OrderDetail.loadTirageStock()');
+        const onStock = visibleText(run('OrderDetail.renderTirageInfo()'));
+        assert.ok(onStock.includes('На складе 30 из 30 · заморожено 121 000 ₽ · продано 0'), onStock);
+        assert.ok(onStock.includes('Пересчитать себестоимость'), onStock);
+        assert.equal(visibleText(dom('od-tirage-slot').innerHTML), onStock, 'the block is redrawn in place');
+        noSmallText(dom('od-tirage-slot').innerHTML, 'tirage block with the stock');
+
+        // 9. Продали 5 штук за 29 500 ₽: на складе 25 из 30, заморожена себестоимость только непроданных.
+        const positionId = base.lists.stock.find(row => Number(row.order_id) === 9601).id;
+        base.lists.sales = [{ id: 3, ready_goods_id: positionId, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33, revenue: 29500, payout: 29000 }];
+        base.lists.stock = base.lists.stock.map(row => (Number(row.order_id) === 9601 ? { ...row, qty: 25 } : row));
+        await run('OrderDetail.loadTirageStock()');
+        const afterSale = visibleText(run('OrderDetail.renderTirageInfo()'));
+        assert.ok(afterSale.includes('На складе 25 из 30 · заморожено 100 833 ₽ · продано 5 на 29 500 ₽'), afterSale);
+
+        // 9a. Склад не прочитался (общая база не ответила): это не «на складе пусто». Настоящая загрузка
+        // тогда помечает список «недоступно» и отдаёт пустой — читатель отвечает ошибкой, а блок остаётся
+        // как был, вместе с кнопкой. История склада читателю не нужна: без неё он читает как обычно.
+        const shownBefore = visibleText(dom('od-tirage-slot').innerHTML);
+        const tirageStockBefore = clone(run('OrderDetail.tirageStock'));
+        assert.deepEqual(tirageStockBefore, { inStock: 25, total: 30, frozen: 100833.25, soldQty: 5, soldRevenue: 29500 });
+        const stockLoader = context.loadReadyGoods;
+        const salesLoader = context.loadSalesRecords;
+        context.loadReadyGoods = async () => { const rows = await stockLoader(); return base.unavailable.has('stock') ? [] : rows; };
+        context.loadSalesRecords = async () => { const rows = await salesLoader(); return base.unavailable.has('sales') ? [] : rows; };
+        const cardWarn = console.warn;
+        console.warn = () => {};
+        try {
+            for (const list of ['stock', 'sales']) {
+                base.unavailable.add(list);
+                const outcome = await run(`Warehouse.getOrderTirageStockSummary(9601).then(() => 'resolved', error => String(error.message))`);
+                assert.equal(outcome, 'READY_GOODS_SHARED_UNAVAILABLE', `${list}: an unreadable store is not an empty stock`);
+                await run('OrderDetail.loadTirageStock()');
+                assert.equal(visibleText(dom('od-tirage-slot').innerHTML), shownBefore, `${list}: the block stays as it was`);
+                assert.deepEqual(clone(run('OrderDetail.tirageStock')), tirageStockBefore, `${list}: and so does what it shows`);
+                assert.ok(visibleText(run('OrderDetail.renderTirageInfo()')).includes('Пересчитать себестоимость'), `${list}: the button stays`);
+                base.unavailable.delete(list);
+            }
+            // Нет истории — читателю всё равно: он её не читает.
+            base.unavailable.add('history');
+            assert.deepEqual(clone(await run('Warehouse.getOrderTirageStockSummary(9601)')), tirageStockBefore, 'history is not read, so it does not matter');
+            base.unavailable.delete('history');
+            // Первое чтение не удалось: у блока нет строки склада, но он не падает и разметка на месте.
+            open(lemon);
+            base.unavailable.add('stock');
+            await run('OrderDetail.loadTirageStock()');
+            const noStockLine = visibleText(run('OrderDetail.renderTirageInfo()'));
+            assert.ok(noStockLine.includes('клиенту 0 · на продажу 30 по 5 900 ₽'), noStockLine);
+            assert.ok(!noStockLine.includes('На складе'), noStockLine);
+            assert.equal(run('OrderDetail.tirageStock'), null);
+        } finally {
+            console.warn = cardWarn;
+            context.loadReadyGoods = stockLoader;
+            context.loadSalesRecords = salesLoader;
+            base.unavailable.clear();
+        }
+        // База снова отвечает: тот же вызов видит склад.
+        await run('OrderDetail.loadTirageStock()');
+        assert.equal(visibleText(dom('od-tirage-slot').innerHTML), shownBefore);
+
+        // 10. «Пересчитать себестоимость»: ФинТабло догнал — у непроданных 25 штук 150 000 / 30 = 5 000 ₽,
+        // записи продаж не тронуты, шапка читает «Факт» заново.
+        context.__realCosts[9601] = lemonRealCost({ realTotal: 150000 });
+        context.__realCostCalls = [];
+        context.__toasts = [];
+        const salesBefore = clone(base.lists.sales);
+        await run('OrderDetail.recalcTirageCost()');
+        assert.equal(base.lists.stock.find(row => Number(row.order_id) === 9601).cost_per_unit, 5000);
+        assert.deepEqual(clone(base.lists.sales), salesBefore, 'recorded sales keep their cost');
+        assert.deepEqual(clone(context.__realCostCalls), [
+            { orderId: 9601, options: { fresh: true } },
+            { orderId: 9601, options: { fresh: true } },
+        ], 'the stock and the header both read a fresh «Факт»');
+        assert.deepEqual(clone(context.__toasts), ['Себестоимость непроданных штук пересчитана']);
+        assert.ok(visibleText(run('OrderDetail.renderTirageInfo()')).includes('На складе 25 из 30 · заморожено 125 000 ₽ · продано 5 на 29 500 ₽'));
+        assert.ok(statsText().includes('Себестоимость 150 000 ₽'), 'the header follows the new real cost');
+        assert.equal(run('OrderDetail.tirageRecalcBusy'), false);
+        // Нечего менять — так и сказано.
+        context.__toasts = [];
+        await run('OrderDetail.recalcTirageCost()');
+        assert.deepEqual(clone(context.__toasts), ['Себестоимость не изменилась']);
+        // Нет связи с общей базой — не молчим, кнопка снова доступна.
+        context.__realCosts[9601] = lemonRealCost({ realTotal: 160000 });
+        base.failSaves.add('stock');
+        context.__toasts = [];
+        const errorLog = console.error;
+        console.error = () => {};
+        try {
+            await run('OrderDetail.recalcTirageCost()');
+        } finally {
+            console.error = errorLog;
+            base.failSaves.clear();
+        }
+        assert.deepEqual(clone(context.__toasts), ['Не удалось пересчитать себестоимость — нет связи с общей базой. Попробуйте ещё раз.']);
+        assert.equal(run('OrderDetail.tirageRecalcBusy'), false);
+        assert.equal(base.lists.stock.find(row => Number(row.order_id) === 9601).cost_per_unit, 5000, 'nothing half-written');
+        // «Факт» сейчас не отвечает (или нечего ему сказать): пересчёт не ставит плановую себестоимость
+        // вместо реальной, а так и говорит; шапка не перечитывается.
+        for (const unavailable of [null, new Error('timesheet unavailable')]) {
+            context.__realCosts[9601] = unavailable;
+            context.__realCostCalls = [];
+            context.__toasts = [];
+            const noFactError = console.error;
+            console.error = () => {};
+            try {
+                await run('OrderDetail.recalcTirageCost()');
+            } finally {
+                console.error = noFactError;
+            }
+            assert.deepEqual(clone(context.__toasts), ['Не удалось пересчитать себестоимость — «Факт» сейчас недоступен. Попробуйте позже.']);
+            assert.equal(base.lists.stock.find(row => Number(row.order_id) === 9601).cost_per_unit, 5000, 'the frozen cost stays');
+            assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9601, options: { fresh: true } }], 'only the recalc asked «Факт»');
+            assert.equal(run('OrderDetail.tirageRecalcBusy'), false);
+            assert.ok(statsText().includes('Себестоимость 150 000 ₽'), 'the header keeps the last real cost');
+        }
+
+        // 11. Всё продано — пересчитывать нечего, кнопки нет, а проданное видно.
+        base.lists.stock = base.lists.stock.map(row => (Number(row.order_id) === 9601 ? { ...row, qty: 0 } : row));
+        base.lists.sales = [{ id: 3, ready_goods_id: positionId, product_name: 'Лимон', qty: 30, revenue: 177000 }];
+        await run('OrderDetail.loadTirageStock()');
+        const soldOut = visibleText(run('OrderDetail.renderTirageInfo()'));
+        assert.ok(soldOut.includes('На складе 0 из 30 · заморожено 0 ₽ · продано 30 на 177 000 ₽'), soldOut);
+        assert.ok(!soldOut.includes('Пересчитать себестоимость'), soldOut);
+
+        // 12. Без разметки блока нет и склад не читается; шапка без «Отдаём бесплатно» и «ожидаем».
+        const plain = cardData(9602, { order: { client_name: 'ООО Груша' } });
+        plain.items[0].tirage_allocation = null;
+        addOrder(plain);
+        open(plain);
+        assert.equal(run('OrderDetail.renderTirageInfo()'), '');
+        const loadsBeforePlain = clone(base.loads);
+        await run('OrderDetail.loadTirageStock()');
+        assert.deepEqual(clone(base.loads), loadsBeforePlain, 'nothing is for sale — the stock is not read');
+        const plainStats = render();
+        assert.ok(plainStats.includes('Выручка 590 000 ₽'), plainStats);
+        assert.ok(!plainStats.includes('ожидаем'), plainStats);
+        assert.ok(!plainStats.includes('Отдаём бесплатно'), plainStats);
+        run('OrderDetail.renderInfoTab()');
+        assert.ok(!dom('od-tab-info').innerHTML.includes('id="od-tirage-card"'), 'no block on an order without a split');
+
+        // B2C разметку не использует: блока нет, деньги не разделены.
+        const b2c = addOrder(cardData(9603, { order: { client_name: 'B2C' } }));
+        open(b2c);
+        assert.equal(run('OrderDetail.renderTirageInfo()'), '');
+        const b2cStats = render();
+        assert.ok(b2cStats.includes('Выручка 590 000 ₽'), b2cStats);
+        assert.ok(!b2cStats.includes('ожидаем'), b2cStats);
+        assert.ok(!b2cStats.includes('Отдаём бесплатно'), b2cStats);
+
+        // «Переделка» и «Сборка из остатков» — как раньше: ни блока, ни себестоимости, «Факт» не читается.
+        context.__realCostCalls = [];
+        const rework = addOrder(cardData(9604, { order: { production_purpose: 'rework' } }));
+        open(rework);
+        assert.equal(run('OrderDetail.renderTirageInfo()'), '');
+        assert.equal(run('OrderDetail.realCostState'), 'none');
+        await run('OrderDetail.loadRealCost()');
+        await run('OrderDetail.loadTirageStock()');
+        const reworkStats = render();
+        assert.ok(reworkStats.includes('Некоммерческие расходы −97 135 ₽'), reworkStats);
+        assert.ok(reworkStats.includes('Тип работ ↻ Переделка брака'), reworkStats);
+        assert.ok(!reworkStats.includes('Себестоимость'), reworkStats);
+        assert.ok(!reworkStats.includes('план'), reworkStats);
+        assert.ok(!reworkStats.includes('Отдаём бесплатно'), reworkStats);
+        const leftover = addOrder({
+            order: { id: 9605, order_name: 'Сборка', client_name: 'ООО Груша', status: 'draft', production_purpose: 'leftover_assembly',
+                leftover_assembly: { revenue: 5000, quantity: 10, assembly_hours: 2, details: 'остатки' } },
+            items: [],
+        });
+        open(leftover);
+        assert.equal(run('OrderDetail.renderTirageInfo()'), '');
+        await run('OrderDetail.loadRealCost()');
+        const leftoverStats = render();
+        assert.ok(leftoverStats.includes('Тип работ ↙ Сборка из остатков'), leftoverStats);
+        assert.ok(!leftoverStats.includes('Себестоимость'), leftoverStats);
+        assert.ok(!leftoverStats.includes('план'), leftoverStats);
+        assert.deepEqual(clone(context.__realCostCalls), [], 'the real cost is read for client orders only');
+
+        // 13. Ответ «Факта» по уже закрытой карточке на чужую не ложится.
+        context.__realCosts[9601] = lemonRealCost();
+        open(lemon);
+        const pending = run('OrderDetail.loadRealCost()');
+        open(plain);
+        await pending;
+        assert.equal(run('OrderDetail.currentRealCost'), null);
+        assert.equal(run('OrderDetail.realCostState'), 'loading', 'the other card is still waiting for its own answer');
+        // То же со складом: «Лимон» ещё читается, а открыта уже другая карточка.
+        open(lemon);
+        const pendingStock = run('OrderDetail.loadTirageStock()');
+        open(plain);
+        await pendingStock;
+        assert.equal(run('OrderDetail.tirageStock'), null);
+
+        // 14. «Готово» прямо в карточке: как только переход закончен, блок «Тираж» показывает склад.
+        context.__realCosts[9606] = lemonRealCost();
+        const delivered = addOrder(cardData(9606, { order: { status: 'delivery' } }));
+        open(delivered);
+        await run('OrderDetail.loadTirageStock()');
+        assert.ok(!visibleText(dom('od-tirage-slot').innerHTML).includes('На складе'), 'nothing on the stock yet');
+        const completedChoice = clone(run(`STATUS_OPTIONS.filter(option => option.value !== 'deleted' && option.value !== 'delivery').map(option => option.value)`)).indexOf('completed') + 1;
+        assert.ok(completedChoice > 0, '«Готово» is one of the statuses');
+        run(`
+            globalThis.__promptQueue = [${JSON.stringify(String(completedChoice))}, 'Smoke'];
+            globalThis.prompt = () => globalThis.__promptQueue.shift() || '';
+            globalThis.updateOrderStatus = async () => {};
+            Orders._ensureStatusTransitionAllowed = async () => ({ ok: true });
+            Orders._finishStatusTransition = async (orderId, order) => { await Warehouse.moveOrderToReadyGoods(orderId, order.order_name); };
+        `);
+        await run('OrderDetail.changeStatus()');
+        assert.equal(run('OrderDetail.currentOrder.status'), 'completed');
+        assert.ok(visibleText(dom('od-tirage-slot').innerHTML).includes('На складе 30 из 30 · заморожено 121 000 ₽ · продано 0'), visibleText(dom('od-tirage-slot').innerHTML));
+        delete context.__promptQueue;
+    } finally {
+        Object.assign(context, originals);
+        delete context.Factual;
+        ['__realCosts', '__realCostCalls', '__toasts', '__cardCost'].forEach(name => { delete context[name]; });
+        vm.runInContext(`
+            App.params = globalThis.__cardOriginals.params;
+            App.canAccess = globalThis.__cardOriginals.canAccess;
+            App.isAdmin = globalThis.__cardOriginals.isAdmin;
+            App.toast = globalThis.__cardOriginals.toast;
+            Orders.metaByOrderId = globalThis.__cardOriginals.metaByOrderId;
+            Orders._ensureStatusTransitionAllowed = globalThis.__cardOriginals.ensureAllowed;
+            Orders._finishStatusTransition = globalThis.__cardOriginals.finishTransition;
+            globalThis.updateOrderStatus = globalThis.__cardOriginals.updateOrderStatus;
+            globalThis.prompt = globalThis.__cardOriginals.prompt;
+            Object.assign(OrderDetail, globalThis.__cardOriginals.card);
+            delete globalThis.__cardOriginals;
+        `, context);
+        Object.entries(domBefore).forEach(([id, html]) => { dom(id).innerHTML = html; });
+    }
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -9240,6 +11481,11 @@ async function main() {
     await smokeCustomCompositePersistence(context);
     await smokeCustomCompositeEditing(context);
     await smokeCustomCompositeToggleSafety(context);
+    await smokeTirageAllocationPersistsAndInvoices(context);
+    await smokeTirageBlockUi(context);
+    await smokeTirageCalculatorSummary(context);
+    await smokeSaveRemapsParentIndexesPastEmptyRows(context);
+    await smokeTirageB2CIgnoresSplit(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
@@ -9300,6 +11546,15 @@ async function main() {
     await smokeCloneOrderPrefersNormalizedItems(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
+    await smokeReadyGoodsWritersReportFailedSave(context);
+    // Before the status smokes below: they replace Orders status helpers for good.
+    await smokeTirageReadyGoodsTransfer(context);
+    await smokeTirageReadyGoodsSyncToSplit(context);
+    await smokeTirageCompletedOrderSaveFollowsReadyGoods(context);
+    await smokeProductionPlanStatusSyncsReadyGoods(context);
+    await smokeReadyGoodsRecordsCreatedInOneMillisecondKeepTheirIds(context);
+    await smokeTiragePositionsFollowTheirLine(context);
+    await smokeOrderCardTirageAndRealMargin(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);

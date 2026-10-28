@@ -3035,6 +3035,8 @@ const ORDER_ITEM_CALC_FIELDS = [
     'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
     'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
     'custom_composite', 'custom_parts',
+    // Разметка тиража строки: без неё доска считала бы выручку со всего тиража.
+    'tirage_allocation',
     'setup_hours_override', 'colors', 'color_count',
     'builtin_assembly_name', 'builtin_assembly_speed',
     'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',
@@ -6887,13 +6889,22 @@ function _isEmptyBlobPatch(patch) {
     return Object.keys(patch.set).length === 0 && Object.keys(patch.remove).length === 0 && Object.keys(patch.top).length === 0;
 }
 
+// The API cannot take this patch yet: it has no blob-patch route (404/405) or it
+// is the build from before this blob existed (400 INVALID_BLOB_TARGET). The SPA
+// and the API deploy from one merge a few minutes apart, so in that window a
+// save falls back to the legacy write instead of failing.
+function _isBlobPatchNotReadyError(error) {
+    return [404, 405].includes(Number(error.status || error.code))
+        || String(error.code) === 'INVALID_BLOB_TARGET';
+}
+
 // Sends the patch; returns the merged server value, or undefined when the
-// endpoint is not deployed yet (caller then falls back to the legacy write).
+// endpoint is not ready for it (caller then falls back to the legacy write).
 async function _sendBlobPatch(target, patch) {
     if (!supabaseClient || typeof supabaseClient.patchBlob !== 'function') return undefined;
     const { data, error } = await _withRemoteTimeout('write', `patch ${target}`, () => supabaseClient.patchBlob(target, patch));
     if (error) {
-        if ([404, 405].includes(Number(error.status || error.code))) return undefined;
+        if (_isBlobPatchNotReadyError(error)) return undefined;
         throw new Error(error.message || error.code || `patch ${target} failed`);
     }
     return data ? data.value : null;
@@ -7855,6 +7866,15 @@ const READY_GOODS_SETTINGS_KEYS = Object.freeze({
     sales_records: 'ready_goods_sales_records_json',
 });
 
+// The same three lists as blob-patch targets (ops/api compat-blob-patch.js).
+// Each shared read remembers what it returned under this name and each save
+// sends only the difference, so two tabs never overwrite each other's rows.
+const READY_GOODS_BLOB_TARGETS = Object.freeze({
+    ready_goods: 'ready_goods_stock',
+    ready_goods_history: 'ready_goods_history',
+    sales_records: 'ready_goods_sales_records',
+});
+
 const READY_GOODS_SOURCE_SHARED = 'shared-settings';
 const READY_GOODS_SOURCE_LOCAL = 'local-cache';
 const READY_GOODS_SOURCE_UNAVAILABLE = 'shared-unavailable';
@@ -7869,6 +7889,31 @@ function _cloneReadyGoodsPayload(value) {
     if (Array.isArray(value)) return value.map(item => (item && typeof item === 'object') ? { ...item } : item);
     if (value && typeof value === 'object') return { ...value };
     return value;
+}
+
+// Lists a ready goods read handed out when it did not reach the shared base. They hold none of
+// the real rows, so _saveReadyGoodsStore never saves one — nor a list built on one — even after a
+// later read of the same list in this tab has turned the store's status back to «shared».
+const _readyGoodsFallbackLists = new WeakSet();
+
+function _readyGoodsFallbackPayload(fallbackValue) {
+    const payload = _cloneReadyGoodsPayload(fallbackValue);
+    if (payload && typeof payload === 'object') _readyGoodsFallbackLists.add(payload);
+    return payload;
+}
+
+// Would this save stand on a failed read? The list itself is one a failed read handed out (rows
+// pushed into it or not); or it was built on one ([...list], list.map(...)): then it has no tracked
+// origin — neither the list nor any of its records came from a read — and holds no record the
+// tab's latest read of the list knows of, so its patch, diffed against that read, would remove
+// every row of it. Copies of a real read keep the ids of that read and still save.
+function _isReadyGoodsListFromFailedRead(name, records) {
+    if (_readyGoodsFallbackLists.has(records)) return true;
+    if (!Array.isArray(records) || _blobArrayInfo.has(records)) return false;
+    if (records.some(record => record && typeof record === 'object' && _blobRecordInfo.has(record))) return false;
+    const latest = _blobLatestSnapshot[name];
+    if (!latest || latest.ids.size === 0) return false;
+    return !records.some(record => latest.ids.has(_blobRecordId(record)));
 }
 
 function _normalizeReadyGoodsPayload(value, fallbackValue = []) {
@@ -7902,13 +7947,13 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
             const normalized = _normalizeReadyGoodsPayload(remote.value, safeFallback);
             setLocal(localKey, normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
-            return normalized;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], normalized);
         }
         if (remote.status === 'error') {
             // A slow or failed read is not "no data": seeding [] here used to
             // wipe ready goods stock, history and sales for everyone.
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
-            return _cloneReadyGoodsPayload(safeFallback);
+            return _readyGoodsFallbackPayload(safeFallback);
         }
 
         const seedPayload = _cloneReadyGoodsPayload(safeFallback);
@@ -7916,28 +7961,69 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
         if (!_hasSupabaseAccessProblem()) {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'seeded-empty');
             setLocal(localKey, seedPayload);
-            return seedPayload;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], seedPayload);
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
-            return _cloneReadyGoodsPayload(safeFallback);
+            return _readyGoodsFallbackPayload(safeFallback);
         }
     }
 
     _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, isSupabaseReady() ? 'shared-unavailable' : 'shared-required');
-    return _cloneReadyGoodsPayload(safeFallback);
+    return _readyGoodsFallbackPayload(safeFallback);
 }
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
+    // _normalizeReadyGoodsPayload hands an array back as is, so the records keep
+    // the identity the diff below relies on.
     const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
-    // Every save rewrites the whole list; it is only safe on top of a list
-    // that was really read from the shared store.
+    // A save is only safe on top of a list that was really read from the
+    // shared store; a stale fallback must never be written back.
     if (_readyGoodsSourceStatus[storeKey] && _readyGoodsSourceStatus[storeKey].source !== READY_GOODS_SOURCE_SHARED) {
         throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
     }
+    // The status is one for the whole tab: a list from a failed read stays unsafe after another
+    // read of the same list made the store look shared again.
+    if (_isReadyGoodsListFromFailedRead(READY_GOODS_BLOB_TARGETS[storeKey], normalized)) {
+        console.error(`save ${READY_GOODS_BLOB_TARGETS[storeKey]}: refused — the list comes from a read that did not reach the shared base`);
+        throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+    }
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
-        await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        const blobTarget = READY_GOODS_BLOB_TARGETS[storeKey];
+        // Send only what changed since this tab last read or saved the list; the
+        // server merges it into the current list, so rows another tab added or
+        // changed meanwhile survive. `merged` stays undefined only while the API
+        // cannot take the patch yet (no route, or it does not know this blob).
+        let merged;
+        if (blobTarget && Array.isArray(normalized)) {
+            const patch = _diffRecordBlob(blobTarget, normalized);
+            // A record without an id cannot be matched on the server, which appends
+            // every copy it gets: a cloned legacy row would come back once more on
+            // each save (1 → 2 → 4 → 8). Such a row is never sent.
+            const withoutId = patch.upserts.filter(record => _blobRecordId(record) === null);
+            if (withoutId.length > 0) {
+                console.warn(`save ${blobTarget}: skipped ${withoutId.length} record(s) without id`, withoutId);
+                patch.upserts = patch.upserts.filter(record => _blobRecordId(record) !== null);
+            }
+            if (_isEmptyBlobPatch(patch)) {
+                setLocal(localKey, normalized);
+                return normalized;
+            }
+            try {
+                merged = await _sendBlobPatch(blobTarget, patch);
+            } catch (error) {
+                // Never fall back to a whole-list write here: it would drop rows
+                // other tabs added. The snapshot is untouched, so a retry sends
+                // the same change again.
+                console.error(`save ${blobTarget} patch error:`, error);
+                throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+            }
+        }
+        if (merged === undefined) {
+            await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        }
         if (!_hasSupabaseAccessProblem()) {
-            setLocal(localKey, normalized);
+            if (blobTarget) _trackRecordBlob(blobTarget, normalized);
+            setLocal(localKey, Array.isArray(merged) ? merged : normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
