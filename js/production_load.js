@@ -296,12 +296,12 @@ function _isSoldOrder(order) {
 function _orderProductionPurpose(order) {
     return typeof normalizeProductionPurpose === 'function'
         ? normalizeProductionPurpose(order?.production_purpose)
-        : (['rework', 'stock_sample'].includes(String(order?.production_purpose || '')) ? String(order.production_purpose) : 'commercial');
+        : (['rework', 'stock_sample', 'marketing'].includes(String(order?.production_purpose || '')) ? String(order.production_purpose) : 'commercial');
 }
 
 function _isNonCommercialOrder(order) {
     const purpose = _orderProductionPurpose(order);
-    return purpose === 'rework' || purpose === 'stock_sample';
+    return purpose === 'rework' || purpose === 'stock_sample' || purpose === 'marketing';
 }
 
 function _isScheduledNonCommercialOrder(order) {

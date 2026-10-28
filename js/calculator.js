@@ -2187,8 +2187,10 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
 const PRODUCTION_PURPOSES = {
     commercial: { label: 'Клиентский заказ', shortLabel: 'Клиентский' },
     leftover_assembly: { label: 'Сборка из неучтённых остатков', shortLabel: 'Сборка из остатков' },
-    rework: { label: 'Переделка брака', shortLabel: 'Переделка брака' },
-    stock_sample: { label: 'Сток / внутренний образец', shortLabel: 'Сток / образец' },
+    rework: { label: 'Переделка брака', shortLabel: 'Переделка брака', icon: '↻' },
+    stock_sample: { label: 'Сток / внутренний образец', shortLabel: 'Сток / образец', icon: '▦' },
+    // Подарки, промо, раздача: не продаём, все затраты — расход на маркетинг.
+    marketing: { label: 'Маркетинг: подарки, промо, раздача', shortLabel: 'Маркетинг', icon: '✦' },
 };
 
 function normalizeProductionPurpose(value) {
@@ -2197,7 +2199,7 @@ function normalizeProductionPurpose(value) {
 }
 
 function isNonCommercialProductionPurpose(value) {
-    return ['rework', 'stock_sample'].includes(normalizeProductionPurpose(value));
+    return ['rework', 'stock_sample', 'marketing'].includes(normalizeProductionPurpose(value));
 }
 
 function getProductionPurposeMeta(value) {

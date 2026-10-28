@@ -957,7 +957,7 @@ const Orders = {
             ? '<span style="display:inline-block;font-size:9px;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 5px;border-radius:4px;margin-left:4px;">B2C</span>'
             : '';
         const purposeBadge = isNonCommercial
-            ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / внутренний образец'}</div>`
+            ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${getProductionPurposeMeta(purpose).icon} ${getProductionPurposeMeta(purpose).label}</div>`
             : '';
         // Доска считает по калькулятору, а не по «Факту» (для каждой карточки доски это слишком
         // тяжело): маржа плановая и подписана, реальная — в карточке заказа. У «Переделки» и
@@ -1108,7 +1108,7 @@ const Orders = {
         const purposeBadge = purpose === 'leftover_assembly'
             ? this.renderBadge('Сборка из остатков', 'badge-blue')
             : isNonCommercialProductionPurpose(purpose)
-            ? this.renderBadge(purpose === 'rework' ? 'Переделка брака' : 'Сток / образец', 'badge-purple')
+            ? this.renderBadge(getProductionPurposeMeta(purpose).shortLabel, 'badge-purple')
             : '';
 
         return `<div>
