@@ -4280,11 +4280,15 @@ async function smokeReadyGoodsWritersReportFailedSave(context) {
     context.saveSalesRecords = failable('sales', records => { context.__salesRecords = records; });
     writeOffDialog.remove = () => { context.__removed.push('writeoff'); };
     addDialog.remove = () => { context.__removed.push('add'); };
+    context.__toastDurations = [];
     vm.runInContext(`
         globalThis.__origToast = App.toast;
         globalThis.__origRenderStats = Warehouse.renderStats;
         globalThis.__origRenderView = Warehouse.renderReadyGoodsView;
-        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        App.toast = (message, duration) => {
+            globalThis.__toasts.push(String(message || ''));
+            globalThis.__toastDurations.push(duration === undefined ? null : duration);
+        };
         Warehouse.renderStats = () => { globalThis.__renders.push('stats'); };
         Warehouse.renderReadyGoodsView = () => { globalThis.__renders.push('view'); };
     `, context);
@@ -4298,6 +4302,7 @@ async function smokeReadyGoodsWritersReportFailedSave(context) {
         context.__salesRecords = [];
         context.__failing = new Set(failing);
         context.__toasts = [];
+        context.__toastDurations = [];
         context.__renders = [];
         context.__removed = [];
     };
@@ -4348,6 +4353,7 @@ async function smokeReadyGoodsWritersReportFailedSave(context) {
         fillWriteOff();
         await vm.runInContext('Warehouse.doWriteOff()', context);
         assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000], 'write-off: the partial failure stays long enough to read');
         assert.deepEqual(clone(context.__removed), ['writeoff'], 'write-off: no stale dialog to retry from');
         assert.deepEqual(clone(context.__renders), ['stats', 'view'], 'write-off: the screen shows what is really saved');
         assert.deepEqual(state(), { stockQty: [4], sales: 0, history: 0 });
@@ -4356,6 +4362,7 @@ async function smokeReadyGoodsWritersReportFailedSave(context) {
         fillWriteOff();
         await vm.runInContext('Warehouse.doWriteOff()', context);
         assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000]);
         assert.deepEqual(state(), { stockQty: [4], sales: 1, history: 0 });
 
         // Manual add: same rules.
@@ -4380,11 +4387,13 @@ async function smokeReadyGoodsWritersReportFailedSave(context) {
         fillAdd();
         await vm.runInContext('Warehouse.doAddReadyGoods()', context);
         assert.deepEqual(clone(context.__toasts), [PARTIAL]);
+        assert.deepEqual(clone(context.__toastDurations), [8000], 'manual add: the same');
         assert.deepEqual(clone(context.__removed), ['add']);
         assert.deepEqual(clone(context.__renders), ['stats', 'view']);
         assert.deepEqual(state(), { stockQty: [7, 5], sales: 0, history: 0 });
     } finally {
         names.forEach(name => { context[name] = originals[name]; });
+        delete context.__toastDurations;
         writeOffDialog.remove = originalRemove[0];
         addDialog.remove = originalRemove[1];
         vm.runInContext(`
@@ -9794,6 +9803,13 @@ async function smokeTirageCalculatorSummary(context) {
     assert.equal(state.plain.revenueNote.display, 'none');
     assert.equal(state.plain.freeNote.display, 'none');
     assert.equal(state.plain.marginLabel, 'Маржа · план');
+    // Подписи под суммами — читаемым текстом, не мельче 14 px (мелкий текст калькулятора — частая жалоба).
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    ['sum-revenue-note', 'sum-free-note'].forEach(id => {
+        const tag = indexHtml.match(new RegExp(`<div id="${id}"[^>]*>`));
+        assert.ok(tag, `${id} is in index.html`);
+        assert.match(tag[0], /font-size:14px/, `${id}: 14 px`);
+    });
 }
 
 // B2C-заказ (клиент «B2C», как у Orders._shouldSyncOrderToReadyGoods) разметку не использует:
@@ -11097,7 +11113,7 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.ok(!opened.includes('NFC'), 'a row with nothing in it is not listed');
         assert.ok(!opened.includes('ЗП'), 'no salary rows for those who cannot see them on «Факт»');
         assert.ok(!opened.includes('Косвенные'), 'nor the indirect row');
-        assert.ok(opened.includes('Зарплата и косвенные скрыты'), 'the missing rows are explained');
+        assert.ok(opened.includes('Зарплата и косвенные скрыты: их видят только администраторы.'), 'the missing rows are explained');
         assert.ok(!opened.includes('Табеля по заказу нет'), 'there is a timesheet');
         noSmallText(dom('od-stats').innerHTML, 'real cost details');
         // Доступ к странице «Факт» администратором не делает: у строк тот же замок, что у страницы.

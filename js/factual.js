@@ -1876,7 +1876,10 @@ async _loadFactSummaries() {
 
     // Hours turn into salary through the timesheet and employee rates. The «Факт» page loads both in
     // load(); outside the page we fetch what is missing ourselves (or both again when `fresh`).
-    // Rejects if a load fails: a half-empty timesheet would give a plausible but wrong cost.
+    // A failed load is not noticed here: loadTimeEntries / loadEmployees do not reject — they fall
+    // back to the bootstrap, the copy cached in this browser or the defaults — so the cost is counted
+    // from a possibly stale (or empty) timesheet; an empty one reads as an order nobody logged hours
+    // on (hasTimesheet false, plan cost).
     async _ensureRealCostSources(fresh = false) {
         if (!this._orderCache || typeof this._orderCache !== 'object') this._orderCache = {};
         const needEntries = fresh || !Array.isArray(this._entries) || this._entries.length === 0;

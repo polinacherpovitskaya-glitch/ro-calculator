@@ -8108,7 +8108,8 @@ const Warehouse = {
         // is really saved.
         const dialog = document.getElementById(dialogId);
         if (dialog) dialog.remove();
-        App.toast('Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.');
+        // Дольше обычного: прочитать и пойти проверять остатки надо успеть.
+        App.toast('Готовая продукция сохранена не полностью — нет связи с общей базой. Проверьте остатки, прежде чем повторять.', 8000);
         this.renderStats();
         this.renderReadyGoodsView();
     },

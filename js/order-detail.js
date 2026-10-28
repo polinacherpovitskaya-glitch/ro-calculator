@@ -412,7 +412,7 @@ const OrderDetail = {
             if (shown.some(row => row.source === 'fact')) notes.push('Факт по статьям — для справки, в итог не входит.');
         }
         if (salaryHidden) {
-            notes.push('Зарплата и косвенные скрыты: их видит только владелец.');
+            notes.push('Зарплата и косвенные скрыты: их видят только администраторы.');
         }
         return `
         <div class="card" id="od-real-cost-details" style="margin-bottom:0;">
