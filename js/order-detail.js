@@ -57,10 +57,9 @@ const OrderCardLogic = {
     // До упаковки: за 3 дня до срока такой заказ — риск.
     BEFORE_PACKAGING: ['sample', 'production_casting', 'production_printing', 'production_hardware'],
     PAID_STATUSES: ['paid_100', 'postpay_100'],
-    // Час цеха, когда зарплата этапа неизвестна, ₽ (ставка по плану), и полный час цеха с
-    // косвенными, ₽ — им сортируются причины без рублей (их рубли видит только администратор).
+    // Час цеха, когда зарплата этапа неизвестна, ₽ (ставка по плану). Вместе с косвенными за час
+    // им же сортируются причины без рублей (их рубли видит только администратор).
     FALLBACK_SALARY_PER_HOUR: 550,
-    HOUR_COST_FOR_SORT: 4772,
     EPS: 1e-9,
 
     // ---------- даты и числа ----------
@@ -290,6 +289,7 @@ const OrderCardLogic = {
         const free = Math.max(0, num(r.availableQty));
         const qty = value => OrderCardLogic._formatNumber(value, 2);
         if (r.ready) return { tone: 'green', text: 'собрано, списано' };
+        if (!(need > 0)) return { tone: 'gray', text: 'не нужно' };
         if (reserve + eps >= need) return { tone: 'blue', text: `в резерве · на складе ${qty(free)}` };
         if (reserve + free + eps >= need) return { tone: 'gray', text: `есть на складе ${qty(free)}` };
         return { tone: 'red', text: `не хватает ${qty(Math.ceil(need - reserve - free - eps))}` };
@@ -334,6 +334,8 @@ const OrderCardLogic = {
         const shortage = (Array.isArray(input.stock?.shortageNames) ? input.stock.shortageNames : [])
             .map(name => String(name || '').trim()).filter(Boolean);
         const paymentStatus = String(input.paymentStatus || '');
+        // Некоммерческому заказу (маркетинг, сток, переделка) счёт не нужен.
+        const clientQty = isNonCommercialProductionPurpose(input.purpose) ? 0 : L._num(input.clientQty);
 
         if (overdue) red.push(`Срок прошёл ${L.formatDayMonth(input.deadlineEnd)}.`);
         if (hoursRed) red.push(hoursText);
@@ -344,7 +346,7 @@ const OrderCardLogic = {
         if (shortage.length) yellow.push(`На складе не хватает: ${shortage.join(', ')}.`);
         if (input.timesheetStageLabel) yellow.push(`По табелю уже идёт «${input.timesheetStageLabel}», а в статусе — «${stageLabel}».`);
         if (input.notesEmpty) yellow.push('Нет ТЗ для цеха.');
-        if (L._num(input.clientQty) > 0 && (!paymentStatus || paymentStatus === 'not_sent')) yellow.push('Счёт клиенту не выставлен.');
+        if (clientQty > 0 && (!paymentStatus || paymentStatus === 'not_sent')) yellow.push('Счёт клиенту не выставлен.');
         if (input.partnerWithoutNote) yellow.push('Не указано, кому уходит партнёрская доля.');
 
         if (red.length) return { tone: 'red', verdict: 'Горит', reasons: [...red, ...yellow].slice(0, 4) };
@@ -372,7 +374,8 @@ const OrderCardLogic = {
         const marginBad = !isNonCommercialProductionPurpose(input.purpose)
             && marginPlan !== null && marginNow !== null && marginPlan - marginNow > 10 + L.EPS;
         const paymentStatus = String(input.paymentStatus || '');
-        const unpaid = L._num(input.clientQty) > 0 && !L.PAID_STATUSES.includes(paymentStatus);
+        const clientQty = isNonCommercialProductionPurpose(input.purpose) ? 0 : L._num(input.clientQty);
+        const unpaid = clientQty > 0 && !L.PAID_STATUSES.includes(paymentStatus);
         const paymentLabel = (PAYMENT_STATUSES.find(item => item.key === paymentStatus) || PAYMENT_STATUSES[0]).label;
         const noTimesheet = !input.hasTimesheet;
         const missingStages = noTimesheet ? [] : (Array.isArray(input.stageRows) ? input.stageRows : [])
@@ -434,7 +437,7 @@ const OrderCardLogic = {
                 candidates.push({
                     text: `${row.label}: ${L._formatHours(fact)} ч вместо ${L._formatHours(plan)}`,
                     rub: canSeeSalary ? rub : null,
-                    weight: canSeeSalary ? Math.abs(rub) : Math.abs(deltaHours) * L.HOUR_COST_FOR_SORT,
+                    weight: canSeeSalary ? Math.abs(rub) : Math.abs(deltaHours) * (L.FALLBACK_SALARY_PER_HOUR + indirectPerHour),
                 });
             });
             rows.forEach(row => {

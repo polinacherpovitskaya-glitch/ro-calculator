@@ -439,7 +439,8 @@ const goodDone = {
         { text: `Упаковка: ${formatRub(23000)} вместо ${formatRub(21142)}`, rub: -1858 },
     ], 'a manager sees the hours reason without its rubles');
 
-    // Ставка 550 ₽, когда зарплаты по этапу нет; null-причина сортируется как |Δч| × 4 772.
+    // Ставка 550 ₽, когда зарплаты по этапу нет; null-причина сортируется так же, как у
+    // администратора: |Δч| × (550 + косвенные за час) = 1 × 1 550 ₽.
     const ordering = L.marginReasons({
         planPct: 40, nowPct: 35, revenue: 100000, planTotal: 50000, realTotal: 55000,
         rows: [
@@ -455,9 +456,9 @@ const goodDone = {
     });
     assert.deepEqual(plain(ordering.reasons), [
         { text: `Фурнитура: ${formatRub(15000)} вместо ${formatRub(10000)}`, rub: -5000 },
-        { text: 'Выливание: 3 ч вместо 4', rub: null },
         { text: `Прочее: ${formatRub(2000)} вместо ${formatRub(0)}`, rub: -2000 },
-    ], 'at most three, by size (a hidden hours reason ranks as 1 h × 4 772 ₽); fewer hours than planned is a reason too; assembly 0.4 h off is not');
+        { text: 'Выливание: 3 ч вместо 4', rub: null },
+    ], 'at most three, by size (a hidden hours reason ranks as 1 h × 1 550 ₽, like for an admin); fewer hours than planned is a reason too; assembly 0.4 h off is not');
     const orderingAdmin = L.marginReasons({
         planPct: 40, nowPct: 35, revenue: 100000, planTotal: 50000, realTotal: 55000, rows: [],
         stageRows: [{ key: 'casting', label: 'Выливание', planHours: 4, factHours: 3, salary: 0 }],
@@ -469,6 +470,36 @@ const goodDone = {
     const empty = L.marginReasons({ planPct: 30, nowPct: 30, planTotal: 100, realTotal: 100, rows: [], stageRows: [], indirectPerHour: 0, canSeeSalary: true });
     assert.deepEqual(plain(empty), { planPct: 30, nowPct: 30, deltaPp: 0, deltaRub: 0, reasons: [] });
 }
+
+// Некоммерческому заказу счёт не нужен, даже если клиентская доля передана по ошибке.
+{
+    const gifts = { ...okInWork, purpose: 'marketing', paymentStatus: '', clientQty: 100 };
+    const inWork = L.health(gifts);
+    assert.equal(inWork.tone, 'green');
+    assert.ok(!inWork.reasons.some(text => text.startsWith('Счёт клиенту')), inWork.reasons.join(' | '));
+    const closed = L.health({ ...gifts, status: 'completed', completedAt: '2026-11-19' });
+    assert.equal(closed.verdict, 'Закрыт хорошо');
+    assert.ok(!closed.reasons.some(text => text.startsWith('Деньги не пришли')), closed.reasons.join(' | '));
+}
+
+// Без табеля «Факт» берёт весь план: причин нет, а разница (если есть) всё равно отдаётся.
+{
+    const rows = [{ key: 'hardware_total', label: 'Фурнитура', plan: 10000, used: 14000, source: 'fact' }];
+    const stageRows = [{ key: 'assembly', label: 'Сборка', planHours: 2, factHours: 6, salary: 3000 }];
+    const flat = { planPct: 40, nowPct: 36, revenue: 100000, planTotal: 50000, realTotal: 54000, rows, stageRows, indirectPerHour: 4222, canSeeSalary: true };
+    const noTimesheet = L.marginReasons({ ...flat, hasTimesheet: false });
+    assert.deepEqual(plain(noTimesheet.reasons), []);
+    assert.equal(noTimesheet.deltaRub, -4000);
+    // Тот же расчёт, если передать сам realCost «Факта», а не его поля по отдельности.
+    const viaRealCost = L.marginReasons({
+        planPct: 40, nowPct: 36, revenue: 100000, stageRows, canSeeSalary: true,
+        realCost: { rows, planTotal: 50000, realTotal: 54000, hasTimesheet: true, indirectPerHour: 4222 },
+    });
+    assert.deepEqual(plain(viaRealCost), plain(L.marginReasons({ ...flat, hasTimesheet: true })));
+    assert.ok(viaRealCost.reasons.length > 0, 'with a timesheet the differences are reasons');
+}
+
+assert.deepEqual(plain(L.stockLabel({ targetQty: 0, plannedQty: 0 })), { tone: 'gray', text: 'не нужно' });
 
 // Логика чистая: до OrderDetail в файле нет обращений к DOM.
 assert.doesNotMatch(read('js/order-detail.js').split('const OrderDetail = {')[0], /document\./, 'OrderCardLogic does not touch the DOM');
