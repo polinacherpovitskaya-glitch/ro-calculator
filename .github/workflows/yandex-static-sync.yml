@@ -116,12 +116,36 @@ jobs:
             )" || actual=""
             if [ "$actual" = "$expected" ]; then
               echo "${RO_CALC_HOST}: ${actual}"
-              exit 0
+              break
             fi
             echo "Waiting for ${RO_CALC_HOST}: got=${actual:-unreachable}, want=${expected}"
             sleep 10
           done
-          exit 1
+          [ "$actual" = "$expected" ] || exit 1
+
+          # version.json alone is not enough: the page must also run this
+          # release's scripts. Check the js/app.js the published page loads.
+          page="$(mktemp)"
+          curl -fsSL --max-time 20 \
+            --resolve "${RO_CALC_HOST}:443:${YANDEX_VM_HOST}" \
+            "https://${RO_CALC_HOST}/?cb=${GITHUB_RUN_ID}" -o "$page"
+          app_src="$(grep -oE 'src="[^"]*js/app\.js[^"]*"' "$page" | head -1 | sed -E 's/^src="//; s/"$//' || true)"
+          case "$app_src" in
+            ""|*://*|//*)
+              echo "index.html must load js/app.js from this release, got: ${app_src:-nothing}" >&2
+              exit 1
+              ;;
+          esac
+          app_js="$(mktemp)"
+          curl -fsSL --max-time 20 \
+            --resolve "${RO_CALC_HOST}:443:${YANDEX_VM_HOST}" \
+            "https://${RO_CALC_HOST}/${app_src#/}" -o "$app_js"
+          app_version="$(grep -oE "APP_VERSION = '[^']+'" "$app_js" | head -1 | sed -E "s/.*'([^']+)'/\1/" || true)"
+          if [ "$app_version" != "$expected" ]; then
+            echo "${RO_CALC_HOST} loads ${app_src} with APP_VERSION ${app_version:-missing}, want ${expected}" >&2
+            exit 1
+          fi
+          echo "${RO_CALC_HOST}: page runs ${app_src} (${app_version})"
 
       - name: Upload bundle artifact
         if: always()

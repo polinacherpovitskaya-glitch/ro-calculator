@@ -52,6 +52,8 @@ assert.match(dataRefresh, /group:\s*calculator-static-write/);
 assert.match(staticDeploy, /group:\s*calculator-static-write/);
 
 assert.match(staticBuilder, /RO_YANDEX_BUCKET \|\| 'calc\.recycleobject\.ru'/);
+assert.doesNotMatch(staticBuilder, /storage\.yandexcloud\.net/, 'index.html must load its scripts from the same release, not from the retired bucket');
+assert.match(staticDeploy, /APP_VERSION/, 'the deploy must check the version of the scripts the published page actually loads');
 assert.match(floorPublisher, /RO_FLOOR_ASSET_BASE \|\| 'https:\/\/calc\.recycleobject\.ru\/'/);
 assert.match(deployGate, /node tests\/single-calculator-deploy-smoke\.js/);
 
