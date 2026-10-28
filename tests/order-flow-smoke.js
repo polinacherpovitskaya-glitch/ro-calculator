@@ -10283,14 +10283,40 @@ async function smokeTirageReadyGoodsTransfer(context) {
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(9309, { id: 9309, order_name: 'Лимон' }, 'delivery', 'completed')`, context);
         assert.equal(positionsOf(9309).length, 0);
         assert.deepEqual(clone(context.__toasts), [TRANSFER_FAILED]);
+        const back = orderId => vm.runInContext(`Orders._syncReadyGoodsByStatus(${orderId}, { id: ${orderId}, order_name: 'Заказ' }, 'completed', 'delivery')`, context);
         context.__toasts = [];
-        await vm.runInContext(`Orders._syncReadyGoodsByStatus(9308, { id: 9308, order_name: 'Груша и слива' }, 'completed', 'delivery')`, context);
+        await back(9308);
         assert.equal(positionsOf(9308).length, 1);
         assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED]);
+        // Склад не прочитался: о позициях, которые остались, говорим заказу, у которого они могли
+        // быть (B2C — весь тираж; клиентский — штуки «на продажу»). Заказ без «на продажу» и
+        // «Переделка» ничего на склад не ставили — им предупреждать не о чем.
+        context.__toasts = [];
+        await back(9303);
+        assert.equal(positionsOf(9303).length, 1);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED], 'B2C: its tirage is on the stock');
+        for (const orderId of [9304, 9305]) {
+            context.__toasts = [];
+            await back(orderId);
+            assert.deepEqual(clone(context.__toasts), [], `${orderId}: no warning about positions it never had`);
+        }
+        // Не прочитался и сам заказ — сказать нельзя, предупреждаем.
+        context.__toasts = [];
+        await back(9399);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED], 'an order that cannot be read either: warned');
         base.shared = true;
+        // Склад прочитался, а история — нет: у заказа без позиций снимать нечего, и предупреждения
+        // нет; у заказа с позициями они остаются, и менеджер это видит.
+        base.unavailable.add('history');
+        context.__toasts = [];
+        assert.equal(await vm.runInContext(`Warehouse.removeOrderFromReadyGoods(9304, 'Лимон', 'delivery')`, context), 0);
+        await back(9304);
+        assert.deepEqual(clone(context.__toasts), [], 'the stock says the order has nothing there');
+        await back(9308);
+        assert.equal(positionsOf(9308).length, 1);
+        assert.deepEqual(clone(context.__toasts), [ROLLBACK_FAILED]);
         // Общей базы нет только для истории: перенос не пишет ничего — и остатки тоже, чтобы
         // позиция не встала на склад без записи о том, откуда она.
-        base.unavailable.add('history');
         context.__toasts = [];
         const stockSavesBefore = base.saves.stock;
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(9309, { id: 9309, order_name: 'Лимон' }, 'delivery', 'completed')`, context);

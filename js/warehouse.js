@@ -7493,14 +7493,30 @@ const Warehouse = {
     // The order left «Готово»: its positions leave the ready goods stock. A position that has
     // already sold something stays with its sales — Orders._ensureStatusTransitionAllowed does
     // not let such an order go back; this covers a sale that landed in between.
+    // When the base cannot be read it rejects with READY_GOODS_SHARED_UNAVAILABLE, and the error's
+    // orderHoldsPositions says whether the order has positions there to warn about: true / false,
+    // or null when neither the stock nor the order could be read.
     removeOrderFromReadyGoods(orderId, orderName, nextStatus) {
         return this._runReadyGoodsTask(() => this._removeOrderPositions(orderId, orderName, nextStatus));
     },
 
     async _removeOrderPositions(orderId, orderName, nextStatus) {
-        const { stock: readyGoods, history, sales } = await this._loadReadyGoodsForWrite();
+        // Whether the order holds positions at all, the stock alone tells: an order without any
+        // (most orders) leaves «Готово» even when the history or the sales cannot be read.
+        const [stockRead, historyRead, salesRead] = await Promise.allSettled(
+            ['ready_goods', 'ready_goods_history', 'sales_records'].map(storeKey => this._readSharedReadyGoodsStore(storeKey)));
+        const failed = (reason, orderHoldsPositions) => {
+            if (reason && typeof reason === 'object') reason.orderHoldsPositions = orderHoldsPositions;
+            return reason;
+        };
+        if (stockRead.status === 'rejected') throw failed(stockRead.reason, await this._orderMayHoldReadyGoods(orderId));
+        const readyGoods = stockRead.value;
         const orderPositions = readyGoods.filter(item => item && Number(item.order_id) === Number(orderId));
         if (orderPositions.length === 0) return 0;
+        const unread = [historyRead, salesRead].find(read => read.status === 'rejected');
+        if (unread) throw failed(unread.reason, true);
+        const history = historyRead.value;
+        const sales = salesRead.value;
         const soldByPosition = this._countOrderReadyGoodsSales(orderPositions, sales, orderId).byPosition;
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
@@ -7536,6 +7552,23 @@ const Warehouse = {
             await saveReadyGoodsHistory(history);
         }
         return removed.size;
+    },
+
+    // The stock could not be read: could the order hold positions there? A B2C order put its whole
+    // tirage on the stock at «Готово», another order its «на продажу» lines; an order with neither
+    // never had any. null — the order could not be read either.
+    async _orderMayHoldReadyGoods(orderId) {
+        let data = null;
+        try {
+            data = await loadOrder(orderId);
+        } catch (error) {
+            console.warn('Ready goods: the order could not be read:', error);
+        }
+        if (!data || !data.order || !Array.isArray(data.items)) return null;
+        if (isB2CClientName(data.order.client_name)) {
+            return data.items.some(item => item && item.item_type === 'product' && (parseFloat(item.quantity) || 0) > 0);
+        }
+        return this._getTirageLines(data).lines.some(line => line.stock > 0);
     },
 
     // Removes records from a list read for a write, in place: the save of the very list that was
