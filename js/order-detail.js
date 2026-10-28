@@ -28,6 +28,14 @@ const OrderDetail = {
     currentFinancial: null,
     currentTab: 'info',
     deliveryScheduleDraft: [],
+    // Честная шапка: реальная себестоимость заказа из «Факта» и склад его штук «на продажу».
+    // Приходят после показа карточки (см. _beginHonestNumbers). realCostState: 'none' — не нужна
+    // или не пришла, 'loading' — ждём «Факт», 'ready' — ответ в currentRealCost.
+    currentRealCost: null,
+    realCostState: 'none',
+    realCostDetailsOpen: false,
+    tirageStock: null,
+    tirageRecalcBusy: false,
 
     // ==========================================
     // LOAD
@@ -46,12 +54,16 @@ const OrderDetail = {
         this.currentOrder = data.order;
         this.currentItems = data.items || [];
         this.deliveryScheduleDraft = normalizeDeliverySchedule(data.order?.delivery_schedule, 0).schedule;
+        this._beginHonestNumbers();
         this.currentFinancial = this.buildLiveFinancialMeta();
         this.currentTab = 'info';
 
         this.renderHeader();
         this.renderStats();
         this.renderInfoTab();
+        // Реальная себестоимость и склад приходят позже и дорисовываются сами: карточка их не ждёт.
+        void this.loadRealCost();
+        void this.loadTirageStock();
         this.renderProductionTab();
         this.renderFilesTab();
         this.renderItemsTab();
@@ -103,20 +115,31 @@ const OrderDetail = {
 
     buildLiveFinancialMeta() {
         const purpose = normalizeProductionPurpose(this.currentOrder?.production_purpose);
+        // Цифры, сохранённые вместе с заказом, — когда живой расчёт недоступен. Честных денег
+        // (разметка тиража, заработок) в них нет.
+        const storedMeta = () => ({
+            revenue: Number(this.currentOrder?.total_revenue_plan || 0),
+            marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
+            hours: Number(this.currentOrder?.total_hours_plan || 0),
+            purpose,
+            loss: isNonCommercialProductionPurpose(purpose)
+                ? Math.max(0, Number(this.currentOrder?.total_cost_plan || 0))
+                : 0,
+            totalEarned: null,
+            stockQty: 0,
+            stockRevenue: 0,
+            freeQty: 0,
+            freeCost: 0,
+            tirageLines: [],
+        });
         if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
-            return {
-                revenue: Number(this.currentOrder?.total_revenue_plan || 0),
-                marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
-                hours: Number(this.currentOrder?.total_hours_plan || 0),
-                purpose,
-                loss: isNonCommercialProductionPurpose(purpose)
-                    ? Math.max(0, Number(this.currentOrder?.total_cost_plan || 0))
-                    : 0,
-            };
+            return storedMeta();
         }
         try {
             const snapshot = getOrderLiveCalculatorSnapshot(this.currentOrder || {}, this.currentItems || []);
             const snapshotPurpose = normalizeProductionPurpose(snapshot?.productionPurpose || this.currentOrder?.production_purpose);
+            const summary = snapshot?.summary || {};
+            const earned = summary.totalEarned === null || summary.totalEarned === undefined ? NaN : Number(summary.totalEarned);
             return {
                 revenue: Number(snapshot?.revenue || 0),
                 marginPercent: Number(snapshot?.marginPercent || 0),
@@ -125,19 +148,63 @@ const OrderDetail = {
                 loss: isNonCommercialProductionPurpose(snapshotPurpose)
                     ? Math.max(0, Number(snapshot?.nonCommercialLoss || this.currentOrder?.total_cost_plan || 0))
                     : 0,
+                // Честные деньги по разметке тиража — как их считает калькулятор: сколько заработаем
+                // (после затрат на весь тираж) и сколько штук и себестоимости отдаём бесплатно.
+                totalEarned: Number.isFinite(earned) ? earned : null,
+                stockQty: Number(summary.stockQty || 0),
+                stockRevenue: Number(summary.stockRevenue || 0),
+                freeQty: Number(summary.freeQty || 0),
+                freeCost: Number(summary.freeCost || 0),
+                tirageLines: snapshotPurpose === 'commercial' ? this._collectTirageLines(snapshot?.products) : [],
             };
         } catch (e) {
             console.warn('OrderDetail.buildLiveFinancialMeta fallback:', e);
-            return {
-                revenue: Number(this.currentOrder?.total_revenue_plan || 0),
-                marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
-                hours: Number(this.currentOrder?.total_hours_plan || 0),
-                purpose,
-                loss: isNonCommercialProductionPurpose(purpose)
-                    ? Math.max(0, Number(this.currentOrder?.total_cost_plan || 0))
-                    : 0,
-            };
+            return storedMeta();
         }
+    },
+
+    // Строки изделий, у которых есть разметка тиража (кроме «всё клиенту»), для блока «Тираж».
+    // Разметку берём у изделий снимка: B2C-заказ там уже без неё.
+    _collectTirageLines(products) {
+        const lines = [];
+        (Array.isArray(products) ? products : []).forEach((product, index) => {
+            const split = typeof getItemTirageSplit === 'function' ? getItemTirageSplit(product) : null;
+            if (!split) return;
+            lines.push({
+                name: String(product?.product_name || '').trim() || `Изделие ${index + 1}`,
+                quantity: Number(product?.quantity) || 0,
+                split,
+            });
+        });
+        return lines;
+    },
+
+    // Реальная маржа заказа, %: заработок по калькулятору за вычетом перерасхода себестоимости
+    // против плана («Факт» − план), от выручки. null — если считать не из чего.
+    computeRealMargin(totalEarned, totalRevenue, realTotal, planTotal) {
+        const number = value => (value === null || value === undefined || value === '' ? NaN : Number(value));
+        const earned = number(totalEarned);
+        const revenue = number(totalRevenue);
+        const real = number(realTotal);
+        const plan = number(planTotal);
+        if (![earned, revenue, real, plan].every(Number.isFinite) || !(revenue > 0)) return null;
+        return round2((earned - (real - plan)) * 100 / revenue);
+    },
+
+    // Реальная себестоимость заказа из «Факта» вместе с реальной маржой; null, пока «Факт» не ответил.
+    _buildRealCostView(financial) {
+        const real = this.currentRealCost;
+        if (!real) return null;
+        const realTotal = Number(real.realTotal);
+        const planTotal = Number(real.planTotal);
+        if (!Number.isFinite(realTotal) || !Number.isFinite(planTotal)) return null;
+        return {
+            realTotal,
+            planTotal,
+            hasTimesheet: !!real.hasTimesheet,
+            hoursFact: Number(real.hoursFact) || 0,
+            marginPercent: this.computeRealMargin(financial?.totalEarned, financial?.revenue, realTotal, planTotal),
+        };
     },
 
     renderStats() {
@@ -161,19 +228,77 @@ const OrderDetail = {
             ? `<div class="text-muted" style="font-size:11px;margin-top:2px;" title="Зафиксировано при сохранении заказа — по ценам и ставкам того дня. Крупная цифра — пересчёт по сегодняшним параметрам.">при продаже: ${formatPercent(storedMarginPct)}</div>`
             : '';
 
+        // Честная шапка — у клиентского заказа: выручка с учётом разметки тиража, реальная маржа и
+        // себестоимость по «Факту» рядом с плановыми, часы по плану и по табелю. «Переделка»,
+        // «Сток / образец» и «Сборка из остатков» показывают то же, что и раньше.
+        const honest = !isNonCommercial && !isLeftoverAssembly;
+        const financial = this.currentFinancial || {};
+        const real = honest ? this._buildRealCostView(financial) : null;
+        const hasRealMargin = !!real && real.marginPercent !== null;
+        const shownMargin = hasRealMargin ? real.marginPercent : marginPercent;
+        const stockQty = honest ? Number(financial.stockQty || 0) : 0;
+        const freeQty = honest ? Number(financial.freeQty || 0) : 0;
+
+        const revenueCaption = stockQty > 0
+            ? this._caption(`ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.`)
+            : '';
+        // Подпись говорит, чья это цифра: пока «Факт» не ответил (или табеля нет) маржа плановая.
+        let marginCaption = '';
+        if (honest) {
+            if (!hasRealMargin) marginCaption = this._caption('план');
+            else if (!real.hasTimesheet) marginCaption = this._caption('по плану');
+            else marginCaption = this._caption(`план ${formatPercent(marginPercent)}`);
+        }
+        let costCard = '';
+        if (honest && this.realCostState === 'loading') {
+            costCard = `
+            <div class="stat-card">
+                <div class="stat-label">Себестоимость</div>
+                <div class="stat-value text-muted">…</div>
+                ${this._caption('считаем по факту')}
+            </div>`;
+        } else if (real && (real.realTotal > 0 || real.planTotal > 0)) {
+            costCard = `
+            <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+                 title="Показать, из чего сложилась себестоимость"
+                 onclick="OrderDetail.toggleRealCostDetails()"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();OrderDetail.toggleRealCostDetails();}">
+                <div class="stat-label">Себестоимость</div>
+                <div class="stat-value">${this._formatWhole(real.realTotal)}</div>
+                ${this._caption(real.hasTimesheet ? `план ${this._formatWhole(real.planTotal)}` : 'по плану')}
+                ${this._caption(`Разбивка ${this.realCostDetailsOpen ? '▴' : '▾'}`, 'color:var(--accent);')}
+            </div>`;
+        }
+        let hoursCaption = '';
+        if (real) {
+            hoursCaption = this._caption(real.hasTimesheet
+                ? `план ${this._formatHours(hours)} · табель ${this._formatHours(real.hoursFact)}`
+                : `план ${this._formatHours(hours)} · табеля нет`);
+        }
+        const freeLine = freeQty > 0
+            ? `<div style="grid-column:1 / -1;font-size:14px;color:var(--text-secondary);">Отдаём бесплатно: ${this._formatQuantity(freeQty)} шт. на ${this._formatWhole(financial.freeCost)} себестоимости</div>`
+            : '';
+        const details = real && this.realCostDetailsOpen
+            ? `<div style="grid-column:1 / -1;">${this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown())}</div>`
+            : '';
+
         document.getElementById('od-stats').innerHTML = `
             <div class="stat-card">
                 <div class="stat-label">Выручка</div>
                 <div class="stat-value">${formatRub(revenue)}</div>
+                ${revenueCaption}
             </div>
             <div class="stat-card">
                 <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Маржа'}</div>
-                <div class="stat-value ${isNonCommercial || marginPercent < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(marginPercent)}</div>
+                <div class="stat-value ${isNonCommercial || shownMargin < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(shownMargin)}</div>
+                ${marginCaption}
                 ${marginNote}
             </div>
+            ${costCard}
             <div class="stat-card">
                 <div class="stat-label">Часы</div>
                 <div class="stat-value">${hours.toFixed(1)} ч</div>
+                ${hoursCaption}
             </div>
             <div class="stat-card">
                 <div class="stat-label">${isNonCommercial || isLeftoverAssembly ? 'Тип работ' : 'Оплата'}</div>
@@ -183,7 +308,255 @@ const OrderDetail = {
                         ? '↙ Сборка из остатков'
                         : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
             </div>
+            ${freeLine}
+            ${details}
         `;
+    },
+
+    // Подпись под крупной цифрой карточки: читаемого размера (14 px), приглушённая.
+    _caption(text, extraStyle = '') {
+        return `<div style="font-size:14px;color:var(--text-muted);margin-top:4px;line-height:1.35;${extraStyle}">${this._esc(text)}</div>`;
+    },
+
+    // Рубли без копеек: «121 000 ₽».
+    _formatWhole(value) {
+        return formatRub(Math.round(Number(value) || 0));
+    },
+
+    // Часы с десятой, без лишнего «.0»: 12.1, 18.
+    _formatHours(value) {
+        return String(Math.round((Number(value) || 0) * 10) / 10);
+    },
+
+    // ==========================================
+    // HONEST NUMBERS: real cost from «Факт» and the stock of the «на продажу» pieces
+    // ==========================================
+
+    // Карточка открыта (заново): всё, что пришло для предыдущей, забыть. Ответы, которые ещё в пути,
+    // станут устаревшими — их отличает номер открытия.
+    _beginHonestNumbers() {
+        this._honestToken = (this._honestToken || 0) + 1;
+        this.currentRealCost = null;
+        this.tirageStock = null;
+        this.realCostDetailsOpen = false;
+        this.tirageRecalcBusy = false;
+        this.realCostState = this._canLoadRealCost() ? 'loading' : 'none';
+    },
+
+    // Реальная себестоимость нужна клиентскому заказу; у «Переделки», «Стока / образца» и «Сборки из
+    // остатков» продажи нет, и карточка показывает прежнее.
+    _canLoadRealCost() {
+        return !!(this.currentOrder && this.currentOrder.id)
+            && normalizeProductionPurpose(this.currentOrder.production_purpose) === 'commercial'
+            && typeof Factual !== 'undefined' && !!Factual && typeof Factual.computeOrderRealCost === 'function';
+    },
+
+    _canSeeSalaryBreakdown() {
+        return typeof App !== 'undefined' && !!App && typeof App.canAccess === 'function' && !!App.canAccess('factual');
+    },
+
+    // «Факт» считает заказ по свежему табелю — один раз на открытие карточки (и ещё раз, когда
+    // менеджер пересчитывает себестоимость склада). Шапка дорисовывается, когда он ответил.
+    async loadRealCost() {
+        const orderId = this.currentOrder && this.currentOrder.id;
+        if (!orderId || !this._canLoadRealCost()) return null;
+        const token = this._honestToken;
+        let real = null;
+        try {
+            real = await Factual.computeOrderRealCost(orderId, { fresh: true });
+        } catch (error) {
+            console.warn('OrderDetail.loadRealCost failed:', error);
+        }
+        // Пока «Факт» считал, открыли другую карточку — этот ответ уже не про неё.
+        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        if (real && Number.isFinite(Number(real.realTotal)) && Number.isFinite(Number(real.planTotal))) {
+            this.currentRealCost = real;
+            this.realCostState = 'ready';
+        } else if (!this.currentRealCost) {
+            // Нет ответа — шапка остаётся плановой. Прошлый удачный ответ при повторе не теряем.
+            this.realCostState = 'none';
+        }
+        this.renderStats();
+        return this.currentRealCost;
+    },
+
+    toggleRealCostDetails() {
+        this.realCostDetailsOpen = !this.realCostDetailsOpen;
+        this.renderStats();
+    },
+
+    // Из чего сложилась себестоимость заказа: статьи «Факта», план и то, что взято в расчёт (по
+    // факту или по плану). Зарплатные строки — только тем, у кого есть доступ к «Факту»; общая
+    // сумма видна всем.
+    renderRealCostDetails(breakdown, canSeeSalary) {
+        const rows = Array.isArray(breakdown?.rows) ? breakdown.rows : [];
+        const hasMoney = row => !!row && ((Number(row.plan) || 0) !== 0 || (Number(row.used) || 0) !== 0);
+        const shown = rows.filter(row => hasMoney(row) && (canSeeSalary || !row.isSalary));
+        const salaryHidden = !canSeeSalary && rows.some(row => hasMoney(row) && row.isSalary);
+        const cell = 'padding:8px 12px;font-size:14px;';
+        const head = 'padding:8px 12px;font-size:14px;text-transform:none;letter-spacing:0;';
+        const body = shown.map(row => `
+                    <tr>
+                        <td style="${cell}">${this._esc(row.label || row.key || '')}</td>
+                        <td class="text-right" style="${cell}">${this._formatWhole(row.plan)}</td>
+                        <td class="text-right" style="${cell}font-weight:600;">${this._formatWhole(row.used)}</td>
+                        <td style="${cell}color:var(--text-muted);">${row.source === 'plan' ? 'по плану' : 'по факту'}</td>
+                    </tr>`).join('');
+        const notes = [];
+        if (breakdown && breakdown.hasTimesheet === false) {
+            notes.push('Табеля по заказу нет — зарплата и косвенные взяты по плану.');
+        }
+        if (salaryHidden) {
+            notes.push('Зарплата по этапам скрыта: её видят те, у кого есть доступ к «Факту».');
+        }
+        return `
+        <div class="card" id="od-real-cost-details" style="margin-bottom:0;">
+            <div style="font-size:15px;font-weight:600;margin-bottom:8px;">Из чего сложилась себестоимость</div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th style="${head}">Статья</th>
+                        <th class="text-right" style="${head}">План</th>
+                        <th class="text-right" style="${head}">Реально</th>
+                        <th style="${head}">Откуда</th>
+                    </tr></thead>
+                    <tbody>${body}
+                        <tr>
+                            <td style="${cell}font-weight:700;">Итого</td>
+                            <td class="text-right" style="${cell}font-weight:700;">${this._formatWhole(breakdown?.planTotal)}</td>
+                            <td class="text-right" style="${cell}font-weight:700;">${this._formatWhole(breakdown?.realTotal)}</td>
+                            <td style="${cell}"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            ${notes.map(note => `<div style="font-size:14px;color:var(--text-muted);margin-top:8px;">${this._esc(note)}</div>`).join('')}
+        </div>`;
+    },
+
+    // ==========================================
+    // «ТИРАЖ» ON THE INFO TAB
+    // ==========================================
+
+    // Блок «Тираж»: как поделён тираж каждой строки изделия и что из «на продажу» лежит на складе
+    // готовой продукции. Только просмотр: разметку меняют в калькуляторе. Пустая строка, если у
+    // заказа нет разметки (а у B2C, «Переделки», «Стока / образца» и «Сборки из остатков» её нет).
+    renderTirageInfo() {
+        const lines = this._getTirageLines();
+        if (!lines.length) return '';
+        const count = value => this._formatQuantity(value);
+        const note = value => {
+            const text = String(value || '').trim();
+            return text ? ` (${this._esc(text)})` : '';
+        };
+        const rows = lines.map(line => {
+            const { split } = line;
+            const parts = [`клиенту ${count(split.client)}`];
+            if (split.stock > 0) parts.push(`на продажу ${count(split.stock)} по ${formatRub(split.stock_price)}`);
+            if (split.partner > 0) parts.push(`партнёру ${count(split.partner)}${note(split.partner_note)}`);
+            if (split.gift > 0) parts.push(`в подарок ${count(split.gift)}${note(split.gift_note)}`);
+            if (split.sample > 0) parts.push(`образцы ${count(split.sample)}`);
+            return `
+                <div>
+                    <div style="font-size:15px;font-weight:600;">${this._esc(line.name)} · ${count(line.quantity)} шт.</div>
+                    <div style="font-size:14px;margin-top:2px;">${parts.join(' · ')}</div>
+                </div>`;
+        }).join('');
+        return `
+        <div class="card" id="od-tirage-card" style="margin-top:16px;">
+            <div class="card-header"><h3>Тираж</h3></div>
+            <div style="display:grid;gap:14px;">${rows}${this._renderTirageStock()}
+            </div>
+        </div>`;
+    },
+
+    _getTirageLines() {
+        const meta = this.buildLiveFinancialMeta();
+        return Array.isArray(meta.tirageLines) ? meta.tirageLines : [];
+    },
+
+    // «На складе N из M · заморожено X ₽ · продано K на Y ₽» и кнопка пересчёта себестоимости —
+    // когда штуки «на продажу» уже стоят на складе готовой продукции.
+    _renderTirageStock() {
+        const stock = this.tirageStock;
+        if (!stock || !(Number(stock.total) > 0)) return '';
+        const count = value => this._formatQuantity(value);
+        const sold = Number(stock.soldQty) > 0
+            ? `продано ${count(stock.soldQty)} на ${this._formatWhole(stock.soldRevenue)}`
+            : 'продано 0';
+        // Пересчитывать есть что, только пока на складе лежат непроданные штуки.
+        const button = Number(stock.inStock) > 0
+            ? `<div style="margin-top:10px;"><button type="button" class="btn btn-outline" style="font-size:14px;"
+                    onclick="OrderDetail.recalcTirageCost()" ${this.tirageRecalcBusy ? 'disabled' : ''}
+                    title="Когда ФинТабло догнал: себестоимость непроданных штук на складе пересчитается, записи продаж останутся как были">${this.tirageRecalcBusy ? 'Пересчитываем…' : 'Пересчитать себестоимость'}</button></div>`
+            : '';
+        return `
+                <div style="border-top:1px solid var(--border);padding-top:12px;">
+                    <div style="font-size:15px;font-weight:600;">Склад готовой продукции</div>
+                    <div style="font-size:14px;margin-top:2px;" title="Заморожено — себестоимость непроданных штук на складе">На складе ${count(stock.inStock)} из ${count(stock.total)} · заморожено ${this._formatWhole(stock.frozen)} · ${sold}</div>
+                    ${button}
+                </div>`;
+    },
+
+    // Блок перерисовывается на месте: вкладку «Информация» целиком трогать нельзя — в ней могут
+    // править поле.
+    _renderTirageSlot() {
+        const slot = document.getElementById('od-tirage-slot');
+        if (slot) slot.innerHTML = this.renderTirageInfo();
+    },
+
+    // Склад штук «на продажу» этого заказа: читается, только если у заказа есть что продавать.
+    async loadTirageStock() {
+        const orderId = this.currentOrder && this.currentOrder.id;
+        if (!orderId) return null;
+        const forSale = this._getTirageLines().some(line => line.split.stock > 0);
+        if (!forSale || typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.getOrderTirageStockSummary !== 'function') {
+            if (this.tirageStock) {
+                this.tirageStock = null;
+                this._renderTirageSlot();
+            }
+            return null;
+        }
+        const token = this._honestToken;
+        let summary;
+        try {
+            summary = await Warehouse.getOrderTirageStockSummary(orderId);
+        } catch (error) {
+            // Склад не прочитался — блок остаётся как был, не пропадает.
+            console.warn('OrderDetail.loadTirageStock failed:', error);
+            return this.tirageStock;
+        }
+        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        this.tirageStock = summary && Number(summary.total) > 0 ? summary : null;
+        this._renderTirageSlot();
+        return this.tirageStock;
+    },
+
+    // «Пересчитать себестоимость»: непроданные штуки на складе получают сегодняшнюю реальную
+    // себестоимость (записи продаж остаются как были); шапка читает «Факт» заново.
+    async recalcTirageCost() {
+        const orderId = this.currentOrder && this.currentOrder.id;
+        if (!orderId || this.tirageRecalcBusy) return;
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.recalcOrderReadyGoodsCost !== 'function') return;
+        const token = this._honestToken;
+        this.tirageRecalcBusy = true;
+        this._renderTirageSlot();
+        let recalculated = false;
+        try {
+            const updated = await Warehouse.recalcOrderReadyGoodsCost(orderId);
+            recalculated = true;
+            App.toast(updated > 0 ? 'Себестоимость непроданных штук пересчитана' : 'Себестоимость не изменилась');
+        } catch (error) {
+            console.error('OrderDetail.recalcTirageCost failed:', error);
+            App.toast('Не удалось пересчитать себестоимость — нет связи с общей базой. Попробуйте ещё раз.');
+        }
+        // Открыли другую карточку — эта уже не на экране (и её состояние сброшено).
+        if (token !== this._honestToken) return;
+        this.tirageRecalcBusy = false;
+        this._renderTirageSlot();
+        await this.loadTirageStock();
+        // ФинТабло догнал — шапка должна показывать ту же реальную себестоимость, что и склад.
+        if (recalculated) await this.loadRealCost();
     },
 
     // ==========================================
@@ -212,6 +585,7 @@ const OrderDetail = {
                 ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
         </div>
+        <div id="od-tirage-slot">${this.renderTirageInfo()}</div>
         ${this._renderDeliveryScheduleCard()}
         `;
     },
@@ -1256,6 +1630,9 @@ const OrderDetail = {
         if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
             await Orders._finishStatusTransition(this.currentOrder.id, this.currentOrder, oldStatus, newStatus, managerName);
         }
+        // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при возврате) —
+        // блок «Тираж» показывает, что там теперь.
+        await this.loadTirageStock();
     },
 
     openInCalculator() {

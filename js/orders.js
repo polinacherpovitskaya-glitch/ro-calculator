@@ -959,6 +959,12 @@ const Orders = {
         const purposeBadge = isNonCommercial
             ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / внутренний образец'}</div>`
             : '';
+        // Доска считает по калькулятору, а не по «Факту» (для каждой карточки доски это слишком
+        // тяжело): маржа плановая и подписана, реальная — в карточке заказа. У «Переделки» и
+        // «Стока / образца» здесь убыток, а не маржа — подписи нет.
+        const marginHtml = isNonCommercial
+            ? '−' + formatRub(loss)
+            : `${formatPercent(margin)}<span title="Плановая маржа по калькулятору. Реальная — в карточке заказа." style="font-weight:400;color:var(--text-muted);"> план</span>`;
         const rawDeliverySchedule = Array.isArray(order.delivery_schedule) ? order.delivery_schedule : [];
         const deliveryValidation = normalizeDeliverySchedule(
             rawDeliverySchedule,
@@ -982,7 +988,7 @@ const Orders = {
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
                 <span class="badge badge-${payment.color}" style="font-size:9px">${payment.label}</span>
-                <span style="font-size:11px;font-weight:600;${isNonCommercial ? 'color:var(--red)' : (margin >= 30 ? 'color:var(--green)' : 'color:var(--red)')}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(margin)}</span>
+                <span style="font-size:11px;font-weight:600;${isNonCommercial ? 'color:var(--red)' : (margin >= 30 ? 'color:var(--green)' : 'color:var(--red)')}">${marginHtml}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                 <span style="font-size:11px;color:var(--text-muted)">${isNonCommercial ? 'выручка 0 ₽' : formatRub(revenue)}</span>

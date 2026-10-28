@@ -7578,7 +7578,7 @@ const Warehouse = {
 
     // Sales of an order's positions: a sale points at its position (ready_goods_id, as «Списать
     // продажу» writes it) or at the order itself (order_id + order_item_number of the line).
-    // { total, byPosition: Map(position id -> qty) }.
+    // { total, byPosition: Map(position id -> qty), revenue } — revenue: ₽ of those sales.
     _countOrderReadyGoodsSales(positions, sales, orderId) {
         const idOf = value => (value === null || value === undefined || value === '' ? null : String(value));
         const positionById = new Map();
@@ -7588,6 +7588,7 @@ const Warehouse = {
         });
         const byPosition = new Map();
         let total = 0;
+        let revenue = 0;
         (sales || []).forEach(record => {
             if (!record || typeof record !== 'object') return;
             const qty = Math.max(0, parseFloat(record.qty) || 0);
@@ -7600,11 +7601,12 @@ const Warehouse = {
                     && Number(item.order_item_number) === Number(record.order_item_number));
             }
             total += qty;
+            revenue += Math.max(0, parseFloat(record.revenue) || 0);
             if (position && idOf(position.id) !== null) {
                 byPosition.set(idOf(position.id), (byPosition.get(idOf(position.id)) || 0) + qty);
             }
         });
-        return { total: Math.round(total * 100) / 100, byPosition };
+        return { total: Math.round(total * 100) / 100, byPosition, revenue: Math.round(revenue * 100) / 100 };
     },
 
     // How many pieces were already sold from the order's positions on the ready goods stock.
@@ -7613,6 +7615,33 @@ const Warehouse = {
         const positions = (stock || []).filter(item => item && Number(item.order_id) === Number(orderId));
         if (positions.length === 0) return 0;
         return this._countOrderReadyGoodsSales(positions, sales, orderId).total;
+    },
+
+    // What the order's «на продажу» positions hold now, for the «Тираж» block of the order card:
+    // { inStock: pieces on the stock, total: pieces that went on sale (stock + sold), frozen: ₽
+    // cost of the unsold pieces, soldQty: pieces sold, soldRevenue: ₽ of those sales }. An order
+    // without positions gives zeros. One read of the stock and one of the sales; nothing is written.
+    async getOrderTirageStockSummary(orderId) {
+        const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
+        const positions = (stock || []).filter(item => this._isOrderTiragePosition(item, orderId));
+        const empty = { inStock: 0, total: 0, frozen: 0, soldQty: 0, soldRevenue: 0 };
+        if (positions.length === 0) return empty;
+        const sold = this._countOrderReadyGoodsSales(positions, sales, orderId);
+        let inStock = 0;
+        let frozen = 0;
+        positions.forEach(item => {
+            const qty = Math.max(0, parseFloat(item.qty) || 0);
+            inStock += qty;
+            frozen += qty * (parseFloat(item.cost_per_unit) || 0);
+        });
+        const round = value => Math.round(value * 100) / 100;
+        return {
+            inStock: round(inStock),
+            total: round(inStock + sold.total),
+            frozen: round(frozen),
+            soldQty: sold.total,
+            soldRevenue: sold.revenue,
+        };
     },
 
     // ==========================================
