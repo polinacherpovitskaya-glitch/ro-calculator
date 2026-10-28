@@ -11531,6 +11531,10 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.equal(leftoverStrip[1], leftoverTile[1], 'one margin on one card');
         assert.ok(moneyText().includes('по плану'), moneyText());
         assert.ok(!moneyText().includes('по плану 1'), 'no real cost overrun in the strip');
+        run(`OrderDetail.togglePanel('money')`);
+        assert.ok(!panelText().includes('Из чего сложилась себестоимость'), `no «Факт» table next to plan lines: ${panelText()}`);
+        assert.ok(panelText().includes('Сборка из остатков считается по плану.'), panelText());
+        run(`OrderDetail.togglePanel('money')`);
 
         // 13. Ответ «Факта» по уже закрытой карточке на чужую не ложится.
         context.__realCosts[9601] = lemonRealCost();
@@ -11638,10 +11642,12 @@ async function smokeOrderCardWithoutTabs(context) {
     assert.ok(!/OrderDetail\.switchTab|renderProductionTab|renderFilesTab|print_file_url|reference_urls/.test(fs.readFileSync(path.join(__dirname, '..', 'js', 'order-detail.js'), 'utf8')),
         'the tab switcher and the dead «Производство» / «Файлы» tabs are gone');
 
-    const names = ['loadOrder', 'updateOrderFields', 'loadWorkBundle', 'loadChinaPurchases', 'WorkManagementCore', 'Factual'];
+    const names = ['loadOrder', 'updateOrderFields', 'loadWorkBundle', 'loadChinaPurchases', 'WorkManagementCore', 'Factual',
+        'loadWarehouseItems', 'updateOrderCalculatorData'];
     const originals = Object.fromEntries(names.map(name => [name, context[name]]));
     const run = code => vm.runInContext(code, context);
     const dom = id => context.document.getElementById(id);
+    const settle = async (times = 6) => { for (let i = 0; i < times; i += 1) await new Promise(resolve => setImmediate(resolve)); };
     const ids = ['od-head', 'od-type', 'od-stats', 'od-money', 'od-panel', 'od-stages', 'od-what', 'od-progress', 'od-more',
         'od-tab-items', 'od-tab-info', 'od-tab-tasks', 'od-tab-china', 'od-tirage-slot', 'od-val-client_name'];
     const domBefore = Object.fromEntries(ids.map(id => [id, dom(id).innerHTML]));
@@ -11739,7 +11745,8 @@ async function smokeOrderCardWithoutTabs(context) {
         run(`OrderDetail.startEdit('client_name', ${JSON.stringify(tricky)}, 'text')`);
         const editor = dom('od-val-client_name').innerHTML;
         assert.ok(editor.includes('value="ООО &quot;Ёлка&quot; &amp; &#39;Ко&#39; &lt;b&gt;"'), editor);
-        assert.ok(editor.includes(`OrderDetail.finishEdit('client_name', this.value)`), editor);
+        assert.ok(editor.includes(`OrderDetail.finishEdit('client_name', this.value, { orderId: this.dataset.order, token: this.dataset.token })`), editor);
+        assert.ok(editor.includes('data-order="9701"'), 'the editor knows its order');
 
         // Связи нет: тост, значение не записалось, поле снова открыто с тем, что ввели.
         context.__fieldFail = true;
@@ -11818,6 +11825,7 @@ async function smokeOrderCardWithoutTabs(context) {
 
         // 5а. ТЗ в фокусе: перерисовка «Что делаем» не трогает поле, обновляет только состав и тираж.
         dom('od-what').innerHTML = '<textarea id="od-brief">набираю ТЗ</textarea>';
+        dom('od-brief').tagName = 'TEXTAREA';
         context.document.activeElement = dom('od-brief');
         dom('od-what-items').innerHTML = '';
         run('OrderDetail.renderWhat()');
@@ -11827,7 +11835,7 @@ async function smokeOrderCardWithoutTabs(context) {
         run('OrderDetail.toggleDelivery()');
         const scheduleHtml = dom('od-progress').innerHTML;
         assert.ok(scheduleHtml.includes('id="od-delivery-schedule-card"'));
-        const typingDate = { id: 'date-input' };
+        const typingDate = { id: 'date-input', tagName: 'INPUT', type: 'date' };
         context.document.activeElement = typingDate;
         dom('od-delivery-slot').contains = el => el === typingDate;
         dom('od-progress-flow').innerHTML = '';
@@ -11855,6 +11863,172 @@ async function smokeOrderCardWithoutTabs(context) {
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(dom('od-more-sum-tasks').textContent, '1', 'the reloaded order is still this card');
         assert.ok(visibleText(dom('od-tab-tasks').innerHTML).includes('Проверить пакеты'));
+
+        // 5в. Фокус в ТЗ заказа A (груша), открыли заказ B (слива). Уход из поля сохраняет его в A, пока A на
+        // экране; поле A, которое ушло из фокуса уже при B, ничего не пишет; B показывает своё ТЗ.
+        context.loadWorkBundle = async () => ({ projects: [], tasks: [] });
+        const plum = lemonCardOrder(9703, { order: { status: 'production_casting', client_name: 'ООО Слива', notes: 'ТЗ сливы' } });
+        plum.items[0].tirage_allocation = null;
+        orders[9703] = plum;
+        await run('OrderDetail.load(9702)');
+        await settle();
+        const tokenA = String(run('OrderDetail._honestToken'));
+        assert.ok(dom('od-what').innerHTML.includes(`data-order="9702" data-token="${tokenA}"`), 'the brief knows its order');
+        const briefA = {
+            tagName: 'TEXTAREA',
+            value: 'ТЗ груши, недописанное',
+            blurred: 0,
+            blur() {
+                this.blurred += 1;
+                context.document.activeElement = null;
+                return vm.runInContext(`OrderDetail.saveBrief(${JSON.stringify(this.value)}, { orderId: '9702', token: '${tokenA}' })`, context);
+            },
+        };
+        dom('page-order-detail').contains = el => el === briefA;
+        const plainLoad = context.loadOrder;
+        let releasePlum = null;
+        context.loadOrder = orderId => (Number(orderId) === 9703
+            ? new Promise(resolve => { releasePlum = () => resolve(clone(orders[9703])); })
+            : plainLoad(orderId));
+        const writesBeforeSwitch = context.__fieldWrites.length;
+        context.document.activeElement = briefA;
+        const opening = run('OrderDetail.load(9703)');
+        await settle();
+        assert.deepEqual(context.__fieldWrites.slice(writesBeforeSwitch), [[9702, { notes: 'ТЗ груши, недописанное' }]],
+            'leaving the field while A is still on screen saves it to A');
+        // Пока B читается, снова поставили фокус в поле A: при показе B оно уходит из фокуса и не пишет.
+        context.document.activeElement = briefA;
+        releasePlum();
+        await opening;
+        await settle();
+        assert.equal(briefA.blurred, 2, 'the old field is blurred again once B is shown');
+        assert.equal(context.__fieldWrites.slice(writesBeforeSwitch).filter(([orderId]) => orderId === 9703).length, 0, 'nothing of A is written to B');
+        assert.equal(await run(`OrderDetail.saveBrief('ТЗ груши, недописанное', { orderId: '9702', token: '${tokenA}' })`), false, 'a late blur of A writes nowhere');
+        dom('od-val-client_name').innerHTML = '';
+        assert.equal(await run(`OrderDetail.finishEdit('client_name', 'Чужой клиент', { orderId: '9702', token: '${tokenA}' })`), false, 'nor does a late inline edit of A');
+        assert.ok(!dom('od-val-client_name').innerHTML.includes('Чужой клиент'), 'and B does not get A\'s editor back');
+        assert.equal(await run(`OrderDetail.saveField('client_name', 'Чужой клиент', { orderId: '9702', token: '${tokenA}' })`), false, 'saveField itself refuses a field of another card');
+        assert.equal(context.__fieldWrites.slice(writesBeforeSwitch).filter(([orderId]) => orderId === 9703).length, 0);
+        assert.equal(run('OrderDetail.currentOrder.notes'), 'ТЗ сливы');
+        assert.ok(dom('od-what').innerHTML.includes('ТЗ сливы</textarea>'), 'B shows its own brief');
+        assert.equal(run('OrderDetail.briefDraft'), null);
+        context.loadOrder = plainLoad;
+        context.document.activeElement = null;
+        delete dom('page-order-detail').contains;
+
+        // 5г. Кнопка в фокусе — не ввод: после «Сохранить график» строка «Сдаём …» перерисовывается.
+        context.updateOrderCalculatorData = async (orderId, patch) => ({ ...patch });
+        run('OrderDetail.toggleDelivery()');
+        run(`OrderDetail.deliveryScheduleDraft = [{ date: '2026-11-21', quantity: 100 }]`);
+        const saveButton = { tagName: 'BUTTON', type: 'button' };
+        context.document.activeElement = saveButton;
+        dom('od-delivery-slot').contains = el => el === saveButton;
+        await run('OrderDetail.saveDeliverySchedule()');
+        assert.ok(visibleText(dom('od-progress').innerHTML).includes('Сдаём одной партией 21 ноября'), visibleText(dom('od-progress').innerHTML));
+        context.document.activeElement = null;
+        delete dom('od-delivery-slot').contains;
+        run('OrderDetail.toggleDelivery()');
+
+        // 5д. Поздние ответы по закрытой карточке на новую не ложатся: склад (фон и таблица), задачи, Китай и
+        // запись поля. A — айва (карабин, на складе хватает), B — бук (кольцо, не хватает).
+        const quince = lemonCardOrder(9711, { order: { status: 'production_casting', client_name: 'ООО Айва' } });
+        const beech = lemonCardOrder(9712, { order: { status: 'production_casting', client_name: 'ООО Бук' } });
+        [quince, beech].forEach(data => { data.items[0].tirage_allocation = null; });
+        quince.items.push({ id: 9711002, order_id: 9711, item_type: 'hardware', product_name: 'Карабин', quantity: 100, hardware_source: 'warehouse', hardware_warehouse_item_id: 501 });
+        beech.items.push({ id: 9712002, order_id: 9712, item_type: 'hardware', product_name: 'Кольцо', quantity: 10, hardware_source: 'warehouse', hardware_warehouse_item_id: 502 });
+        orders[9711] = quince;
+        orders[9712] = beech;
+        const held = { items: [], tasks: [], china: [] };
+        const releaseHeld = (list, from = 0, to = list.length) => list.slice(from, to).forEach(release => release());
+        context.loadWarehouseItems = () => new Promise(resolve => held.items.push(() => resolve([
+            { id: 501, name: 'Карабин', qty: 300, unit: 'шт' },
+            { id: 502, name: 'Кольцо', qty: 5, unit: 'шт' },
+        ])));
+        context.loadWorkBundle = () => new Promise(resolve => held.tasks.push(() => resolve({ projects: [], tasks: [
+            { id: 71, order_id: 9711, title: 'Задача айвы 1', status: 'in_progress' },
+            { id: 72, order_id: 9711, title: 'Задача айвы 2', status: 'in_progress' },
+            { id: 73, order_id: 9712, title: 'Задача бука', status: 'in_progress' },
+        ] })));
+        context.loadChinaPurchases = (filter) => new Promise(resolve => held.china.push(() => resolve(Number(filter && filter.order_id) === 9711
+            ? [{ id: 1, purchase_name: 'Молды айвы', total_cny: 1 }, { id: 2, purchase_name: 'Шнуры айвы', total_cny: 2 }]
+            : [])));
+        const stats = () => visibleText(dom('od-stats').innerHTML);
+        const assertBeech = label => {
+            assert.ok(stats().includes('Склад Не хватает 1'), `${label}: ${stats()}`);
+            assert.deepEqual(clone(run('OrderDetail.hardwareRows')).map(row => row.itemId), [502], `${label}: B's own rows`);
+            assert.equal(dom('od-more-sum-tasks').textContent, '1', `${label}: B's task count`);
+            assert.equal(dom('od-more-sum-china').textContent, 'нет', `${label}: B's China count`);
+            assert.ok(!visibleText(dom('od-tab-tasks').innerHTML).includes('айвы'), `${label}: no A tasks`);
+            assert.ok(!visibleText(dom('od-tab-china').innerHTML).includes('айвы'), `${label}: no A purchases`);
+            assert.equal(run('OrderDetail.currentOrder.client_name'), 'ООО Бук', `${label}: B's client`);
+        };
+        // Фоновые чтения A (склад, задачи, Китай) ответили, когда открыт уже B.
+        await run('OrderDetail.load(9711)');
+        await settle();
+        const markA = { items: held.items.length, tasks: held.tasks.length, china: held.china.length };
+        assert.deepEqual(markA, { items: 1, tasks: 1, china: 1 }, 'A asked the warehouse, tasks and China once each');
+        await run('OrderDetail.load(9712)');
+        await settle();
+        releaseHeld(held.items, markA.items);
+        releaseHeld(held.tasks, markA.tasks);
+        releaseHeld(held.china, markA.china);
+        await settle();
+        assertBeech('B answered');
+        releaseHeld(held.items, 0, markA.items);
+        releaseHeld(held.tasks, 0, markA.tasks);
+        releaseHeld(held.china, 0, markA.china);
+        await settle();
+        assertBeech('A answered late');
+        // Таблица фурнитуры A (панель «Склад» открыта) ответила, когда открыт уже B.
+        await run('OrderDetail.load(9711)');
+        await settle();
+        releaseHeld(held.items, held.items.length - 1);
+        releaseHeld(held.tasks, held.tasks.length - 1);
+        releaseHeld(held.china, held.china.length - 1);
+        await settle();
+        assert.ok(stats().includes('Склад Всё есть'), stats());
+        run(`OrderDetail.togglePanel('stock')`);
+        await settle();
+        const tableMark = held.items.length;
+        await run('OrderDetail.load(9712)');
+        await settle();
+        releaseHeld(held.items, tableMark);
+        releaseHeld(held.tasks, held.tasks.length - 1);
+        releaseHeld(held.china, held.china.length - 1);
+        await settle();
+        assertBeech('B answered (table)');
+        releaseHeld(held.items, tableMark - 1, tableMark);
+        await settle();
+        assertBeech('A table answered late');
+        assert.ok(!dom('od-tab-hardware').innerHTML.includes('Карабин'), 'A\'s table is not drawn');
+        // Запись поля A пришла, когда открыт уже B.
+        await run('OrderDetail.load(9711)');
+        await settle();
+        releaseHeld(held.items, held.items.length - 1);
+        releaseHeld(held.tasks, held.tasks.length - 1);
+        releaseHeld(held.china, held.china.length - 1);
+        await settle();
+        const recordWrites = context.updateOrderFields;
+        let releaseWrite = null;
+        context.updateOrderFields = (orderId, fields) => new Promise(resolve => {
+            context.__fieldWrites.push([Number(orderId), clone(fields)]);
+            releaseWrite = resolve;
+        });
+        const pendingEdit = run(`OrderDetail.finishEdit('client_name', 'ООО Айва и сыновья')`);
+        await settle(2);
+        await run('OrderDetail.load(9712)');
+        await settle();
+        releaseHeld(held.items, held.items.length - 1);
+        releaseHeld(held.tasks, held.tasks.length - 1);
+        releaseHeld(held.china, held.china.length - 1);
+        await settle();
+        releaseWrite();
+        assert.equal(await pendingEdit, true, 'A was saved');
+        await settle();
+        assert.deepEqual(context.__fieldWrites.slice(-1), [[9711, { client_name: 'ООО Айва и сыновья' }]]);
+        assertBeech('A write landed late');
+        assert.ok(!visibleText(dom('od-head').innerHTML).includes('Айва'), visibleText(dom('od-head').innerHTML));
+        context.updateOrderFields = recordWrites;
 
         // 6. Меню «⋯»: копировать, сменить этап, отменить — с подтверждением в самом меню.
         run('OrderDetail.toggleMenu()');
@@ -12075,12 +12249,26 @@ async function smokeOrderCardContent(context) {
         // Отметка «собрано» при закрытой панели — склад тоже читается заново.
         context.loadWarehouseItems = async () => [{ id: 501, name: 'Круглый карабин с ушком', qty: 300, unit: 'шт' }];
         run('globalThis.__readyToggle = Warehouse.toggleProjectHardwareReady; Warehouse.toggleProjectHardwareReady = async () => {};');
+        // Панель закрыта по-настоящему: таблицы фурнитуры в документе нет.
+        const findById = context.document.getElementById;
+        context.document.getElementById = id => (id === 'od-tab-hardware' ? null : findById.call(context.document, id));
         try {
             await run('OrderDetail.toggleProjectHardwareReady(501, false)');
         } finally {
+            context.document.getElementById = findById;
             run('Warehouse.toggleProjectHardwareReady = globalThis.__readyToggle; delete globalThis.__readyToggle;');
         }
         assert.ok(text('od-stats').includes('Склад Всё есть'), text('od-stats'));
+        // Панель открыта (таблица есть): отметка «собрано» читает склад один раз — таблицей, без второго чтения.
+        let warehouseReads = 0;
+        context.loadWarehouseItems = async () => { warehouseReads += 1; return [{ id: 501, name: 'Круглый карабин с ушком', qty: 300, unit: 'шт' }]; };
+        run('globalThis.__readyToggle = Warehouse.toggleProjectHardwareReady; Warehouse.toggleProjectHardwareReady = async () => {};');
+        try {
+            await run('OrderDetail.toggleProjectHardwareReady(501, true)');
+        } finally {
+            run('Warehouse.toggleProjectHardwareReady = globalThis.__readyToggle; delete globalThis.__readyToggle;');
+        }
+        assert.equal(warehouseReads, 1, 'one warehouse read when the table is open');
 
         // Таблицы и кнопки прежних вкладок внутри карточки — не мельче 15 px, кнопки не ниже 44 px.
         const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'style.css'), 'utf8');

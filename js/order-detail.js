@@ -500,6 +500,8 @@ const OrderDetail = {
     async load(orderId) {
         if (!orderId) { App.navigate('orders'); return; }
 
+        // Фокус в поле прошлой карточки: уход из поля сохраняет его в тот заказ, пока он ещё на экране.
+        this._blurCardFocus();
         const data = await loadOrder(orderId);
         if (!data) {
             App.toast('Заказ не найден');
@@ -511,6 +513,9 @@ const OrderDetail = {
         this.currentItems = data.items || [];
         this.deliveryScheduleDraft = normalizeDeliverySchedule(data.order?.delivery_schedule, 0).schedule;
         this._beginHonestNumbers();
+        // Поставили фокус, пока заказ читался, — тоже убрать: прежнее поле в новой карточке не остаётся,
+        // а его уход из фокуса ничего не пишет (поле знает свой заказ, см. _fromOtherCard).
+        this._blurCardFocus();
 
         // Всё, что есть в самом заказе, — сразу. «Факт», склад готовой продукции, фурнитура, задачи
         // и Китай дорисовываются, когда ответят: карточка их не ждёт.
@@ -561,13 +566,44 @@ const OrderDetail = {
         return el;
     },
 
-    // Сейчас пишут в этом поле (или внутри этого блока) — его не перерисовываем.
+    // Сейчас пишут в этом поле (или внутри этого блока) — его не перерисовываем. «Пишут» — только в поле
+    // ввода: кнопка в фокусе (например, «Сохранить график» после нажатия) перерисовке не мешает.
     _typingIn(id) {
         if (typeof document === 'undefined') return false;
         const box = document.getElementById(id);
         const active = document.activeElement;
-        if (!box || !active || active === document.body) return false;
+        if (!box || !this._isTextEntry(active)) return false;
         return box === active || (typeof box.contains === 'function' && box.contains(active));
+    },
+
+    _isTextEntry(el) {
+        if (!el || typeof el !== 'object') return false;
+        if (el.isContentEditable) return true;
+        const tag = String(el.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        if (tag !== 'INPUT') return false;
+        return !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(String(el.type || 'text').toLowerCase());
+    },
+
+    // Открывают другой заказ, а фокус ещё в поле прошлой карточки: убрать его, чтобы его ТЗ или поле не
+    // осталось на экране нового заказа (перерисовка поля в фокусе не трогает).
+    _blurCardFocus() {
+        if (typeof document === 'undefined') return;
+        const page = document.getElementById('page-order-detail');
+        const active = document.activeElement;
+        if (!page || !active || active === document.body || typeof page.contains !== 'function' || !page.contains(active)) return;
+        if (typeof active.blur === 'function') active.blur();
+    },
+
+    // Поле пишет только в тот заказ, в котором его нарисовали: data-order и data-token рядом с полем.
+    _fieldOwner() {
+        return `data-order="${this._escAttr(this.currentOrder && this.currentOrder.id)}" data-token="${this._escAttr(this._honestToken || 0)}"`;
+    },
+
+    // Значение пришло из поля прошлой карточки (или прошлого открытия этой) — не писать.
+    _fromOtherCard(owner) {
+        if (!owner || owner.orderId === undefined || owner.orderId === null || owner.orderId === '') return false;
+        return !this._isCurrent(Number(owner.token), owner.orderId);
     },
 
     // Тип строки заказа: product (и пустой), pendant, hardware, packaging, extra_cost.
@@ -582,7 +618,8 @@ const OrderDetail = {
     // Ответ, который пришёл позже, — про эту же открытую карточку? Номер открытия и id заказа (объект
     // заказа обработчики фурнитуры подменяют свежим, поэтому сравнивать объекты нельзя).
     _isCurrent(token, orderId) {
-        return token === this._honestToken && !!this.currentOrder && Number(this.currentOrder.id) === Number(orderId);
+        return Number(token || 0) === Number(this._honestToken || 0)
+            && !!this.currentOrder && Number(this.currentOrder.id) === Number(orderId);
     },
 
     // ==========================================
@@ -1317,7 +1354,10 @@ const OrderDetail = {
             notes.push(`Отдаём бесплатно: ${this._formatQuantity(f.freeQty)} шт. на ${this._formatWhole(f.freeCost)} себестоимости — они уже внутри, их оплачивают проданные.`);
         }
         let details;
-        if (m.real) {
+        if (m.leftover) {
+            // Сборка из остатков считается по плану — таблицы «Факта» рядом с плановыми строками нет.
+            details = '<div class="odc-panel-note">Сборка из остатков считается по плану.</div>';
+        } else if (m.real) {
             details = this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown());
         } else {
             details = `<div class="odc-panel-note">${this._esc(this.realCostState === 'loading'
@@ -1417,7 +1457,7 @@ const OrderDetail = {
             console.warn('OrderDetail.loadRealCost failed:', error);
         }
         // Пока «Факт» считал, открыли другую карточку — этот ответ уже не про неё.
-        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        if (!this._isCurrent(token, orderId)) return null;
         if (real && Number.isFinite(Number(real.realTotal)) && Number.isFinite(Number(real.planTotal))) {
             this.currentRealCost = real;
             this.realCostState = 'ready';
@@ -1709,19 +1749,24 @@ const OrderDetail = {
         this._setHtml('od-what', `
             <h2 class="odc-h2">${o.status === 'completed' ? 'Что делали' : 'Что делаем'}</h2>
             <label for="od-brief" class="odc-field-label">ТЗ для цеха — сохраняется само</label>
-            <textarea id="od-brief" class="odc-brief" rows="4"
+            <textarea id="od-brief" class="odc-brief" rows="4" ${this._fieldOwner()}
                 placeholder="Что и сколько, цвет, нанесение, фурнитура и сборка, упаковка"
-                oninput="OrderDetail.briefDraft = this.value"
-                onblur="OrderDetail.saveBrief(this.value)"
+                oninput="OrderDetail.setBriefDraft(this.value, { orderId: this.dataset.order, token: this.dataset.token })"
+                onblur="OrderDetail.saveBrief(this.value, { orderId: this.dataset.order, token: this.dataset.token })"
                 onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.blur();}">${this._esc(text)}</textarea>
             <div id="od-what-items" class="odc-what-items">${this._renderComposition(m)}</div>
             <div id="od-tirage-slot">${this.renderTirageInfo(m.tirageLines)}</div>`);
     },
 
+    setBriefDraft(value, owner) {
+        if (!this._fromOtherCard(owner)) this.briefDraft = String(value ?? '');
+    },
+
     // ТЗ сохраняется само, когда уходят из поля, — если изменилось. Не сохранилось — текст остаётся.
-    async saveBrief(value) {
+    // owner — заказ и открытие, в котором поле нарисовано: ТЗ одного заказа в другой не пишется.
+    async saveBrief(value, owner) {
         const order = this.currentOrder;
-        if (!order) return false;
+        if (!order || this._fromOtherCard(owner)) return false;
         const typed = String(value ?? '');
         if (typed.trim() === String(order.notes || '').trim()) {
             this.briefDraft = null;
@@ -2079,11 +2124,11 @@ const OrderDetail = {
                 : validation.errors[validation.errors.length - 1];
         const rows = this.deliveryScheduleDraft.map((entry, index) => `
             <div class="odc-delivery-line" data-delivery-row="${index}">
-                <input type="date" class="odc-input" aria-label="Дата партии ${index + 1}" value="${this._escAttr(entry.date || '')}"
-                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value)">
-                <input type="number" class="odc-input" min="1" step="1" aria-label="Количество в партии ${index + 1}" value="${this._escAttr(entry.quantity || '')}"
+                <input type="date" class="odc-input" aria-label="Дата партии ${index + 1}" value="${this._escAttr(entry.date || '')}" ${this._fieldOwner()}
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value, { orderId: this.dataset.order, token: this.dataset.token })">
+                <input type="number" class="odc-input" min="1" step="1" aria-label="Количество в партии ${index + 1}" value="${this._escAttr(entry.quantity || '')}" ${this._fieldOwner()}
                     placeholder="Количество"
-                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value)">
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value, { orderId: this.dataset.order, token: this.dataset.token })">
                 <button class="odc-btn odc-btn-icon" type="button" aria-label="Удалить партию ${index + 1}"
                     onclick="OrderDetail.removeDeliveryScheduleRow(${index})">${ORDER_CARD_ICONS.close}</button>
             </div>
@@ -2123,8 +2168,8 @@ const OrderDetail = {
         if (next) previous.replaceWith(next);
     },
 
-    updateDeliveryScheduleDraft(index, field, value) {
-        if (!this.deliveryScheduleDraft[index]) return;
+    updateDeliveryScheduleDraft(index, field, value, owner) {
+        if (this._fromOtherCard(owner) || !this.deliveryScheduleDraft[index]) return;
         this.deliveryScheduleDraft[index][field] = field === 'quantity' ? Number(value) : value;
     },
 
@@ -2578,15 +2623,15 @@ const OrderDetail = {
             rows = await this._buildHardwareRows();
         } catch (error) {
             console.error('renderHardwareTab error', error);
-            container.innerHTML = '<p class="odc-muted">Не удалось загрузить фурнитуру заказа.</p>';
+            if (this._isCurrent(token, orderId)) container.innerHTML = '<p class="odc-muted">Не удалось загрузить фурнитуру заказа.</p>';
             return true;
         }
+        // Пока склад читался, открыли другую карточку: этот ответ не рисуем — ни таблицу, ни плитку.
+        if (!this._isCurrent(token, orderId)) return true;
         // Таблица свежее, чем то, что видят плитка и состав, — они перерисовываются по ней.
-        if (this._isCurrent(token, orderId)) {
-            this.hardwareRows = rows;
-            this.hardwareState = 'ready';
-            this._renderHardwareDependents();
-        }
+        this.hardwareRows = rows;
+        this.hardwareState = 'ready';
+        this._renderHardwareDependents();
 
         if (!rows.length) {
             container.innerHTML = `
@@ -2598,7 +2643,7 @@ const OrderDetail = {
                     </div>
                 </div>
             `;
-            return;
+            return true;
         }
 
         const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
@@ -2679,6 +2724,7 @@ const OrderDetail = {
                 </table>
             </div>
         `;
+        return true;
     },
 
     async setProjectHardwareActualQty(itemId, rawValue) {
@@ -3319,9 +3365,11 @@ const OrderDetail = {
 
     // Запись поля заказа. Не записалось — тост, и введённое не пропадает (это решает тот, кто
     // позвал: поле остаётся открытым, ТЗ — в поле). true — сохранено.
-    async saveField(field, value) {
+    // owner — заказ и открытие, в котором нарисовано поле (data-order / data-token): значение из поля
+    // другой карточки не пишется никуда.
+    async saveField(field, value, owner) {
         const order = this.currentOrder;
-        if (!order || !order.id) return false;
+        if (!order || !order.id || this._fromOtherCard(owner)) return false;
         const token = this._honestToken;
         try {
             await updateOrderFields(order.id, { [field]: value });
@@ -3365,13 +3413,13 @@ const OrderDetail = {
         this._editing = { field, inputType: inputType || 'text', kind: 'text' };
         if (cell.classList) cell.classList.add('od-editing');
 
-        cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
+        cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" ${this._fieldOwner()} onblur="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
         const input = typeof cell.querySelector === 'function' ? cell.querySelector('.od-inline-input') : null;
         if (input && typeof input.focus === 'function') input.focus();
     },
 
-    async finishEdit(field, value) {
-        if (!this.currentOrder) return false;
+    async finishEdit(field, value, owner) {
+        if (!this.currentOrder || this._fromOtherCard(owner)) return false;
         const trimmed = String(value ?? '').trim();
         const editing = this._editing && this._editing.field === field ? this._editing : null;
         if (trimmed === String(this.currentOrder[field] ?? '').trim()) {
@@ -3384,7 +3432,7 @@ const OrderDetail = {
         this._savingFields[field] = true;
         let saved = false;
         try {
-            saved = await this.saveField(field, trimmed);
+            saved = await this.saveField(field, trimmed, owner);
         } finally {
             this._savingFields[field] = false;
         }
@@ -3404,7 +3452,7 @@ const OrderDetail = {
         if (!cell) return;
         if (typeof cell.querySelector === 'function' && cell.querySelector('input')) return;
         this._editing = { field, inputType: 'date', kind: 'date' };
-        cell.innerHTML = `<input type="date" class="odc-input" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onchange="OrderDetail.finishEdit('${field}', this.value)">`;
+        cell.innerHTML = `<input type="date" class="odc-input" value="${this._escAttr(currentValue || '')}" ${this._fieldOwner()} onblur="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })" onchange="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })">`;
         const input = typeof cell.querySelector === 'function' ? cell.querySelector('input') : null;
         if (input && typeof input.focus === 'function') input.focus();
     },
