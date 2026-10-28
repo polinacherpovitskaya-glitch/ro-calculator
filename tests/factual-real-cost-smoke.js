@@ -233,7 +233,8 @@ async function smokeComputeOrderRealCost(context, run) {
     // часы: план из плана заказа, факт — сумма фактических часов по этапам
     assert.deepEqual([first.hoursPlan, first.hoursFact, first.hasTimesheet], [4, 6, true]);
     assert.deepEqual(Object.keys(first).sort(),
-        ['hasTimesheet', 'hoursFact', 'hoursPlan', 'planTotal', 'realTotal', 'rows', 'salaryReal'], 'форма ответа из плана');
+        ['hasTimesheet', 'hoursFact', 'hoursPlan', 'indirectPerHour', 'planTotal', 'realTotal', 'rows', 'salaryReal', 'stages'],
+        'форма ответа из плана + часы по этапам и косвенные за час');
 
     // --- повторный расчёт и числовой id строкой: тот же кэш, лишних загрузок нет
     assert.deepEqual(plain(await compute('301')), first);
@@ -341,6 +342,101 @@ async function smokeNoTimesheetCostIsThePlan(context, run) {
     assert.equal(context.__readyGoods.stock[0].cost_per_unit, Math.round(withSheet.realTotal / 5 * 100) / 100);
 }
 
+// ---------------------------------------------------------------------------
+// Часы по этапам (stages): плановые и фактические часы, зарплата, люди и даты — для карточки заказа.
+// Числа те же, что идут в строки «Факта»: stages — это детализация, а не второй расчёт.
+// ---------------------------------------------------------------------------
+async function smokeStages(context, run) {
+    context.App.params = { fotPerHour: 500, indirectPerHour: 100, taxRate: 0.07, vatRate: 0.05, charityRate: 0.01, wasteFactor: 1.1 };
+    run('Factual._entries = []; Factual._employees = []; Factual._orderCache = {};');
+    context.__employees = [{ id: 1, name: 'Женя', pay_base_salary_month: 0, pay_base_hours_month: 0, pay_overtime_hour_rate: 400 }];
+    const dated = (entry, date) => ({ ...entry, date });
+    context.__timeEntries = [
+        // выливание: Женя 3 + 0.5 ч, Аня 1.5 + 0.1 + 0.2 ч (0.1 + 0.2 — не 0.3 в двоичной дроби: округляем)
+        dated(timeEntry('casting', 3, 304), '2026-10-05'),
+        dated(timeEntry('casting', 0.5, 304), '2026-10-07'),
+        dated({ ...timeEntry('casting', 1.5, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-07'),
+        dated({ ...timeEntry('casting', 0.1, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-06'),
+        dated({ ...timeEntry('casting', 0.2, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-06'),
+        // сборка: Женя и «Оля», у которой в записи только employee_name (ставка — общая 500 ₽/ч)
+        dated(timeEntry('assembly', 1, 304), '2026-10-08'),
+        dated({ ...timeEntry('assembly', 2, 304), employee_id: undefined, worker_name: undefined, employee_name: 'Оля' }, '2026-10-03'),
+        // срезания нет, упаковки нет; чужой заказ и пустые часы в этапы не попадают
+        dated(timeEntry('casting', 50, 999), '2026-01-01'),
+        dated(timeEntry('trim', 0, 304), '2026-10-09'),
+    ];
+    context.__order = lemonLikeOrder(304);
+    context.__imports = [];
+
+    const result = plain(await run('Factual.computeOrderRealCost(304, { fresh: true })'));
+    assert.deepEqual(result.stages.map(s => s.key), ['casting', 'trim', 'assembly', 'packaging'], 'четыре этапа в порядке производства');
+    assert.deepEqual(result.stages.map(s => s.label), ['Выливание', 'Срезание', 'Сборка', 'Упаковка'], 'подписи — из таблицы часов «Факта»');
+    const [casting, trim, assembly, packaging] = result.stages;
+    assert.deepEqual(Object.keys(casting).sort(), ['factHours', 'firstDate', 'key', 'label', 'lastDate', 'people', 'planHours', 'salary']);
+
+    // плановые часы — те же, что делят legacy-часы: выливание 2, срезание 1, сборка 1, упаковка 0
+    assert.deepEqual(result.stages.map(s => s.planHours), [2, 1, 1, 0]);
+    // фактические часы и зарплата — как в строках «Факта»: 3 + 0.5 + 1.5 + 0.1 + 0.2 = 5.3 ч
+    assert.deepEqual(result.stages.map(s => s.factHours), [5.3, 0, 3, 0]);
+    assert.equal(casting.salary, 3.5 * 400 + 1.8 * 500, 'Женя по ставке сотрудника, Аня — по общей');
+    assert.equal(assembly.salary, 1 * 400 + 2 * 500);
+    assert.deepEqual([trim.salary, packaging.salary], [0, 0]);
+    const rowUsed = key => result.rows.find(r => r.key === key).used;
+    const rowFact = key => result.rows.find(r => r.key === key).fact;
+    assert.deepEqual(result.stages.map(s => s.salary),
+        [rowFact('salary_production'), rowFact('salary_trim'), rowFact('salary_assembly'), rowFact('salary_packaging')],
+        'зарплата по этапам совпадает с фактом строк «ЗП» (где часов нет, в строке стоит план, а в этапе — 0)');
+    assert.equal(result.stages.reduce((sum, s) => sum + s.factHours, 0), result.hoursFact, 'сумма этапов — это hoursFact');
+
+    // люди: часы суммируются по имени, по убыванию, округлены до 0.01
+    assert.deepEqual(casting.people, [{ name: 'Женя', hours: 3.5 }, { name: 'Аня', hours: 1.8 }]);
+    assert.deepEqual(assembly.people, [{ name: 'Оля', hours: 2 }, { name: 'Женя', hours: 1 }], 'имя берётся и из employee_name');
+    assert.deepEqual([trim.people, packaging.people], [[], []]);
+
+    // даты: самая ранняя и самая поздняя запись этапа; записей нет — null
+    assert.deepEqual([casting.firstDate, casting.lastDate], ['2026-10-05', '2026-10-07']);
+    assert.deepEqual([assembly.firstDate, assembly.lastDate], ['2026-10-03', '2026-10-08']);
+    assert.deepEqual([trim.firstDate, trim.lastDate, packaging.firstDate, packaging.lastDate], [null, null, null, null]);
+
+    // косвенные за час — тот же параметр, что умножает часы в строке «Косвенные»
+    assert.equal(result.indirectPerHour, 100);
+    assert.equal(rowUsed('indirect_production'), Math.round(result.hoursFact * result.indirectPerHour * 100) / 100);
+
+    // повторный обычный расчёт (из кэша) отдаёт то же самое
+    assert.deepEqual(plain(await run('Factual.computeOrderRealCost(304)')), result);
+
+    // нет табеля — этапы всё равно есть: плановые часы, нулевой факт, без людей и дат
+    context.__order = lemonLikeOrder(305);
+    const idle = plain(await run('Factual.computeOrderRealCost(305, { fresh: true })'));
+    assert.equal(idle.hasTimesheet, false);
+    assert.deepEqual(idle.stages.map(s => [s.key, s.planHours, s.factHours, s.salary, s.people, s.firstDate, s.lastDate]), [
+        ['casting', 2, 0, 0, [], null, null],
+        ['trim', 1, 0, 0, [], null, null],
+        ['assembly', 1, 0, 0, [], null, null],
+        ['packaging', 0, 0, 0, [], null, null],
+    ]);
+    assert.equal(idle.indirectPerHour, 100);
+
+    // ставки косвенных нет в параметрах — число всё равно (0), а не undefined
+    context.App.params = { fotPerHour: 500 };
+    const noRate = plain(await run('Factual.computeOrderRealCost(305, { fresh: true })'));
+    assert.equal(noRate.indirectPerHour, 0);
+    context.App.params = { fotPerHour: 500, indirectPerHour: 100, taxRate: 0.07, vatRate: 0.05, charityRate: 0.01, wasteFactor: 1.1 };
+
+    // legacy-часы без этапа делятся по плану, и люди с датами делятся вместе с ними
+    context.__timeEntries = [
+        dated({ ...timeEntry('other', 4, 306), description: 'Импорт из legacy Google-таблицы' }, '2026-03-02'),
+        dated(timeEntry('casting', 1, 306), '2026-03-09'),
+    ];
+    context.__order = lemonLikeOrder(306);
+    const legacy = plain(await run('Factual.computeOrderRealCost(306, { fresh: true })'));
+    assert.deepEqual(legacy.stages.map(s => s.factHours), [2 + 1, 1, 1, 0], '4 ч legacy по плану 2:1:1 + 1 ч выливания');
+    assert.deepEqual(legacy.stages[0].people, [{ name: 'Женя', hours: 3 }]);
+    assert.deepEqual([legacy.stages[0].firstDate, legacy.stages[0].lastDate], ['2026-03-02', '2026-03-09']);
+    assert.deepEqual([legacy.stages[1].firstDate, legacy.stages[1].lastDate], ['2026-03-02', '2026-03-02']);
+    assert.equal(legacy.stages.reduce((sum, s) => sum + s.factHours, 0), legacy.hoursFact);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/calculator.js');
@@ -351,6 +447,7 @@ async function main() {
     smokeBreakdown(run);
     await smokeComputeOrderRealCost(context, run);
     await smokeNoTimesheetCostIsThePlan(context, run);
+    await smokeStages(context, run);
     console.log('factual-real-cost-smoke: OK');
 }
 
