@@ -30,6 +30,8 @@ function createServer(blobMerge) {
         // When set, patchBlob answers with this error instead of merging
         // (e.g. { status: 404 } for an API that has no blob-patch route yet).
         patchError: null,
+        // When set ({ key, promise }), the next read of that settings row waits for the promise.
+        readGate: null,
         settingsWrites: [],
         patches: [],
     };
@@ -62,6 +64,11 @@ function createServer(blobMerge) {
                     if (server.failReads) return { data: null, error: { code: '503', message: 'slow' } };
                     if (table === 'settings') {
                         const key = filters.find(([column]) => column === 'key')?.[1];
+                        if (server.readGate && server.readGate.key === key) {
+                            const gate = server.readGate;
+                            server.readGate = null;
+                            await gate.promise;
+                        }
                         return { data: server.settings.has(key) ? { key, value: server.settings.get(key) } : null, error: null };
                     }
                     return { data: { ...server.rows[table] }, error: null };
@@ -475,6 +482,142 @@ async function smokeReadyGoodsRecordWithoutIdIsNeverPatched(blobMerge) {
     }
 }
 
+// A tab that also runs the warehouse screens (js/calculator.js + js/warehouse.js) on top of its
+// js/supabase.js: the tirage transfer and sync save through the real patches. «Факт» is a stub;
+// __duringRealCost runs (once) while the warehouse waits for it.
+function createWarehouseTab(server, orders) {
+    const tab = createTab(server);
+    tab.document = { addEventListener() {}, getElementById() { return null; }, querySelector() { return null; }, querySelectorAll() { return []; } };
+    tab.App = { getCurrentEmployeeName: () => 'Smoke', toast() {}, statusLabel: status => String(status || '') };
+    ['js/calculator.js', 'js/warehouse.js'].forEach(file => {
+        vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), tab, { filename: file });
+    });
+    tab.loadOrder = async orderId => JSON.parse(JSON.stringify(orders[Number(orderId)] || null));
+    tab.__duringRealCost = null;
+    tab.Factual = {
+        async computeOrderRealCost() {
+            const during = tab.__duringRealCost;
+            tab.__duringRealCost = null;
+            if (during) await during();
+            return { realTotal: 121000 };
+        },
+    };
+    return tab;
+}
+
+const tirageOrder = (orderId, lines) => ({
+    order: { id: orderId, order_name: 'Лимон', client_name: 'Художница', status: 'completed', production_purpose: 'commercial' },
+    items: lines.map((line, index) => ({
+        id: orderId * 1000 + index + 1, order_id: orderId, item_number: index + 1, item_type: 'product', printings: '[]',
+        ...line,
+    })),
+});
+const LEMON_LINE = { product_name: 'Лимон', quantity: 100, cost_total: 971.35, sell_price_item: 5900, tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 } };
+const PEAR_LINE = { product_name: 'Груша', quantity: 20, cost_total: 100, sell_price_item: 1000, tirage_allocation: { stock: 10, gift: 10 } };
+const seedReadyGoods = (server, stock, sales = []) => {
+    server.settings.set('ready_goods_stock_json', JSON.stringify(stock));
+    server.settings.set('ready_goods_history_json', '[]');
+    server.settings.set('ready_goods_sales_records_json', JSON.stringify(sales));
+};
+// What the second tab does: sells 4 «Значок», adds a new «Кружка».
+const otherTabSellsAndAdds = tabB => run(tabB, `(async () => {
+    const rows = await loadReadyGoods();
+    rows.find(row => row.id === 2).qty = 6;
+    rows.push({ id: 3, product_name: 'Кружка', qty: 1, location_type: 'our' });
+    await saveReadyGoods(rows);
+})()`);
+const OTHER_ROWS = [{ id: 1, product_name: 'Брелок', qty: 4, location_type: 'our' }, { id: 2, product_name: 'Значок', qty: 10, location_type: 'our' }];
+
+// The tirage transfer waits for «Факт» (the real cost). Meanwhile a second tab sells and adds a
+// position, and this tab reads the stock for another screen. The transfer must write only its
+// own position: the second tab's rows survive and nothing stale is sent back.
+async function smokeTirageTransferKeepsOtherTabsWrites(blobMerge) {
+    const server = createServer(blobMerge);
+    seedReadyGoods(server, OTHER_ROWS);
+    const tabA = createWarehouseTab(server, { 9701: tirageOrder(9701, [LEMON_LINE]) });
+    const tabB = createTab(server);
+    tabA.__duringRealCost = async () => {
+        await otherTabSellsAndAdds(tabB);
+        await run(tabA, 'loadReadyGoods()');
+    };
+    assert.equal(await run(tabA, `Warehouse.moveOrderToReadyGoods(9701, 'Лимон')`), 1);
+    const stock = serverList(server, READY_GOODS_STORES[0]);
+    assert.deepEqual(stock.map(row => `${row.product_name}:${row.qty}`), ['Брелок:4', 'Значок:6', 'Кружка:1', 'Лимон:30'], 'the other tab rows survive');
+    const patch = lastPatchFor(server, READY_GOODS_STORES[0]).patch;
+    assert.deepEqual(patch.upserts.map(row => row.product_name), ['Лимон'], 'only the new position is sent');
+    assert.deepEqual(patch.removeIds, [], 'nothing of the other tab is removed');
+}
+
+// The same, but the second tab writes while the transfer's own read of the lists is still in
+// flight (its history read is slow): the write is a patch against the transfer's own read of the
+// stock, not against whatever this tab read last.
+async function smokeTirageTransferPatchesItsOwnRead(blobMerge) {
+    const server = createServer(blobMerge);
+    seedReadyGoods(server, OTHER_ROWS);
+    const tabA = createWarehouseTab(server, { 9702: tirageOrder(9702, [LEMON_LINE]) });
+    const tabB = createTab(server);
+    let openHistory = null;
+    server.readGate = { key: 'ready_goods_history_json', promise: new Promise(resolve => { openHistory = resolve; }) };
+    const transfer = run(tabA, `Warehouse.moveOrderToReadyGoods(9702, 'Лимон')`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await otherTabSellsAndAdds(tabB);
+    await run(tabA, 'loadReadyGoods()');
+    openHistory();
+    assert.equal(await transfer, 1);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => `${row.product_name}:${row.qty}`), ['Брелок:4', 'Значок:6', 'Кружка:1', 'Лимон:30']);
+    const patch = lastPatchFor(server, READY_GOODS_STORES[0]).patch;
+    assert.deepEqual(patch.upserts.map(row => row.product_name), ['Лимон']);
+    assert.deepEqual(patch.removeIds, []);
+}
+
+// A completed order gets a new line for sale while another tab sells from its existing
+// position. The new line's cost is counted before the lists are read, so the sync decides on
+// what was really sold: the existing position ends at 40 − 2, not at 40.
+async function smokeTirageSyncDecidesOnAFreshRead(blobMerge) {
+    const server = createServer(blobMerge);
+    seedReadyGoods(server, [{
+        id: 9703001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9703, order_item_number: 1, order_line_key: null,
+        source: 'tirage', location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900,
+    }]);
+    const raised = tirageOrder(9703, [
+        { ...LEMON_LINE, tirage_allocation: { stock: 40, partner: 40, gift: 20, stock_price: 5900 } },
+        PEAR_LINE,
+    ]);
+    const tabA = createWarehouseTab(server, { 9703: raised });
+    const tabB = createTab(server);
+    tabA.__duringRealCost = () => run(tabB, `(async () => {
+        const stock = await loadReadyGoods();
+        stock[0].qty = 28;
+        await saveReadyGoods(stock);
+        const sales = await loadSalesRecords();
+        sales.push({ id: 77, ready_goods_id: 9703001, product_name: 'Лимон', qty: 2, cost_per_unit: 4033.33 });
+        await saveSalesRecords(sales);
+    })()`);
+    const result = await run(tabA, `Warehouse.syncOrderReadyGoodsToTirage(9703, ${JSON.stringify(raised)})`);
+    assert.equal(result.ok, true);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => `${row.product_name}:${row.qty}`), ['Лимон:38', 'Груша:10']);
+    assert.equal(serverList(server, READY_GOODS_STORES[2]).length, 1, 'the sale is kept');
+}
+
+// «Пересчитать себестоимость» waits for «Факт» while another tab sells 2 from the position: the
+// new cost lands on the position as it is after that sale (28 left), the sale is not undone.
+async function smokeTirageRecalcKeepsASaleMadeMeanwhile(blobMerge) {
+    const server = createServer(blobMerge);
+    seedReadyGoods(server, [{
+        id: 9704001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9704, order_item_number: 1, order_line_key: null,
+        source: 'tirage', location_type: 'our', qty: 30, cost_per_unit: 3000, sale_price: 5900,
+    }]);
+    const tabA = createWarehouseTab(server, { 9704: tirageOrder(9704, [LEMON_LINE]) });
+    const tabB = createTab(server);
+    tabA.__duringRealCost = () => run(tabB, `(async () => {
+        const stock = await loadReadyGoods();
+        stock[0].qty = 28;
+        await saveReadyGoods(stock);
+    })()`);
+    assert.equal(await run(tabA, 'Warehouse.recalcOrderReadyGoodsCost(9704)'), 1);
+    assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => `${row.qty}:${row.cost_per_unit}`), ['28:4033.33']);
+}
+
 async function main() {
     const blobMerge = await import(pathToFileURL(path.join(__dirname, '..', 'ops/api/src/compat-blob-patch.js')).href);
     await smokeTwoTabsKeepEachOthersReservations(blobMerge);
@@ -490,6 +633,10 @@ async function main() {
     await smokeUnknownBlobTargetFallsBackToWholeWrite(blobMerge);
     await smokeReadyGoodsRecordWithoutIdIsNeverPatched(blobMerge);
     await smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge);
+    await smokeTirageTransferKeepsOtherTabsWrites(blobMerge);
+    await smokeTirageTransferPatchesItsOwnRead(blobMerge);
+    await smokeTirageSyncDecidesOnAFreshRead(blobMerge);
+    await smokeTirageRecalcKeepsASaleMadeMeanwhile(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }
 
