@@ -16,7 +16,7 @@
 - Деньги считаются в одном месте (`js/calculator.js`), все экраны берут их оттуда.
 - Склад готовой продукции (`ready_goods_stock_json`, `ready_goods_history_json`, `ready_goods_sales_records_json`) пишется только патчами через `POST /api/compat/blob-patch`.
 - У заказов без разметки не меняется ни одна цифра; B2C-заказы работают как сейчас.
-- Реальную маржу и общую сумму реальной себестоимости видят все, кто видит заказ; разбивку с зарплатами — только при `App.canAccess('factual')`.
+- Реальную маржу и общую сумму реальной себестоимости видят все, кто видит заказ; строки зарплаты и «Косвенные» в разбивке — только при `App.isAdmin()`, как на странице «Факт».
 - Не менять сигнатуры `Calculator.recalculate/toJSON/loadOrder`, DOM-идентификаторы и селекторы смоуков; новых файлов в `js/` не создавать (`AGENTS.md`).
 - Версия: `v482` в 4 местах + `?v=482` у каждого изменённого `js/*.js` в `index.html`; `node tests/version-smoke.js`.
 - Тексты интерфейса по-русски; блок разметки раскрывается прямо под строкой, крупный текст.
@@ -27,7 +27,7 @@
 2. Скидка суммой больше выручки «клиенту» → скидка упирается в выручку «клиенту», ожидаемая выручка «на продажу» не трогается (Task 1).
 3. Перевод в «Готово» дважды (доска + план производства, повторный клик) → позиции на складе не задваиваются (Task 5).
 4. Возврат из «Готово», когда часть штук уже продана → статус не меняется, понятное сообщение (Task 5).
-5. По заказу нет табеля или статья «Факта» пустая → реальная себестоимость берёт план по этой статье с пометкой «по плану», а не 0 (Task 3).
+5. По заказу нет табеля или статья «Факта» пустая → реальная себестоимость берёт план по этой статье с пометкой «по плану», а не 0; табеля нет совсем → вся себестоимость плановая (`realTotal = planTotal`), статьи показывают, что есть в «Факте» (Task 3).
 
 ---
 
@@ -46,7 +46,7 @@
   - `getTirageFreeQty(allocation) -> number` (`partner + gift + sample`).
   - `calculateOrderSummary(...)` возвращает дополнительно `clientRevenue`, `stockRevenue`, `stockQty`, `freeQty`, `freeCost`.
 
-- [ ] **Step 1: Тест `normalize` — в `tests/tirage-allocation-smoke.js`** (загрузить `js/calculator.js` в `vm`-контекст с заглушкой `App = { params: {} }`):
+- [x] **Step 1: Тест `normalize` — в `tests/tirage-allocation-smoke.js`** (загрузить `js/calculator.js` в `vm`-контекст с заглушкой `App = { params: {} }`):
 
 ```js
 // всё клиенту по умолчанию
@@ -64,9 +64,9 @@ assert.deepEqual(normalizeTirageAllocation({ stock: -5, partner: 2.7 }, 10, 0).a
 assert.equal(normalizeTirageAllocation({ stock: 3 }, 0, 100).allocation.stock, 0);
 ```
 
-- [ ] **Step 2: Запустить** `node tests/tirage-allocation-smoke.js` → FAIL (`normalizeTirageAllocation is not defined`).
-- [ ] **Step 3: Реализовать** `TIRAGE_PARTS`, `normalizeTirageAllocation`, `hasTirageSplit`, `getTirageFreeQty` в `js/calculator.js`. Дробные — вниз до целого, отрицательные → 0; порядок урезания: `stock`, `gift`, `sample`, `partner`; `stock_price` по умолчанию = `defaultStockPrice`.
-- [ ] **Step 4: Тест денег** (параметры `{ taxRate: 0.07, commercialRate: 0.065, charityRate: 0.01, vatRate: 0.05 }` → удержание 0.855):
+- [x] **Step 2: Запустить** `node tests/tirage-allocation-smoke.js` → FAIL (`normalizeTirageAllocation is not defined`).
+- [x] **Step 3: Реализовать** `TIRAGE_PARTS`, `normalizeTirageAllocation`, `hasTirageSplit`, `getTirageFreeQty` в `js/calculator.js`. Дробные — вниз до целого, отрицательные → 0; порядок урезания: `stock`, `gift`, `sample`, `partner`; `stock_price` по умолчанию = `defaultStockPrice`.
+- [x] **Step 4: Тест денег** (параметры `{ taxRate: 0.07, commercialRate: 0.065, charityRate: 0.01, vatRate: 0.05 }` → удержание 0.855):
 
 ```js
 const lemonItem = { quantity: 100, sell_price_item: 5900, result: { costTotal: 971.35 },
@@ -91,11 +91,11 @@ const withHw = calculateOrderSummary([{ ...lemonItem, tirage_allocation: { clien
 assert.equal(withHw.totalRevenue, 40 * 5900 + 40 * 10);
 ```
 
-- [ ] **Step 5: Запустить** → FAIL.
-- [ ] **Step 6: Реализовать в `calculateOrderSummary`**: для изделия с разметкой — выручка `client × (цена + печать) + stock × stock_price`; заработок `client × margin(цена+печать) + stock × margin(stock_price) − free × costTotal` через `calculateActualMargin`; скидка считается от `totalRevenue − stockRevenue` и уменьшает только её; фурнитура/упаковка с `parent_item_index` — выручка и заработок по доле `client / quantity` родителя, остальная доля — только себестоимость. Без разметки код идёт ровно как сейчас.
-- [ ] **Step 7: `getOrderLiveCalculatorSnapshot`** — убедиться, что `tirage_allocation` из `item_data` доезжает до объектов изделий, которые уходят в `calculateOrderSummary`; тест: снимок заказа из строки с `item_data: { tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 } }` даёт выручку 177000.
-- [ ] **Step 8: Запустить** `node tests/tirage-allocation-smoke.js` → PASS; добавить его в `deploy-pages.yml`.
-- [ ] **Step 9: Commit** `Count only paid tirage in order revenue`.
+- [x] **Step 5: Запустить** → FAIL.
+- [x] **Step 6: Реализовать в `calculateOrderSummary`**: для изделия с разметкой — выручка `client × (цена + печать) + stock × stock_price`; заработок `client × margin(цена+печать) + stock × margin(stock_price) − free × costTotal` через `calculateActualMargin`; скидка считается от `totalRevenue − stockRevenue` и уменьшает только её; фурнитура/упаковка с `parent_item_index` — выручка и заработок по доле `client / quantity` родителя, остальная доля — только себестоимость. Без разметки код идёт ровно как сейчас.
+- [x] **Step 7: `getOrderLiveCalculatorSnapshot`** — убедиться, что `tirage_allocation` из `item_data` доезжает до объектов изделий, которые уходят в `calculateOrderSummary`; тест: снимок заказа из строки с `item_data: { tirage_allocation: { stock: 30, partner: 50, gift: 20, stock_price: 5900 } }` даёт выручку 177000.
+- [x] **Step 8: Запустить** `node tests/tirage-allocation-smoke.js` → PASS; добавить его в `deploy-pages.yml`.
+- [x] **Step 9: Commit** `Count only paid tirage in order revenue`.
 
 ### Task 2: Разметка в калькуляторе, сохранение, счёт и КП
 
@@ -108,13 +108,13 @@ assert.equal(withHw.totalRevenue, 40 * 5900 + 40 * 10);
 - Consumes: Task 1 (`normalizeTirageAllocation`, `hasTirageSplit`, `getTirageFreeQty`, поля сводки).
 - Produces: `item.tirage_allocation` в состоянии калькулятора и в `item_data`; `Calculator.renderTirageBlock(idx) -> string`, `Calculator.onTirageChange(idx, part, value)`, `Calculator.onTirageTextChange(idx, field, value)` (`field` ∈ `stock_price | partner_note | gift_note`), `Calculator.toggleTirageBlock(idx)`.
 
-- [ ] **Step 1: Тест**: строка с `quantity: 100`, разметка `{ stock: 30, partner: 50, gift: 20, stock_price: 5900, partner_note: 'художница' }` → `_collectItemsForSave()[0].tirage_allocation` равен нормализованной разметке; после `Calculator.loadOrder` с этим элементом `Calculator.items[0].tirage_allocation.partner_note === 'художница'`; строки счёта и КП для строки с `client: 40` дают `qty: 40`, при `client: 0` строки нет; `onNumChange(0, 'quantity', 60)` оставляет сумму частей 60.
-- [ ] **Step 2: Запустить** `node tests/order-flow-smoke.js` → FAIL.
-- [ ] **Step 3: Реализовать**: `getEmptyItem` — `tirage_allocation: null`; `_collectItemsForSave` — нормализованная разметка или `null`, если всё клиенту; изменение тиража перенормализует разметку и показывает под строкой «Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10»; счёт/КП берут `client`.
-- [ ] **Step 4: Блок «Тираж»** в `renderItemBlock`: свёрнуто — «Тираж: весь — клиенту ▸ разметить» или «клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 · в подарок 20»; развёрнуто под строкой — 5 полей количества, цена продажи, «кому» у партнёра и подарка; «Клиенту» только показывает остаток; поле не даёт ввести больше доступного. Скрыт, если `isNonCommercialProductionPurpose`/`leftover_assembly` или клиент «B2C».
-- [ ] **Step 5: Сводка калькулятора**: при разметке — подпись выручки «ожидаем, если продадим N шт.» и строка «Отдаём бесплатно: N шт. на X ₽ себестоимости»; рядом с маржой «план».
-- [ ] **Step 6: Запустить** `node tests/order-flow-smoke.js` → PASS.
-- [ ] **Step 7: Commit** `Let managers split a product line's tirage in the calculator`.
+- [x] **Step 1: Тест**: строка с `quantity: 100`, разметка `{ stock: 30, partner: 50, gift: 20, stock_price: 5900, partner_note: 'художница' }` → `_collectItemsForSave()[0].tirage_allocation` равен нормализованной разметке; после `Calculator.loadOrder` с этим элементом `Calculator.items[0].tirage_allocation.partner_note === 'художница'`; строки счёта и КП для строки с `client: 40` дают `qty: 40`, при `client: 0` строки нет; `onNumChange(0, 'quantity', 60)` оставляет сумму частей 60.
+- [x] **Step 2: Запустить** `node tests/order-flow-smoke.js` → FAIL.
+- [x] **Step 3: Реализовать**: `getEmptyItem` — `tirage_allocation: null`; `_collectItemsForSave` — нормализованная разметка или `null`, если всё клиенту; изменение тиража перенормализует разметку и показывает под строкой «Тираж уменьшился: на продажу 30 → 0, в подарок 20 → 10»; счёт/КП берут `client`.
+- [x] **Step 4: Блок «Тираж»** в `renderItemBlock`: свёрнуто — «Тираж: весь — клиенту ▸ разметить» или «клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 · в подарок 20»; развёрнуто под строкой — 5 полей количества, цена продажи, «кому» у партнёра и подарка; «Клиенту» только показывает остаток; поле не даёт ввести больше доступного. Скрыт, если `isNonCommercialProductionPurpose`/`leftover_assembly` или клиент «B2C».
+- [x] **Step 5: Сводка калькулятора**: при разметке — подпись выручки «ожидаем, если продадим N шт.» и строка «Отдаём бесплатно: N шт. на X ₽ себестоимости»; рядом с маржой «план».
+- [x] **Step 6: Запустить** `node tests/order-flow-smoke.js` → PASS.
+- [x] **Step 7: Commit** `Let managers split a product line's tirage in the calculator`.
 
 ### Task 3: Реальная себестоимость заказа и себестоимость складской штуки
 
@@ -127,10 +127,10 @@ assert.equal(withHw.totalRevenue, 40 * 5900 + 40 * 10);
 - Produces:
   - `REAL_COST_ROW_KEYS = ['salary_production', 'salary_trim', 'salary_assembly', 'salary_packaging', 'indirect_production', 'hardware_total', 'nfc_total', 'packaging_total', 'design_printing', 'plastic', 'molds', 'other']` (в `factual.js`; без налогов, коммерческого, благотворительности, доставки).
   - `Factual._buildRealCostBreakdown(planData, factData) -> { rows: [{ key, label, plan, fact, used, source: 'fact'|'plan', isSalary }], planTotal, realTotal, salaryReal }`
-  - `Factual.computeOrderRealCost(orderId) -> Promise<{ ...breakdown, hoursPlan, hoursFact, hasTimesheet } | null>` — сам догружает `this._entries` (`loadTimeEntries`) и `this._employees` (`loadEmployees`), если их нет; ничего не рисует.
+  - `Factual.computeOrderRealCost(orderId) -> Promise<{ ...breakdown, hoursPlan, hoursFact, hasTimesheet } | null>` — сам догружает `this._entries` (`loadTimeEntries`) и `this._employees` (`loadEmployees`), если их нет; ничего не рисует. Без табеля (`hasTimesheet: false`) `realTotal = planTotal` — вся себестоимость плановая (спека); по ней считают шапка карточки и склад.
   - `allocateRealCostToRows(rows: [{ key, planCost, paidQty }], realProductionCost) -> { [key]: unitCost }`
 
-- [ ] **Step 1: Тесты**:
+- [x] **Step 1: Тесты**:
 
 ```js
 // allocateRealCostToRows
@@ -148,10 +148,10 @@ assert.equal(b.realTotal, 3500 + 3000 + 1700); assert.equal(b.salaryReal, 3500);
 assert.equal(b.rows.some(r => r.key === 'taxes'), false);
 ```
 
-- [ ] **Step 2: Запустить** оба смоука → FAIL.
-- [ ] **Step 3: Реализовать** `allocateRealCostToRows` (доля = `planCost / Σ planCost`, при Σ = 0 — по `paidQty`; округление до копеек), `_buildRealCostBreakdown` (подписи из `Factual.ROWS`), `computeOrderRealCost` поверх `_ensureComputedOrder` (часы: план — `planHours`, факт — сумма `fact_hours_*`).
-- [ ] **Step 4: Запустить** → PASS. «Факт» берёт выручку из `total_revenue_plan`, которую калькулятор сохраняет из новой сводки, — его менять не нужно.
-- [ ] **Step 5: Commit** `Compute an order's real cost and split it across product lines`.
+- [x] **Step 2: Запустить** оба смоука → FAIL.
+- [x] **Step 3: Реализовать** `allocateRealCostToRows` (доля = `planCost / Σ planCost`, при Σ = 0 — по `paidQty`; округление до копеек), `_buildRealCostBreakdown` (подписи из `Factual.ROWS`), `computeOrderRealCost` поверх `_ensureComputedOrder` (часы: план — `planHours`, факт — сумма `fact_hours_*`).
+- [x] **Step 4: Запустить** → PASS. «Факт» берёт выручку из `total_revenue_plan`, которую калькулятор сохраняет из новой сводки, — его менять не нужно.
+- [x] **Step 5: Commit** `Compute an order's real cost and split it across product lines`.
 
 ### Task 4: Склад готовой продукции — запись патчами
 
@@ -163,11 +163,11 @@ assert.equal(b.rows.some(r => r.key === 'taxes'), false);
 **Interfaces:**
 - Produces: имена целей `ready_goods_stock | ready_goods_history | ready_goods_sales_records`; сигнатуры `saveReadyGoods/saveReadyGoodsHistory/saveSalesRecords` не меняются.
 
-- [ ] **Step 1: Тесты**: (api) `executeBlobPatch({ target: 'ready_goods_stock', patch: { upserts: [{ id: 7 }] } })` на пустом `settings` создаёт строку с `key: 'ready_goods_stock_json'`, `value` — строка `'[{"id":7}]'`; (смоук) две вкладки: A загрузила склад `[{id:1}]`, B добавила `{id:2}` и сохранила, A изменила `id:1` и сохранила → на сервере `[1, 2]`; после неудачной загрузки `saveReadyGoods` по-прежнему отклоняется.
-- [ ] **Step 2: Запустить** `cd ops/api && node --test test/compat-blob-patch.test.js` и `node tests/warehouse-blob-patch-smoke.js` → FAIL.
-- [ ] **Step 3: Реализовать.**
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Commit** `Write ready goods as patches`.
+- [x] **Step 1: Тесты**: (api) `executeBlobPatch({ target: 'ready_goods_stock', patch: { upserts: [{ id: 7 }] } })` на пустом `settings` создаёт строку с `key: 'ready_goods_stock_json'`, `value` — строка `'[{"id":7}]'`; (смоук) две вкладки: A загрузила склад `[{id:1}]`, B добавила `{id:2}` и сохранила, A изменила `id:1` и сохранила → на сервере `[1, 2]`; после неудачной загрузки `saveReadyGoods` по-прежнему отклоняется.
+- [x] **Step 2: Запустить** `cd ops/api && node --test test/compat-blob-patch.test.js` и `node tests/warehouse-blob-patch-smoke.js` → FAIL.
+- [x] **Step 3: Реализовать.**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Commit** `Write ready goods as patches`.
 
 ### Task 5: Перенос «на продажу» на склад, откат и пересчёт
 
@@ -180,13 +180,13 @@ assert.equal(b.rows.some(r => r.key === 'taxes'), false);
 
 **Interfaces:**
 - Consumes: Task 1 (`normalizeTirageAllocation`), Task 3 (`Factual.computeOrderRealCost`, `allocateRealCostToRows`), Task 4 (патчи).
-- Produces: позиция склада `{ id, product_name, order_name, order_id, order_item_number, source: 'tirage', location_type: 'our', qty, cost_per_unit, sale_price, added_at, added_by }`; `Warehouse.getOrderReadyGoodsSoldQty(orderId) -> Promise<number>`; `Warehouse.syncOrderReadyGoodsToTirage(orderId) -> Promise<{ ok, message }>`; `Warehouse.recalcOrderReadyGoodsCost(orderId) -> Promise<number>` (сколько позиций обновлено).
+- Produces: позиция склада `{ id, product_name, order_name, order_id, order_item_number, order_line_key, source: 'tirage', location_type: 'our', qty, cost_per_unit, sale_price, added_at, added_by }` (`order_line_key` — `line_key` разметки строки: калькулятор перенумеровывает строки, ключ остаётся); `Warehouse.getOrderReadyGoodsSoldQty(orderId) -> Promise<number>`; `Warehouse.syncOrderReadyGoodsToTirage(orderId) -> Promise<{ ok, message }>`; `Warehouse.recalcOrderReadyGoodsCost(orderId) -> Promise<number>` (сколько позиций обновлено; без ответа «Факта» — отказ `READY_GOODS_REAL_COST_UNAVAILABLE`, позиции не меняются).
 
-- [ ] **Step 1: Тест** (заглушки `loadOrder`, `Factual.computeOrderRealCost` → `{ realTotal: 121000 }`, склад в памяти): заказ «Лимон» с разметкой → `moveOrderToReadyGoods` добавляет одну позицию `qty: 30`, `cost_per_unit: 4033.33`, `sale_price: 5900`, `source: 'tirage'`; повторный вызов не добавляет вторую; B2C-заказ переносится как раньше (весь тираж, `cost_total`); заказ без разметки — 0 позиций; при продаже 5 штук `_ensureStatusTransitionAllowed(id, 'production_casting')` из «Готово» → не разрешено, текст «Уже продано 5 шт. со склада — заказ нельзя вернуть из «Готово»»; без продаж — откат снимает позицию; `recalcOrderReadyGoodsCost` при `realTotal: 150000` меняет `cost_per_unit` на 5000 и не трогает записи продаж.
-- [ ] **Step 2: Запустить** → FAIL.
-- [ ] **Step 3: Реализовать** перенос (позиция на строку с `stock > 0`, себестоимость штуки — `allocateRealCostToRows` по строкам: `planCost` = `cost_total × quantity` строки + её фурнитура/упаковка, `paidQty` = `client + stock`; без табеля — план), защиту от дублей (позиция с тем же `order_id` + `order_item_number` + `source: 'tirage'` уже есть → только сверка количества), запрет отката при продажах, синхронизацию при сохранении «Готово» (количество = `stock − продано`), пересчёт себестоимости непроданных.
-- [ ] **Step 4: Запустить** `node tests/order-flow-smoke.js` → PASS.
-- [ ] **Step 5: Commit** `Move the for-sale part of a tirage to ready goods at real cost`.
+- [x] **Step 1: Тест** (заглушки `loadOrder`, `Factual.computeOrderRealCost` → `{ realTotal: 121000 }`, склад в памяти): заказ «Лимон» с разметкой → `moveOrderToReadyGoods` добавляет одну позицию `qty: 30`, `cost_per_unit: 4033.33`, `sale_price: 5900`, `source: 'tirage'`; повторный вызов не добавляет вторую; B2C-заказ переносится как раньше (весь тираж, `cost_total`); заказ без разметки — 0 позиций; при продаже 5 штук `_ensureStatusTransitionAllowed(id, 'production_casting')` из «Готово» → не разрешено, текст «Уже продано 5 шт. со склада — заказ нельзя вернуть из «Готово»»; без продаж — откат снимает позицию; `recalcOrderReadyGoodsCost` при `realTotal: 150000` меняет `cost_per_unit` на 5000 и не трогает записи продаж.
+- [x] **Step 2: Запустить** → FAIL.
+- [x] **Step 3: Реализовать** перенос (позиция на строку с `stock > 0`, себестоимость штуки — `allocateRealCostToRows` по строкам: `planCost` = `cost_total × quantity` строки + её фурнитура/упаковка, `paidQty` = `client + stock`; без табеля — план), защиту от дублей (позиция с тем же `order_id`, `source: 'tirage'` и ключом строки уже есть → только сверка количества; позиция ищется по `order_line_key` = `line_key` разметки строки, у старых позиций без ключа — по `order_item_number`), запрет отката при продажах, синхронизацию при сохранении «Готово» (количество = `stock − продано`), пересчёт себестоимости непроданных.
+- [x] **Step 4: Запустить** `node tests/order-flow-smoke.js` → PASS.
+- [x] **Step 5: Commit** `Move the for-sale part of a tirage to ready goods at real cost`.
 
 ### Task 6: Карточка — честная шапка и блок «Тираж»
 
@@ -199,11 +199,11 @@ assert.equal(b.rows.some(r => r.key === 'taxes'), false);
 - Consumes: Task 1 (поля сводки), Task 3 (`Factual.computeOrderRealCost`), Task 5 (`getOrderReadyGoodsSoldQty`, `recalcOrderReadyGoodsCost`).
 - Produces: `OrderDetail.renderTirageInfo() -> string`, `OrderDetail.renderRealCostDetails(breakdown, canSeeSalary) -> string`.
 
-- [ ] **Step 1: Тест**: для «Лимона» (сводка из Task 1, реальная себестоимость `realTotal 121000` при плановой `planTotal 97135`) шапка показывает «177 000 ₽», подпись «ожидаем, если продадим 30 шт.», реальную маржу `round2((54200 − (121000 − 97135)) × 100 / 177000)` = 17.14% и «план 30.62%», часы «план 12.1 · табель 18», строку «Отдаём бесплатно: 70 шт. на 67 995 ₽ себестоимости»; карточка доски показывает маржу с подписью «план»; `renderRealCostDetails(b, false)` не содержит «ЗП», `renderRealCostDetails(b, true)` содержит «ЗП выливание»; блок «Тираж» показывает «клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 (художница) · в подарок 20» и, после переноса, «На складе 30 из 30 · заморожено 121 000 ₽ · продано 0»; кнопка «Пересчитать себестоимость» есть только при позициях на складе.
-- [ ] **Step 2: Запустить** → FAIL.
-- [ ] **Step 3: Реализовать** (реальная маржа = `(totalEarned − (realTotal − planTotal)) / totalRevenue`; без табеля — подпись «по плану»; разбивка — по клику, зарплатные строки только при `App.canAccess('factual')`).
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Commit** `Show honest money and the tirage split on the order card`.
+- [x] **Step 1: Тест**: для «Лимона» (сводка из Task 1, реальная себестоимость `realTotal 121000` при плановой `planTotal 97135`) шапка показывает «177 000 ₽», подпись «ожидаем, если продадим 30 шт.», реальную маржу `round2((54200 − (121000 − 97135)) × 100 / 177000)` = 17.14% и «план 30.62%», часы «план 12.1 · табель 18», строку «Отдаём бесплатно: 70 шт. на 67 995 ₽ себестоимости»; карточка доски показывает маржу с подписью «план»; `renderRealCostDetails(b, false)` не содержит «ЗП», `renderRealCostDetails(b, true)` содержит «ЗП выливание»; блок «Тираж» показывает «клиенту 0 · на продажу 30 по 5 900 ₽ · партнёру 50 (художница) · в подарок 20» и, после переноса, «На складе 30 из 30 · заморожено 121 000 ₽ · продано 0»; кнопка «Пересчитать себестоимость» есть только при позициях на складе.
+- [x] **Step 2: Запустить** → FAIL.
+- [x] **Step 3: Реализовать** (реальная маржа = `(totalEarned − (realTotal − planTotal)) / totalRevenue`; без табеля — подпись «по плану»; разбивка — по клику, строки зарплаты и «Косвенные» только при `App.isAdmin()`, как на странице «Факт»; общая сумма и реальная маржа видны всем).
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Commit** `Show honest money and the tirage split on the order card`.
 
 ### Task 7: Версия, полный прогон, PR
 
