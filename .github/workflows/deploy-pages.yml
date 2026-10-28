@@ -72,6 +72,7 @@ jobs:
           node tests/warehouse-reservations-churn-smoke.js
           node tests/tirage-allocation-smoke.js
           node tests/marketing-purpose-smoke.js
+          node tests/order-card-smoke.js
           node tests/factual-real-cost-smoke.js
           node tests/platform-client-smoke.js
           node tests/save-reliability-smoke.js

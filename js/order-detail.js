@@ -22,6 +22,446 @@ const HARDWARE_STATUSES = [
 
 // Plastic is always PP, print type is set at printing level — removed from UI
 
+// =============================================
+// Логика карточки заказа — чистые функции без DOM: этапы, доли тиража, метки склада, часы по
+// этапам, вердикт («лицо») с причинами и причины расхождения маржи. Правила — спецификация
+// docs/specs/2026-10-28-order-card-redesign.md («Вердикт»). Даты — строки YYYY-MM-DD, «сегодня»
+// передаётся снаружи. Тест: tests/order-card-smoke.js.
+// =============================================
+
+const OrderCardLogic = {
+    MONTHS_GENITIVE: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа',
+        'сентября', 'октября', 'ноября', 'декабря'],
+
+    // Строка этапов по порядку. «Образец» виден, только пока заказ — образец; печать, сборка и
+    // упаковка — если они есть в заказе (или заказ уже на этом этапе).
+    STAGE_STEPS: [
+        { value: 'draft', label: 'Черновик' },
+        { value: 'sample', label: 'Образец', onlyWhenCurrent: true },
+        { value: 'production_casting', label: 'Выливание' },
+        { value: 'production_printing', label: 'Печать', when: 'hasPrinting' },
+        { value: 'production_hardware', label: 'Сборка', when: 'hasHardware' },
+        { value: 'production_packaging', label: 'Упаковка', when: 'hasPackaging' },
+        { value: 'delivery', label: 'Доставка' },
+        { value: 'completed', label: 'Готово' },
+    ],
+    // Прежние статусы, которые строка этапов показывает как свои.
+    STATUS_ALIASES: { calculated: 'draft', production: 'production_casting', in_production: 'production_casting' },
+    // Где по табелю этап и где по статусу заказ: срезание — часть литья; доставка и «Готово» —
+    // дальше всех этапов табеля.
+    TIMESHEET_STAGE_LEVEL: { casting: 0, trim: 0, assembly: 1, packaging: 2 },
+    STATUS_STAGE_LEVEL: {
+        production_casting: 0, production_printing: 0, production_hardware: 1,
+        production_packaging: 2, delivery: 3, completed: 3,
+    },
+    // До упаковки: за 3 дня до срока такой заказ — риск.
+    BEFORE_PACKAGING: ['sample', 'production_casting', 'production_printing', 'production_hardware'],
+    PAID_STATUSES: ['paid_100', 'postpay_100'],
+    // Час цеха, когда зарплата этапа неизвестна, ₽ (ставка по плану), и полный час цеха с
+    // косвенными, ₽ — им сортируются причины без рублей (их рубли видит только администратор).
+    FALLBACK_SALARY_PER_HOUR: 550,
+    HOUR_COST_FOR_SORT: 4772,
+    EPS: 1e-9,
+
+    // ---------- даты и числа ----------
+
+    _isoParts(value) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? '').trim());
+        if (!match) return null;
+        const y = Number(match[1]);
+        const m = Number(match[2]);
+        const d = Number(match[3]);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        return { y, m, d };
+    },
+
+    _dayNumber(value) {
+        const parts = OrderCardLogic._isoParts(value);
+        return parts ? Math.round(Date.UTC(parts.y, parts.m - 1, parts.d) / 86400000) : null;
+    },
+
+    // Дней от `from` до `to` (обе даты — YYYY-MM-DD или начало ISO-времени); null без одной из них.
+    _daysBetween(from, to) {
+        const a = OrderCardLogic._dayNumber(from);
+        const b = OrderCardLogic._dayNumber(to);
+        return a === null || b === null ? null : b - a;
+    },
+
+    _today(value) {
+        if (OrderCardLogic._isoParts(value)) return String(value).trim().slice(0, 10);
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    },
+
+    _num(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    },
+
+    _finiteOrNull(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    },
+
+    _formatNumber(value, maxDigits) {
+        const n = OrderCardLogic._num(value);
+        return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: maxDigits }).format(n === 0 ? 0 : n);
+    },
+
+    // Часы до десятой: 12,1; 8.
+    _formatHours(value) {
+        return OrderCardLogic._formatNumber(value, 1);
+    },
+
+    // Проценты до десятой, через пробел: «30,1 %».
+    _formatPct(value) {
+        return `${OrderCardLogic._formatNumber(value, 1)} %`;
+    },
+
+    // '2026-10-26' → '26 октября'; пустая строка, если даты нет.
+    formatDayMonth(value) {
+        const parts = OrderCardLogic._isoParts(value);
+        return parts ? `${parts.d} ${OrderCardLogic.MONTHS_GENITIVE[parts.m - 1]}` : '';
+    },
+
+    _normalizeStatus(status) {
+        const key = String(status || '').trim();
+        return OrderCardLogic.STATUS_ALIASES[key] || key || 'draft';
+    },
+
+    // Подпись этапа строки этапов для статуса: «Выливание», «Готово»; '' — у отменённого.
+    stageLabel(status) {
+        const value = OrderCardLogic._normalizeStatus(status);
+        const step = OrderCardLogic.STAGE_STEPS.find(item => item.value === value);
+        return step ? step.label : '';
+    },
+
+    // Зарплатные строки и «Косвенные» в разбивке «Факта» — их видит только администратор.
+    isSalaryRow(row) {
+        return !!row && (row.isSalary === true || String(row.key || '').startsWith('salary_') || row.key === 'indirect_production');
+    },
+
+    // ---------- этапы ----------
+
+    // { list: [{ value, label, state: 'done'|'current'|'todo' }], next: { value, label } | null }.
+    // У отменённого заказа текущего этапа и следующего нет.
+    stages({ status, hasPrinting = false, hasHardware = false, hasPackaging = false } = {}) {
+        const current = OrderCardLogic._normalizeStatus(status);
+        const flags = { hasPrinting: !!hasPrinting, hasHardware: !!hasHardware, hasPackaging: !!hasPackaging };
+        const steps = OrderCardLogic.STAGE_STEPS.filter(step => step.value === current
+            || (!step.onlyWhenCurrent && (!step.when || flags[step.when])));
+        const currentIndex = steps.findIndex(step => step.value === current);
+        const list = steps.map((step, index) => ({
+            value: step.value,
+            label: step.label,
+            state: currentIndex < 0 || index > currentIndex ? 'todo' : (index === currentIndex ? 'current' : 'done'),
+        }));
+        const nextStep = currentIndex >= 0 && currentIndex < steps.length - 1 ? steps[currentIndex + 1] : null;
+        return { list, next: nextStep ? { value: nextStep.value, label: nextStep.label } : null };
+    },
+
+    // ---------- часы по этапам ----------
+
+    _stageRow(stage) {
+        const num = OrderCardLogic._num;
+        return {
+            key: stage.key,
+            label: stage.label,
+            planHours: round2(num(stage.planHours)),
+            factHours: round2(num(stage.factHours)),
+            salary: round2(num(stage.salary)),
+            people: (Array.isArray(stage.people) ? stage.people : [])
+                .map(person => ({ name: String(person?.name || ''), hours: round2(num(person?.hours)) })),
+            firstDate: stage.firstDate || null,
+            lastDate: stage.lastDate || null,
+        };
+    },
+
+    // Литьё и срезание одной строкой: часы, зарплата, люди (по убыванию часов) и даты вместе.
+    _mergeCastingAndTrim(casting, trim) {
+        const hoursByName = new Map();
+        [...casting.people, ...trim.people].forEach(person => {
+            if (!person.name) return;
+            hoursByName.set(person.name, round2((hoursByName.get(person.name) || 0) + person.hours));
+        });
+        const people = [...hoursByName.entries()]
+            .map(([name, hours]) => ({ name, hours }))
+            .sort((a, b) => b.hours - a.hours);
+        const firstDates = [casting.firstDate, trim.firstDate].filter(Boolean).sort();
+        const lastDates = [casting.lastDate, trim.lastDate].filter(Boolean).sort();
+        return {
+            key: 'casting',
+            label: 'Литьё и срезание',
+            planHours: round2(casting.planHours + trim.planHours),
+            factHours: round2(casting.factHours + trim.factHours),
+            salary: round2(casting.salary + trim.salary),
+            people,
+            firstDate: firstDates[0] || null,
+            lastDate: lastDates[lastDates.length - 1] || null,
+        };
+    },
+
+    // Строки «Как идёт» из `stages` «Факта» (computeOrderRealCost): срезание без своего плана
+    // показывается вместе с литьём; этапы без плана и без часов не выводятся.
+    // Строка: { key, label, planHours, factHours, salary, people, firstDate, lastDate }.
+    stageHoursRows(stages) {
+        const list = (Array.isArray(stages) ? stages : []).filter(stage => stage && stage.key);
+        const castingStage = list.find(stage => stage.key === 'casting');
+        const trimStage = list.find(stage => stage.key === 'trim');
+        const mergeTrim = !!castingStage && !!trimStage && !(OrderCardLogic._num(trimStage.planHours) > 0);
+        const rows = [];
+        list.forEach(stage => {
+            if (mergeTrim && stage === trimStage) return;
+            if (mergeTrim && stage === castingStage) {
+                rows.push(OrderCardLogic._mergeCastingAndTrim(OrderCardLogic._stageRow(castingStage), OrderCardLogic._stageRow(trimStage)));
+                return;
+            }
+            rows.push(OrderCardLogic._stageRow(stage));
+        });
+        return rows.filter(row => row.planHours > 0 || row.factHours > 0);
+    },
+
+    // Подпись самого дальнего этапа табеля с часами, который дальше этапа статуса, или null:
+    // «по табелю уже идёт сборка, а статус — выливание».
+    timesheetAhead({ status, stageRows } = {}) {
+        const statusLevel = OrderCardLogic.STATUS_STAGE_LEVEL[OrderCardLogic._normalizeStatus(status)];
+        if (statusLevel === undefined) return null;
+        let furthest = null;
+        (Array.isArray(stageRows) ? stageRows : []).forEach(row => {
+            const level = OrderCardLogic.TIMESHEET_STAGE_LEVEL[row?.key];
+            if (level === undefined || level <= statusLevel || !(OrderCardLogic._num(row.factHours) > 0)) return;
+            if (!furthest || level >= furthest.level) furthest = { level, label: row.label };
+        });
+        return furthest ? furthest.label : null;
+    },
+
+    // ---------- тип заказа и как продаём ----------
+
+    // Доли тиража: [{ key, label, qty, how }], key ∈ commercial|stock|partner|marketing|rework|b2c.
+    // tirageLines — строки с разметкой ({ name, quantity, split }, OrderDetail._collectTirageLines),
+    // products — все изделия заказа ({ quantity }), по ним считается тираж (без них — по строкам
+    // разметки); штуки без разметки — клиенту.
+    typeParts({ purpose, clientName, tirageLines, products, stockPrice } = {}) {
+        const kind = normalizeProductionPurpose(purpose);
+        const count = value => Math.max(0, Math.round(OrderCardLogic._num(value)));
+        const lines = (Array.isArray(tirageLines) ? tirageLines : []).filter(Boolean);
+        const productsQty = (Array.isArray(products) ? products : [])
+            .reduce((sum, product) => sum + count(product?.quantity ?? product?.qty), 0);
+        const linesQty = lines.reduce((sum, line) => sum + count(line.quantity), 0);
+        const totalQty = productsQty > 0 ? productsQty : linesQty;
+        const client = String(clientName || '').trim();
+        const whole = (key, label, how) => (totalQty > 0 ? [{ key, label, qty: totalQty, how }] : []);
+
+        if (kind === 'marketing') return whole('marketing', 'Маркетинг', 'дарим, не продаём');
+        if (kind === 'stock_sample') return whole('stock', 'Сток', 'делаем на склад');
+        if (kind === 'rework') return whole('rework', 'Переделка брака', 'переделываем брак');
+        if (isB2CClientName(client)) return whole('b2c', 'B2C', 'всё на склад готовой продукции');
+
+        const splits = lines.map(line => line.split).filter(split => split && typeof split === 'object');
+        const sum = part => splits.reduce((total, split) => total + count(split[part]), 0);
+        const notes = field => [...new Set(splits.map(split => String(split[field] || '').trim()).filter(Boolean))].join(', ');
+        const withNote = (text, note) => (note ? `${text} — ${note}` : text);
+        const stock = sum('stock');
+        const partner = sum('partner');
+        const marketing = sum('gift') + sum('sample');
+        const commercial = Math.max(0, totalQty - stock - partner - marketing);
+        const ownPrice = OrderCardLogic._num(stockPrice);
+        const linePrice = OrderCardLogic._num((splits.find(split => count(split.stock) > 0) || {}).stock_price);
+        const price = ownPrice > 0 ? ownPrice : linePrice;
+        return [
+            { key: 'commercial', label: 'Коммерция', qty: commercial, how: withNote('по счёту клиенту', client) },
+            { key: 'stock', label: 'Сток', qty: stock, how: price > 0 ? `продаём сами со склада по ${formatRub(price)}` : 'продаём сами со склада' },
+            { key: 'partner', label: 'Партнёру', qty: partner, how: withNote('бесплатно', notes('partner_note')) },
+            { key: 'marketing', label: 'Маркетинг', qty: marketing, how: withNote('дарим', notes('gift_note')) },
+        ].filter(part => part.qty > 0);
+    },
+
+    // ---------- склад ----------
+
+    // Метка строки фурнитуры/упаковки (строки OrderDetail.renderHardwareTab): нужно — targetQty,
+    // а без него plannedQty; резерв — currentReserveQty; свободно на складе — availableQty.
+    stockLabel(row) {
+        const r = row || {};
+        const num = OrderCardLogic._num;
+        const eps = 1e-6;
+        const need = Math.max(0, num(r.targetQty) || num(r.plannedQty));
+        const reserve = Math.max(0, num(r.currentReserveQty));
+        const free = Math.max(0, num(r.availableQty));
+        const qty = value => OrderCardLogic._formatNumber(value, 2);
+        if (r.ready) return { tone: 'green', text: 'собрано, списано' };
+        if (reserve + eps >= need) return { tone: 'blue', text: `в резерве · на складе ${qty(free)}` };
+        if (reserve + free + eps >= need) return { tone: 'gray', text: `есть на складе ${qty(free)}` };
+        return { tone: 'red', text: `не хватает ${qty(Math.ceil(need - reserve - free - eps))}` };
+    },
+
+    // ---------- вердикт ----------
+
+    // { tone: 'green'|'yellow'|'red'|'gray', verdict, reasons (до 4, сначала самые серьёзные) }.
+    health(input = {}) {
+        const status = OrderCardLogic._normalizeStatus(input.status);
+        const today = OrderCardLogic._today(input.today);
+        if (status === 'cancelled' || status === 'deleted') return { tone: 'gray', verdict: 'Отменён', reasons: [] };
+        if (status === 'draft') {
+            const sinceStart = OrderCardLogic._daysBetween(input.deadlineStart, today);
+            if (sinceStart !== null && sinceStart > 0) {
+                return {
+                    tone: 'yellow',
+                    verdict: 'Пора запускать',
+                    reasons: [`Старт по плану был ${OrderCardLogic.formatDayMonth(input.deadlineStart)}, заказ ещё черновик.`],
+                };
+            }
+            return { tone: 'gray', verdict: 'Черновик', reasons: [] };
+        }
+        if (status === 'completed') return OrderCardLogic._healthCompleted(input);
+        return OrderCardLogic._healthInWork(input, status, today);
+    },
+
+    // Образец, производство, доставка.
+    _healthInWork(input, status, today) {
+        const L = OrderCardLogic;
+        const red = [];
+        const yellow = [];
+        const good = [];
+        const daysLeft = L._daysBetween(today, input.deadlineEnd);
+        const hoursPlan = L._num(input.hoursPlan);
+        const hoursFact = L._num(input.hoursFact);
+        const stageLabel = input.statusStageLabel || L.stageLabel(status);
+        const hoursText = `Часов по табелю ${L._formatHours(hoursFact)} вместо ${L._formatHours(hoursPlan)}.`;
+        const overdue = daysLeft !== null && daysLeft < 0;
+        const hoursRed = hoursPlan > 2 && hoursFact > hoursPlan * 1.5 + L.EPS;
+        const hoursYellow = !hoursRed && hoursPlan > 0 && hoursFact > hoursPlan * 1.15 + L.EPS;
+        const shortage = (Array.isArray(input.stock?.shortageNames) ? input.stock.shortageNames : [])
+            .map(name => String(name || '').trim()).filter(Boolean);
+        const paymentStatus = String(input.paymentStatus || '');
+
+        if (overdue) red.push(`Срок прошёл ${L.formatDayMonth(input.deadlineEnd)}.`);
+        if (hoursRed) red.push(hoursText);
+        if (!overdue && daysLeft !== null && daysLeft <= 3 && L.BEFORE_PACKAGING.includes(status)) {
+            yellow.push(`До срока ${daysLeft} дн., а заказ ещё на этапе «${stageLabel}».`);
+        }
+        if (hoursYellow) yellow.push(hoursText);
+        if (shortage.length) yellow.push(`На складе не хватает: ${shortage.join(', ')}.`);
+        if (input.timesheetStageLabel) yellow.push(`По табелю уже идёт «${input.timesheetStageLabel}», а в статусе — «${stageLabel}».`);
+        if (input.notesEmpty) yellow.push('Нет ТЗ для цеха.');
+        if (L._num(input.clientQty) > 0 && (!paymentStatus || paymentStatus === 'not_sent')) yellow.push('Счёт клиенту не выставлен.');
+        if (input.partnerWithoutNote) yellow.push('Не указано, кому уходит партнёрская доля.');
+
+        if (red.length) return { tone: 'red', verdict: 'Горит', reasons: [...red, ...yellow].slice(0, 4) };
+        if (yellow.length) return { tone: 'yellow', verdict: 'Есть риски', reasons: yellow.slice(0, 4) };
+
+        if (paymentStatus === 'paid_100') good.push('Оплачено 100 %.');
+        if (daysLeft !== null) good.push(`До срока ${daysLeft} дн.`);
+        if (hoursPlan > 0 && hoursFact > 0) good.push(`По часам сделано ${Math.round((hoursFact / hoursPlan) * 100)} %.`);
+        return { tone: 'green', verdict: 'Идёт по плану', reasons: good.slice(0, 4) };
+    },
+
+    // «Готово»: опоздание — дата сдачи (completedAt) против срока (deadlineEnd).
+    _healthCompleted(input) {
+        const L = OrderCardLogic;
+        const red = [];
+        const yellow = [];
+        const good = [];
+        const lateDays = L._daysBetween(input.deadlineEnd, input.completedAt);
+        const late = lateDays !== null && lateDays > 0;
+        const lateText = late
+            ? `Сдали ${L.formatDayMonth(input.completedAt)}, срок был ${L.formatDayMonth(input.deadlineEnd)} — на ${lateDays} дн. позже.`
+            : '';
+        const marginPlan = L._finiteOrNull(input.marginPlan);
+        const marginNow = L._finiteOrNull(input.marginNow);
+        const marginBad = !isNonCommercialProductionPurpose(input.purpose)
+            && marginPlan !== null && marginNow !== null && marginPlan - marginNow > 10 + L.EPS;
+        const paymentStatus = String(input.paymentStatus || '');
+        const unpaid = L._num(input.clientQty) > 0 && !L.PAID_STATUSES.includes(paymentStatus);
+        const paymentLabel = (PAYMENT_STATUSES.find(item => item.key === paymentStatus) || PAYMENT_STATUSES[0]).label;
+        const noTimesheet = !input.hasTimesheet;
+        const missingStages = noTimesheet ? [] : (Array.isArray(input.stageRows) ? input.stageRows : [])
+            .filter(row => row && L._num(row.planHours) > 0 && !(L._num(row.factHours) > 0));
+
+        if (late && lateDays > 7) red.push(lateText);
+        if (marginBad) red.push(`Маржа ${L._formatPct(marginNow)} вместо ${L._formatPct(marginPlan)}.`);
+        if (late && lateDays <= 7) yellow.push(lateText);
+        if (unpaid) yellow.push(`Деньги не пришли: «${paymentLabel}».`);
+        if (noTimesheet) yellow.push('В табель не внесли ни часа.');
+        missingStages.forEach(row => yellow.push(`Этап «${row.label}» в табель не внесли.`));
+        if (lateDays !== null && !late) good.push('Сдали в срок.');
+        if (paymentStatus === 'paid_100') good.push('Оплачено 100 %.');
+
+        const reasons = [...red, ...yellow, ...good].slice(0, 4);
+        if (red.length) return { tone: 'red', verdict: 'Закрыт плохо', reasons };
+        if (late) return { tone: 'yellow', verdict: 'Сдали с опозданием', reasons };
+        if (unpaid) return { tone: 'yellow', verdict: 'Сдали, ждём деньги', reasons };
+        if (yellow.length) return { tone: 'yellow', verdict: 'Закрыт с вопросами', reasons };
+        return { tone: 'green', verdict: 'Закрыт хорошо', reasons };
+    },
+
+    // ---------- почему маржа другая ----------
+
+    // { planPct, nowPct, deltaPp, deltaRub, reasons: [{ text, rub }] } — до 3 причин по модулю ₽.
+    // deltaRub = planTotal − realTotal: на сколько больше (+) или меньше (−) заказ заработает.
+    // rub у причины — тоже изменение заработка. Этап — когда часов по табелю больше или меньше
+    // плана на 0,5 ч и больше; этап без часов в табеле не причина: «Факт» считает его по плану.
+    // Рубли этапа (зарплата и косвенные) — только при canSeeSalary, иначе null. Статья
+    // себестоимости (кроме зарплаты и косвенных) — когда «взято в расчёт» отличается от плана на
+    // max(500 ₽, 2 % плана статьи). Вход — поля realCost «Факта» по отдельности (rows, planTotal,
+    // realTotal, indirectPerHour) или сам realCost.
+    marginReasons(input = {}) {
+        const L = OrderCardLogic;
+        const real = input.realCost && typeof input.realCost === 'object' ? input.realCost : {};
+        const rows = Array.isArray(input.rows) ? input.rows : (Array.isArray(real.rows) ? real.rows : []);
+        const stageRows = Array.isArray(input.stageRows) ? input.stageRows : [];
+        const planTotal = L._finiteOrNull(input.planTotal ?? real.planTotal);
+        const realTotal = L._finiteOrNull(input.realTotal ?? real.realTotal);
+        const indirectPerHour = L._num(input.indirectPerHour ?? real.indirectPerHour);
+        const planPct = L._finiteOrNull(input.planPct);
+        const nowPct = L._finiteOrNull(input.nowPct);
+        const canSeeSalary = !!input.canSeeSalary;
+        const hasTimesheet = input.hasTimesheet ?? real.hasTimesheet;
+        const candidates = [];
+
+        // Без табеля «Факт» берёт всю себестоимость по плану — объяснять нечего.
+        if (hasTimesheet !== false) {
+            stageRows.forEach(row => {
+                if (!row) return;
+                const fact = L._num(row.factHours);
+                const plan = L._num(row.planHours);
+                if (!(fact > 0)) return;
+                const deltaHours = round2(fact - plan);
+                if (Math.abs(deltaHours) < 0.5 - L.EPS) return;
+                const salary = L._num(row.salary);
+                const salaryPerHour = salary > 0 ? salary / fact : L.FALLBACK_SALARY_PER_HOUR;
+                const rub = Math.round(-deltaHours * (salaryPerHour + indirectPerHour));
+                candidates.push({
+                    text: `${row.label}: ${L._formatHours(fact)} ч вместо ${L._formatHours(plan)}`,
+                    rub: canSeeSalary ? rub : null,
+                    weight: canSeeSalary ? Math.abs(rub) : Math.abs(deltaHours) * L.HOUR_COST_FOR_SORT,
+                });
+            });
+            rows.forEach(row => {
+                if (!row || L.isSalaryRow(row)) return;
+                const plan = L._num(row.plan);
+                const used = L._num(row.used);
+                const diff = round2(used - plan);
+                if (Math.abs(diff) < Math.max(500, Math.abs(plan) * 0.02) - L.EPS) return;
+                const rub = Math.round(-diff);
+                candidates.push({
+                    text: `${row.label || row.key}: ${formatRub(Math.round(used))} вместо ${formatRub(Math.round(plan))}`,
+                    rub,
+                    weight: Math.abs(rub),
+                });
+            });
+        }
+        candidates.sort((a, b) => b.weight - a.weight);
+        return {
+            planPct,
+            nowPct,
+            deltaPp: planPct !== null && nowPct !== null ? round2(nowPct - planPct) : null,
+            deltaRub: planTotal !== null && realTotal !== null ? Math.round(planTotal - realTotal) : null,
+            reasons: candidates.slice(0, 3).map(({ text, rub }) => ({ text, rub })),
+        };
+    },
+};
+
 const OrderDetail = {
     currentOrder: null,
     currentItems: [],
@@ -355,7 +795,7 @@ const OrderDetail = {
     // Строки, которые страница «Факт» прячет от не-администраторов: зарплата по этапам и
     // «Косвенные» (часы × косвенные за час). Тот же признак, что у страницы.
     _isSalaryGatedRow(row) {
-        return !!row && (row.isSalary === true || String(row.key || '').startsWith('salary_') || row.key === 'indirect_production');
+        return OrderCardLogic.isSalaryRow(row);
     },
 
     // «Факт» считает заказ по свежему табелю — один раз на открытие карточки (и ещё раз, когда
