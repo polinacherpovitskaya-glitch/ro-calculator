@@ -5183,6 +5183,7 @@ async function smokeProductionPlanCompletedGuard(context) {
         globalThis.__planLoadCount = 0;
         App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
         Orders._syncWarehouseByStatus = async () => { throw new Error('status sync should not run when production plan completed is blocked'); };
+        Orders._syncReadyGoodsByStatus = async () => { throw new Error('ready goods sync should not run when production plan completed is blocked'); };
         Orders.addChangeRecord = async () => { throw new Error('change record should not run when production plan completed is blocked'); };
         ProductionPlan.load = async () => { globalThis.__planLoadCount += 1; };
         ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
@@ -5225,8 +5226,10 @@ async function smokeProductionPlanCompletedGuard(context) {
         globalThis.__toasts = [];
         globalThis.__planLoadCount = 0;
         globalThis.__warehouseSyncCalls = [];
+        globalThis.__readyGoodsSyncCalls = [];
         globalThis.__changeRecordCalls = [];
         Orders._syncWarehouseByStatus = async (...args) => { globalThis.__warehouseSyncCalls.push(args); };
+        Orders._syncReadyGoodsByStatus = async (...args) => { globalThis.__readyGoodsSyncCalls.push(args); };
         Orders.addChangeRecord = async (...args) => { globalThis.__changeRecordCalls.push(args); };
         ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
     `, context);
@@ -5238,6 +5241,11 @@ async function smokeProductionPlanCompletedGuard(context) {
     assert.equal(vm.runInContext(`globalThis.__planLoadCount`, context), 1);
     assert.equal((clone(vm.runInContext(`globalThis.__warehouseSyncCalls`, context)) || []).length, 1);
     assert.equal((clone(vm.runInContext(`globalThis.__changeRecordCalls`, context)) || []).length, 1);
+    // Готовая продукция синхронизируется и при смене статуса из плана производства.
+    const readyGoodsSyncCalls = clone(vm.runInContext(`globalThis.__readyGoodsSyncCalls`, context)) || [];
+    assert.equal(readyGoodsSyncCalls.length, 1);
+    assert.equal(readyGoodsSyncCalls[0][0], 91);
+    assert.deepEqual(readyGoodsSyncCalls[0].slice(2), ['delivery', 'completed']);
 }
 
 async function smokePendantWarehouseDemandSync(context) {
@@ -10477,6 +10485,75 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
     }
 }
 
+// План производства меняет статус так же, как доска: «Готово» переносит «на продажу» на склад,
+// возврат с проданным запрещён, без продаж — снимает позицию.
+async function smokeProductionPlanStatusSyncsReadyGoods(context) {
+    if (!vm.runInContext(`typeof ProductionPlan !== 'undefined'`, context)) {
+        runScript(context, 'js/production_plan.js');
+    }
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'updateOrderStatus'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const order = lemonOrderData(9501, { order: { status: 'delivery' } });
+    context.loadOrder = async () => clone(order);
+    context.__statusWrites = [];
+    context.updateOrderStatus = async (orderId, status) => { context.__statusWrites.push({ orderId: Number(orderId), status: String(status) }); };
+    context.Factual = { async computeOrderRealCost() { return { realTotal: 121000 }; } };
+    context.__toasts = [];
+    context.__warehouseSyncs = [];
+    context.__changeRecords = [];
+    vm.runInContext(`
+        globalThis.__planReadyGoodsOriginals = {
+            toast: App.toast,
+            syncWarehouse: Orders._syncWarehouseByStatus,
+            addChangeRecord: Orders.addChangeRecord,
+            load: ProductionPlan.load,
+            allRows: ProductionPlan.allRows,
+        };
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Orders._syncWarehouseByStatus = async (...args) => { globalThis.__warehouseSyncs.push(args); };
+        Orders.addChangeRecord = async (...args) => { globalThis.__changeRecords.push(args); };
+        ProductionPlan.load = async () => {};
+        ProductionPlan.allRows = [{ id: 9501, status: 'delivery', orderName: 'Лимон' }];
+    `, context);
+    const positions = () => base.lists.stock.filter(row => Number(row.order_id) === 9501);
+
+    try {
+        await vm.runInContext('ProductionPlan.goNextStage(9501)', context);
+        assert.deepEqual(clone(context.__statusWrites), [{ orderId: 9501, status: 'completed' }]);
+        assert.deepEqual(positions().map(row => row.qty), [30], '«на продажу» is on the stock after «Готово» from the plan');
+        assert.equal(context.__warehouseSyncs.length, 1);
+        assert.deepEqual(clone(context.__warehouseSyncs[0]).slice(0, 4), [9501, 'delivery', 'completed', 'Лимон']);
+        assert.equal(context.__changeRecords.length, 1);
+        assert.ok(context.__toasts.includes('1 товар(ов) → Готовая продукция'));
+        assert.equal(vm.runInContext('ProductionPlan.allRows[0].status', context), 'completed');
+
+        // Продали 5: план производства не вернёт заказ из «Готово».
+        base.lists.sales = [{ id: 3, ready_goods_id: positions()[0].id, product_name: 'Лимон', qty: 5, cost_per_unit: 4033.33 }];
+        base.lists.stock = base.lists.stock.map(row => (Number(row.order_id) === 9501 ? { ...row, qty: 25 } : row));
+        context.__toasts = [];
+        await vm.runInContext(`ProductionPlan.setOrderStageStatus(9501, 'production_casting')`, context);
+        assert.equal(context.__statusWrites.length, 1, 'the status is not written');
+        assert.deepEqual(clone(context.__toasts), ['Уже продано 5 шт. со склада — заказ нельзя вернуть из «Готово»']);
+        assert.deepEqual(positions().map(row => row.qty), [25]);
+
+        // Без продаж возврат из плана снимает позицию.
+        base.lists.sales = [];
+        await vm.runInContext(`ProductionPlan.setOrderStageStatus(9501, 'production_casting')`, context);
+        assert.deepEqual(clone(context.__statusWrites)[1], { orderId: 9501, status: 'production_casting' });
+        assert.deepEqual(positions(), []);
+    } finally {
+        Object.assign(context, originals);
+        delete context.Factual;
+        vm.runInContext(`
+            App.toast = globalThis.__planReadyGoodsOriginals.toast;
+            Orders._syncWarehouseByStatus = globalThis.__planReadyGoodsOriginals.syncWarehouse;
+            Orders.addChangeRecord = globalThis.__planReadyGoodsOriginals.addChangeRecord;
+            ProductionPlan.load = globalThis.__planReadyGoodsOriginals.load;
+            ProductionPlan.allRows = globalThis.__planReadyGoodsOriginals.allRows;
+        `, context);
+    }
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -10557,6 +10634,7 @@ async function main() {
     await smokeTirageReadyGoodsTransfer(context);
     await smokeTirageReadyGoodsSyncToSplit(context);
     await smokeTirageCompletedOrderSaveFollowsReadyGoods(context);
+    await smokeProductionPlanStatusSyncsReadyGoods(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);
