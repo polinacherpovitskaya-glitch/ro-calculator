@@ -137,7 +137,9 @@ export function achievement(fact, thresholds, direction = 'higher', ladder = DEF
   return Math.min(cap, lMax + (lMax - lTarget) * ((x - c) / (c - b)));
 }
 
-const NON_COMMERCIAL = new Set(['rework', 'stock_sample']);
+const NON_COMMERCIAL = new Set(['rework', 'stock_sample', 'marketing']);
+// Внутренняя работа цеха (сток, маркетинг): в зачёт только с отметкой, в проданные часы не идёт.
+const INTERNAL = new Set(['stock_sample', 'marketing']);
 
 export function orderPurpose(order) {
   const key = String(order?.production_purpose || '').trim().toLowerCase();
@@ -281,7 +283,7 @@ export function computeProductionPeriod(input) {
     const hoursPlan = num(order.total_hours_plan);
     const hoursFact = sumHours(entries);
     const deadline = day(order.deadline);
-    const isStock = purpose === 'stock_sample';
+    const isStock = INTERNAL.has(purpose);
     const approved = isStock ? approvals.has(String(order.id)) : null;
     const onTime = deadline ? completion.date <= deadline : null;
     const included = hoursPlan > 0 && (!isStock || approved);
@@ -325,7 +327,7 @@ export function computeProductionPeriod(input) {
     if (!order) continue;
     const purpose = orderPurpose(order);
     if (purpose === 'rework') reworkHours += num(entry.hours);
-    else if (purpose !== 'stock_sample') commercialPeriodHours += num(entry.hours);
+    else if (!INTERNAL.has(purpose)) commercialPeriodHours += num(entry.hours);
   }
 
   // Проданное, но ещё не сделанное: коммерческие заказы с дедлайном в периоде,
