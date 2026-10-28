@@ -10925,6 +10925,20 @@ function lemonRealCost(overrides = {}) {
     };
 }
 
+// Без табеля вся себестоимость заказа плановая — так её отдаёт Factual.computeOrderRealCost.
+const NO_TIMESHEET_NOTE = 'Табеля по заказу нет — вся себестоимость взята по плану.';
+const FACT_ROWS_ASIDE_NOTE = 'Факт по статьям — для справки, в итог не входит.';
+
+// Табеля нет, но ФинТабло уже дал факт по фурнитуре: статья его показывает, итог — план.
+function lemonNoTimesheetWithFinTabloFact() {
+    const cost = lemonPlanOnlyCost();
+    return {
+        ...cost,
+        rows: cost.rows.map(row => (row.key === 'hardware_total' ? { ...row, fact: 28865, used: 28865, source: 'fact' } : row)),
+        realTotal: cost.planTotal,
+    };
+}
+
 // По заказу нет табеля: «Факт» берёт плановое значение каждой статьи.
 function lemonPlanOnlyCost() {
     const cost = lemonRealCost();
@@ -11078,16 +11092,31 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         const noSheetRowsHidden = statsText();
         assert.ok(noSheetRowsHidden.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetRowsHidden);
         assert.ok(!noSheetRowsHidden.includes('ЗП') && !noSheetRowsHidden.includes('Косвенные'), noSheetRowsHidden);
-        assert.ok(noSheetRowsHidden.includes('Табеля по заказу нет — зарплата и косвенные взяты по плану.'), noSheetRowsHidden);
+        assert.ok(noSheetRowsHidden.includes(NO_TIMESHEET_NOTE), noSheetRowsHidden);
+        assert.ok(!noSheetRowsHidden.includes(FACT_ROWS_ASIDE_NOTE), 'every row is the plan — nothing to explain');
         run(`App.isAdmin = () => true`);
         run('OrderDetail.renderStats()');
         const noSheetRows = statsText();
         assert.ok(noSheetRows.includes('ЗП выливание 30 000 ₽ 30 000 ₽ по плану'), noSheetRows);
         assert.ok(noSheetRows.includes('Косвенные 12 000 ₽ 12 000 ₽ по плану'), noSheetRows);
         assert.ok(!noSheetRows.includes('по факту'), noSheetRows);
-        assert.ok(noSheetRows.includes('Табеля по заказу нет — зарплата и косвенные взяты по плану.'), noSheetRows);
+        assert.ok(noSheetRows.includes(NO_TIMESHEET_NOTE), noSheetRows);
         run('OrderDetail.toggleRealCostDetails()');
         run(`App.isAdmin = () => false`);
+
+        // 4a. Табеля нет, а ФинТабло уже дал факт по фурнитуре. Вся себестоимость — план (спека): шапка
+        // и реальная маржа по плану; в разбивке статья показывает факт, итог — план, и это сказано.
+        context.__realCosts[9601] = lemonNoTimesheetWithFinTabloFact();
+        await run('OrderDetail.loadRealCost()');
+        const noSheetFact = statsText();
+        assert.ok(noSheetFact.includes('Маржа 30,6% по плану'), noSheetFact);
+        assert.ok(noSheetFact.includes('Себестоимость 97 135 ₽ по плану'), noSheetFact);
+        run('OrderDetail.toggleRealCostDetails()');
+        const noSheetFactRows = statsText();
+        assert.ok(noSheetFactRows.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), noSheetFactRows);
+        assert.ok(noSheetFactRows.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetFactRows);
+        assert.ok(noSheetFactRows.includes(`${NO_TIMESHEET_NOTE} ${FACT_ROWS_ASIDE_NOTE}`), noSheetFactRows);
+        run('OrderDetail.toggleRealCostDetails()');
 
         // 5. «Факт» не ответил: шапка остаётся плановой, подписана «план», карточки себестоимости нет.
         context.__realCosts[9601] = new Error('timesheet unavailable');

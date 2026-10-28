@@ -412,8 +412,11 @@ const OrderDetail = {
                         <td style="${cell}color:var(--text-muted);">${row.source === 'plan' ? 'по плану' : 'по факту'}</td>
                     </tr>`).join('');
         const notes = [];
+        // Без табеля вся себестоимость плановая (Factual.computeOrderRealCost): итог — план, даже
+        // если по какой-то статье «Факт» уже знает больше (например, ФинТабло по фурнитуре).
         if (breakdown && breakdown.hasTimesheet === false) {
-            notes.push('Табеля по заказу нет — зарплата и косвенные взяты по плану.');
+            notes.push('Табеля по заказу нет — вся себестоимость взята по плану.');
+            if (shown.some(row => row.source === 'fact')) notes.push('Факт по статьям — для справки, в итог не входит.');
         }
         if (salaryHidden) {
             notes.push('Зарплата и косвенные скрыты: их видит только владелец.');

@@ -16,8 +16,9 @@ function createContext() {
     };
     const context = {
         console, Math, Date, JSON, Intl, Number, String, Array, Object, Set, Map,
-        document: { getElementById: renderingForbidden, querySelectorAll: renderingForbidden },
-        App: { params: {}, isAdmin() { return false; }, toast() {} },
+        // addEventListener: js/warehouse.js subscribes to clicks when it loads
+        document: { getElementById: renderingForbidden, querySelectorAll: renderingForbidden, addEventListener() {} },
+        App: { params: {}, isAdmin() { return false; }, toast() {}, getCurrentEmployeeName: () => 'Smoke' },
         setTimeout(fn) { fn(); return 1; },
         clearTimeout() {},
         // то, что «Факт» читает из хранилища; сценарии подменяют содержимое
@@ -43,6 +44,18 @@ function createContext() {
     context.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
     context.loadTimeEntries = counted('loadTimeEntries', () => context.__timeEntries);
     context.loadEmployees = counted('loadEmployees', () => context.__employees);
+    // склад готовой продукции (js/warehouse.js) — три списка в памяти, общая база доступна
+    context.__readyGoods = { stock: [], history: [], sales: [] };
+    const copy = value => JSON.parse(JSON.stringify(value));
+    context.getReadyGoodsSourceStatus = () => ({
+        ready_goods: { source: 'shared-settings' },
+        ready_goods_history: { source: 'shared-settings' },
+        sales_records: { source: 'shared-settings' },
+    });
+    [['stock', 'ReadyGoods'], ['history', 'ReadyGoodsHistory'], ['sales', 'SalesRecords']].forEach(([list, name]) => {
+        context[`load${name}`] = async () => copy(context.__readyGoods[list]);
+        context[`save${name}`] = async rows => { context.__readyGoods[list] = copy(rows); };
+    });
     context.window = context;
     return vm.createContext(context);
 }
@@ -285,14 +298,59 @@ async function smokeComputeOrderRealCost(context, run) {
     assert.deepEqual(calls(), {}, 'с испорченным id ничего не загружается');
 }
 
+// ---------------------------------------------------------------------------
+// Табеля по заказу нет совсем — вся себестоимость плановая (спека), даже когда ФинТабло уже дал
+// факт по фурнитуре. Разбивка по статьям показывает, что есть в «Факте»; итог — план. По этому итогу
+// считают шапка карточки (себестоимость и реальная маржа) и склад: заморозка при «Готово» и пересчёт.
+// ---------------------------------------------------------------------------
+async function smokeNoTimesheetCostIsThePlan(context, run) {
+    context.App.params = { fotPerHour: 500, indirectPerHour: 100, taxRate: 0.07, vatRate: 0.05, charityRate: 0.01, wasteFactor: 1.1 };
+    run('Factual._entries = []; Factual._employees = []; Factual._orderCache = {};');
+    context.__employees = [{ id: 1, name: 'Женя', pay_base_salary_month: 0, pay_base_hours_month: 0, pay_overtime_hour_rate: 400 }];
+    context.__timeEntries = [timeEntry('casting', 3, 301)]; // табель есть, но у другого заказа
+    context.__imports = [finTabloImport]; // фурнитура 700 ₽ — по ФинТабло
+    // «Лимон» на 10 штук: 5 «на продажу», 5 в подарок — платных штук 5.
+    const order = lemonLikeOrder(303);
+    order.order.client_name = 'Художница';
+    order.items[0] = { ...order.items[0], item_number: 1, product_name: 'Лимон', sell_price_item: 100, tirage_allocation: { stock: 5, gift: 5, stock_price: 100 } };
+    context.__order = order;
+    context.__readyGoods = { stock: [], history: [], sales: [] };
+
+    const noSheet = plain(await run('Factual.computeOrderRealCost(303, { fresh: true })'));
+    assert.deepEqual([noSheet.hasTimesheet, noSheet.hoursFact], [false, 0]);
+    const hardware = noSheet.rows.find(r => r.key === 'hardware_total');
+    assert.deepEqual([hardware.plan, hardware.fact, hardware.used, hardware.source], [0, 700, 700, 'fact'], 'по статье — факт из ФинТабло');
+    assert.equal(noSheet.planTotal, 290);
+    assert.equal(noSheet.realTotal, 290, 'без табеля итог — план, а не план вперемешку с фактом (990)');
+
+    // склад: себестоимость штуки «на продажу» при «Готово» — по плану: 290 ₽ / 5 платных штук
+    assert.equal(await run(`Warehouse.moveOrderToReadyGoods(303, 'Лимон')`), 1);
+    assert.deepEqual(context.__readyGoods.stock.map(row => [row.qty, row.cost_per_unit]), [[5, 58]]);
+    // «Пересчитать себестоимость» без табеля — тот же план, менять нечего
+    assert.equal(await run('Warehouse.recalcOrderReadyGoodsCost(303)'), 0);
+    assert.equal(context.__readyGoods.stock[0].cost_per_unit, 58);
+
+    // Табель появился — себестоимость реальная, и пересчёт её берёт.
+    context.__timeEntries = [...context.__timeEntries, timeEntry('casting', 3, 303)];
+    const withSheet = plain(await run('Factual.computeOrderRealCost(303, { fresh: true })'));
+    assert.equal(withSheet.hasTimesheet, true);
+    const usedTotal = Math.round(withSheet.rows.reduce((sum, row) => sum + row.used, 0) * 100) / 100;
+    assert.equal(withSheet.realTotal, usedTotal, 'с табелем итог — сумма статей');
+    assert.ok(withSheet.realTotal > withSheet.planTotal, `${withSheet.realTotal} > ${withSheet.planTotal}`);
+    assert.equal(await run('Warehouse.recalcOrderReadyGoodsCost(303)'), 1);
+    assert.equal(context.__readyGoods.stock[0].cost_per_unit, Math.round(withSheet.realTotal / 5 * 100) / 100);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/calculator.js');
     runScript(context, 'js/factual.js');
+    runScript(context, 'js/warehouse.js');
     const run = code => vm.runInContext(code, context);
     run.context = context;
     smokeBreakdown(run);
     await smokeComputeOrderRealCost(context, run);
+    await smokeNoTimesheetCostIsThePlan(context, run);
     console.log('factual-real-cost-smoke: OK');
 }
 

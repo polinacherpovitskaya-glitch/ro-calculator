@@ -1892,7 +1892,9 @@ async _loadFactSummaries() {
 
     // Real production cost of one order: { rows, planTotal, realTotal, salaryReal } (see
     // _buildRealCostBreakdown) plus hours — planned, and from the timesheet. `hasTimesheet` is false
-    // when nobody logged hours on the order: then salary and indirect rows come from the plan.
+    // when nobody logged hours on the order: then the whole cost is the plan — realTotal = planTotal
+    // (spec: «Если табеля нет совсем — вся себестоимость плановая»), while the rows still show what
+    // «Факт» has (a FinTablo fact, say). The card header and the ready goods stock use realTotal.
     // Resolves to null when the order does not exist. Cached per order like the page does; pass
     // { fresh: true } to re-read the timesheet, rates and the order's sources — when the number is
     // about to be stored, or FinTablo has caught up.
@@ -1909,11 +1911,14 @@ async _loadFactSummaries() {
         const factData = computed.factData || {};
         const sumHours = (source, field) => round2(this.HOUR_ROWS.reduce((sum, row) => sum + this._num(source[field(row)]), 0));
         const hoursFact = sumHours(factData, row => 'fact_' + row.key);
+        const hasTimesheet = hoursFact > 0;
+        const breakdown = this._buildRealCostBreakdown(computed.planData, factData);
         return {
-            ...this._buildRealCostBreakdown(computed.planData, factData),
+            ...breakdown,
+            realTotal: hasTimesheet ? breakdown.realTotal : breakdown.planTotal,
             hoursPlan: sumHours(planHours, row => row.planField),
             hoursFact,
-            hasTimesheet: hoursFact > 0,
+            hasTimesheet,
         };
     },
 
