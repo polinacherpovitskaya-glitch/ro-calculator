@@ -6249,12 +6249,12 @@ const Calculator = {
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
-            // «Готово»: the ready goods stock follows the tirage split; below what is sold — no save.
+            // «Готово»: «на продажу» below what is already sold is not saved.
             if (order.status === 'completed') {
-                const readyGoodsSync = await this._syncCompletedOrderReadyGoods(orderIdForSave, order, items);
-                if (readyGoodsSync.blocked) {
+                const soldFloor = await this._checkCompletedOrderReadyGoods(orderIdForSave, order, items);
+                if (soldFloor.blocked) {
                     const blockedStatusEl = document.getElementById('calc-autosave-status');
-                    if (blockedStatusEl) blockedStatusEl.textContent = readyGoodsSync.message;
+                    if (blockedStatusEl) blockedStatusEl.textContent = soldFloor.message;
                     return;
                 }
             }
@@ -6276,6 +6276,13 @@ const Calculator = {
                 if (statusEl) statusEl.textContent = 'Черновик сохранён • ' + timeStr;
                 this._clearLocalDraftSnapshot();
             }
+            // The order is written: now the ready goods stock follows its split.
+            if (orderId && order.status === 'completed'
+                && !(await this._syncCompletedOrderReadyGoods(orderId, order, items))
+                && this._isCurrentAutosave(autosaveGeneration)) {
+                const syncStatusEl = document.getElementById('calc-autosave-status');
+                if (syncStatusEl) syncStatusEl.textContent = this.READY_GOODS_SYNC_FAILED_MESSAGE;
+            }
         } catch (e) {
             console.error('[autosave] error:', e);
             const statusEl = document.getElementById('calc-autosave-status');
@@ -6286,18 +6293,37 @@ const Calculator = {
     },
 
     // Заказ в «Готово»: его штуки «на продажу» стоят на складе готовой продукции и могли уже
-    // продаваться. Склад подстраивается под разметку до записи заказа; blocked — «на продажу»
-    // стало меньше проданного, такой заказ не сохраняют (в message — почему).
-    async _syncCompletedOrderReadyGoods(orderId, order, items) {
+    // продаваться. Сначала проверка (blocked — «на продажу» меньше проданного, заказ не сохраняют,
+    // в message — почему), потом запись заказа, потом склад подстраивается под его разметку.
+    // Синхронизация повторяемая: если она не прошла, следующее сохранение догонит склад.
+    READY_GOODS_SYNC_FAILED_MESSAGE: 'Заказ сохранён, но склад готовой продукции не обновился — сохраните ещё раз',
+
+    async _checkCompletedOrderReadyGoods(orderId, order, items) {
         if (!order || order.status !== 'completed') return { ok: true, message: '' };
-        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.syncOrderReadyGoodsToTirage !== 'function') {
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.checkOrderReadyGoodsSoldFloor !== 'function') {
             return { ok: true, message: '' };
         }
         try {
-            return (await Warehouse.syncOrderReadyGoodsToTirage(orderId, { order, items })) || { ok: true, message: '' };
+            return (await Warehouse.checkOrderReadyGoodsSoldFloor(orderId, { order, items })) || { ok: true, message: '' };
+        } catch (error) {
+            // Nothing to block on; the sync after the save reports the stock.
+            console.error('[Calculator] ready goods check failed:', error);
+            return { ok: false, message: '' };
+        }
+    },
+
+    // true — the stock follows the saved order (or there is nothing to follow).
+    async _syncCompletedOrderReadyGoods(orderId, order, items) {
+        if (!order || order.status !== 'completed') return true;
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.syncOrderReadyGoodsToTirage !== 'function') {
+            return true;
+        }
+        try {
+            const result = await Warehouse.syncOrderReadyGoodsToTirage(orderId, { order, items });
+            return !result || result.ok !== false;
         } catch (error) {
             console.error('[Calculator] ready goods sync failed:', error);
-            return { ok: false, message: 'Склад готовой продукции не обновился. Сохраните заказ ещё раз.' };
+            return false;
         }
     },
 
@@ -6561,15 +6587,13 @@ const Calculator = {
                 || 'draft';
         }
 
-        // «Готово»: the ready goods stock follows the tirage split before the order is written;
-        // «на продажу» below what is already sold is not saved.
-        let readyGoodsSync = { ok: true, message: '' };
+        // «Готово»: «на продажу» below what is already sold is not saved.
         if (order.status === 'completed') {
-            readyGoodsSync = await this._syncCompletedOrderReadyGoods(orderIdForSave, order, items);
-            if (readyGoodsSync.blocked) {
+            const soldFloor = await this._checkCompletedOrderReadyGoods(orderIdForSave, order, items);
+            if (soldFloor.blocked) {
                 const blockedStatusEl = document.getElementById('calc-autosave-status');
-                if (blockedStatusEl) blockedStatusEl.textContent = readyGoodsSync.message;
-                App.toast(readyGoodsSync.message);
+                if (blockedStatusEl) blockedStatusEl.textContent = soldFloor.message;
+                App.toast(soldFloor.message);
                 return;
             }
         }
@@ -6672,10 +6696,16 @@ const Calculator = {
             this._invalidateWhPickerContext();
             this._captureCommittedWhDemandSnapshot(orderId);
 
-            if (warehouseSyncError) {
+            // The order is written: now the ready goods stock follows its split.
+            const readyGoodsSynced = order.status === 'completed'
+                ? await this._syncCompletedOrderReadyGoods(orderId, order, items)
+                : true;
+
+            if (!readyGoodsSynced) {
+                // Saving again re-runs both syncs, so this message covers a hardware failure too.
+                App.toast(this.READY_GOODS_SYNC_FAILED_MESSAGE);
+            } else if (warehouseSyncError) {
                 App.toast('Заказ сохранён, но склад не синхронизировался');
-            } else if (!readyGoodsSync.ok) {
-                App.toast(`Заказ сохранён. ${readyGoodsSync.message}`);
             } else if (!warehouseSyncResult || !warehouseSyncResult.shortage) {
                 App.toast('Заказ сохранен');
             }

@@ -7733,21 +7733,17 @@ const Warehouse = {
 
         const soldByPosition = this._countOrderReadyGoodsSales(positions, stores.sales, orderId).byPosition;
         const soldOf = item => soldByPosition.get(String(item.id)) || 0;
-        const lineByNumber = new Map(tirage.lines.filter(line => line.itemNumber !== undefined).map(line => [line.itemNumber, line]));
+        const lineByNumber = this._tirageLinesByNumber(tirage);
         const positionNumbers = new Set(positions.map(item => Number(item.order_item_number)));
         const count = value => Number(value || 0).toLocaleString('ru-RU');
 
         if (mode === 'sync') {
-            for (const item of positions) {
-                const line = lineByNumber.get(Number(item.order_item_number));
-                const stock = line ? line.stock : 0;
-                const sold = soldOf(item);
-                if (stock < sold) {
-                    const name = line ? line.productName : (item.product_name || 'Товар');
-                    result.blocked = true;
-                    result.message = `Заказ не сохранён: у «${name}» на продажу ${count(stock)} шт., а со склада уже продано ${count(sold)} шт. Меньше проданного поставить нельзя.`;
-                    return result;
-                }
+            // Checked before the order was written; a sale may have landed since.
+            const breach = this._tirageSoldFloorMessage(positions, tirage, soldByPosition);
+            if (breach) {
+                result.blocked = true;
+                result.message = breach;
+                return result;
             }
         }
 
@@ -7841,11 +7837,48 @@ const Warehouse = {
         return result;
     },
 
-    // A completed order is saved with another split: its stock follows (see above). Called before
-    // the order is written, with what is about to be written (orderData = { order, items }); without
-    // it — from the saved order. { ok: false, blocked: true, message }: «на продажу» would drop
-    // below what is already sold, such an order is not saved. { ok: false, message }: the ready
-    // goods base could not be read or written.
+    _tirageLinesByNumber(tirage) {
+        return new Map(tirage.lines.filter(line => line.itemNumber !== undefined).map(line => [line.itemNumber, line]));
+    },
+
+    // «На продажу» of a line may not drop below what its position already sold: the message for
+    // the first position that would, or ''. A line that is gone counts as 0 for sale.
+    _tirageSoldFloorMessage(positions, tirage, soldByPosition) {
+        const lineByNumber = this._tirageLinesByNumber(tirage);
+        const count = value => Number(value || 0).toLocaleString('ru-RU');
+        for (const item of positions) {
+            const line = lineByNumber.get(Number(item.order_item_number));
+            const stock = line ? line.stock : 0;
+            const sold = soldByPosition.get(String(item.id)) || 0;
+            if (stock < sold) {
+                const name = line ? line.productName : (item.product_name || 'Товар');
+                return `Заказ не сохранён: у «${name}» на продажу ${count(stock)} шт., а со склада уже продано ${count(sold)} шт. Меньше проданного поставить нельзя.`;
+            }
+        }
+        return '';
+    },
+
+    // Before a completed order is written (orderData = { order, items } about to be written): would
+    // its split put «на продажу» below what is already sold? Reads the stock and the sales, writes
+    // nothing. { ok: false, blocked: true, message } — do not save. Lists that could not be read
+    // block nothing: the sync after the save reports the stock.
+    async checkOrderReadyGoodsSoldFloor(orderId, orderData = null) {
+        const data = orderData || await loadOrder(orderId);
+        if (!data || !data.order || data.order.status !== 'completed') return { ok: true, message: '' };
+        if (isB2CClientName(data.order.client_name)) return { ok: true, message: '' };
+        const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
+        const positions = (stock || []).filter(item => this._isOrderTiragePosition(item, orderId));
+        if (positions.length === 0) return { ok: true, message: '' };
+        const soldByPosition = this._countOrderReadyGoodsSales(positions, sales, orderId).byPosition;
+        const message = this._tirageSoldFloorMessage(positions, this._getTirageLines(data), soldByPosition);
+        return message ? { ok: false, blocked: true, message } : { ok: true, message: '' };
+    },
+
+    // A completed order was saved: its stock follows the split it was saved with (see above;
+    // orderData = { order, items } that were written, without it — the saved order). Repeating it
+    // is harmless, so the next save heals a failed one. { ok: false, blocked: true, message }: a sale
+    // landed after the check and «на продажу» is now below it — nothing is written.
+    // { ok: false, message }: the ready goods base could not be read or written.
     async syncOrderReadyGoodsToTirage(orderId, orderData = null) {
         const data = orderData || await loadOrder(orderId);
         if (!data || !data.order || data.order.status !== 'completed') return { ok: true, message: '' };

@@ -9960,21 +9960,25 @@ async function smokeSaveRemapsParentIndexesPastEmptyRows(context) {
 const READY_GOODS_STUB_NAMES = ['getReadyGoodsSourceStatus', 'loadReadyGoods', 'saveReadyGoods', 'loadReadyGoodsHistory', 'saveReadyGoodsHistory', 'loadSalesRecords', 'saveSalesRecords'];
 
 // Склад готовой продукции в памяти. Каждый список пишется так, как его пишет общая база:
-// запись — изменения относительно последнего чтения этого списка (новые и изменённые строки по
-// id, удалённые — только те, что читавший видел и убрал), поэтому лишняя позиция заказа видна
-// как лишняя строка. staleNext[list] — следующее чтение отдаёт старую копию (вторая вкладка,
-// прочитавшая склад до чужой записи). Возвращает базу; заглушки — в контексте.
-function useReadyGoodsBase(context, initial = {}) {
-    const base = {
+// запись — изменения относительно последнего чтения этого списка вкладкой (новые и изменённые
+// строки по id, удалённые — только те, что она видела и убрала), поэтому лишняя позиция заказа
+// видна как лишняя строка, а запись с чужим id заменяет чужую строку. staleNext[list] — следующее
+// чтение отдаёт старую копию (вкладка, прочитавшая склад до чужой записи). server — та же база
+// для ещё одной вкладки. Возвращает базу; заглушки — в контексте вкладки.
+function useReadyGoodsBase(context, initial = {}, server = null) {
+    const base = server || {
         lists: { stock: clone(initial.stock || []), history: clone(initial.history || []), sales: clone(initial.sales || []) },
-        seen: {},
         staleNext: {},
         loads: { stock: 0, history: 0, sales: 0 },
         saves: { stock: 0, history: 0, sales: 0 },
-        // shared = false — общей базы нет совсем; unavailable — только эти списки (её нет для них).
+        // shared = false — общей базы нет совсем; unavailable — нет для этих списков (и чтение
+        // это видит); failSaves — читается, но запись в эти списки не проходит.
         shared: true,
         unavailable: new Set(),
+        failSaves: new Set(),
     };
+    // Что эта вкладка последний раз прочитала или записала.
+    const seenByTab = {};
     const isShared = list => base.shared && !base.unavailable.has(list);
     const idOf = row => (row && row.id !== null && row.id !== undefined && row.id !== '' ? String(row.id) : null);
     const snapshot = rows => new Map(rows.filter(row => idOf(row)).map(row => [idOf(row), JSON.stringify(row)]));
@@ -9982,12 +9986,12 @@ function useReadyGoodsBase(context, initial = {}) {
         base.loads[list] += 1;
         const rows = clone(base.staleNext[list] || base.lists[list]);
         delete base.staleNext[list];
-        base.seen[list] = snapshot(rows);
+        seenByTab[list] = snapshot(rows);
         return rows;
     };
     const save = list => async (rows) => {
-        if (!isShared(list)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
-        const seen = base.seen[list] || new Map();
+        if (!isShared(list) || base.failSaves.has(list)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        const seen = seenByTab[list] || new Map();
         const present = new Set(rows.map(idOf).filter(Boolean));
         const next = base.lists[list].filter(row => !(idOf(row) && seen.has(idOf(row)) && !present.has(idOf(row))));
         rows.forEach(row => {
@@ -9998,7 +10002,7 @@ function useReadyGoodsBase(context, initial = {}) {
             else next.push(clone(row));
         });
         base.lists[list] = next;
-        base.seen[list] = snapshot(rows);
+        seenByTab[list] = snapshot(rows);
         base.saves[list] += 1;
     };
     context.getReadyGoodsSourceStatus = () => {
@@ -10312,6 +10316,14 @@ async function smokeTirageReadyGoodsSyncToSplit(context) {
         });
         assert.deepEqual(lemonQty(), [35]);
         assert.deepEqual(clone(base.saves), savesBefore);
+        // Та же проверка до записи заказа — только чтение остатков и продаж.
+        const historyLoadsBefore = base.loads.history;
+        const check = data => vm.runInContext(`Warehouse.checkOrderReadyGoodsSoldFloor(9401, ${JSON.stringify(data)})`, context);
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { tirage: { stock: 3 } }))), lowered);
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { tirage: { stock: 40, partner: 40 } }))), { ok: true, message: '' });
+        assert.deepEqual(clone(await check(lemonOrderData(9401, { order: { status: 'delivery' }, tirage: { stock: 3 } }))), { ok: true, message: '' });
+        assert.deepEqual(clone(base.saves), savesBefore, 'the check writes nothing');
+        assert.equal(base.loads.history, historyLoadsBefore, 'the check does not read the history');
         // Строку убрали совсем — то же самое.
         const dropped = clone(await sync({ ...lemonOrderData(9401), items: [] }));
         assert.equal(dropped.blocked, true);
@@ -10391,10 +10403,12 @@ async function smokeTirageReadyGoodsSyncToSplit(context) {
     }
 }
 
-// Калькулятор: сохранение заказа в «Готово» подстраивает склад под разметку, а «на продажу»
-// меньше проданного не сохраняет ни вручную, ни автосохранением.
+// Калькулятор: заказ в «Готово» с «на продажу» меньше проданного не сохраняется ни вручную, ни
+// автосохранением. Остальное — сначала записывается заказ, потом склад подстраивается под его
+// разметку; если склад не записался, менеджер узнаёт об этом, а следующее сохранение догоняет.
 async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
     const BLOCKED = 'Заказ не сохранён: у «Лимон» на продажу 3 шт., а со склада уже продано 5 шт. Меньше проданного поставить нельзя.';
+    const SYNC_FAILED = 'Заказ сохранён, но склад готовой продукции не обновился — сохраните ещё раз';
     const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder', 'saveOrder'].map(name => [name, context[name]]));
     const position = {
         id: 9402001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9402, order_item_number: 1, source: 'tirage',
@@ -10404,7 +10418,9 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
     context.__orderStatus = 'completed';
     context.loadOrder = async (orderId) => ({ order: { id: Number(orderId), order_name: 'Лимон', client_name: 'Художница Маша', status: context.__orderStatus }, items: [] });
     context.__writes = [];
+    context.__orderWriteFails = false;
     context.saveOrder = async (order, items) => {
+        if (context.__orderWriteFails) throw new Error('нет связи');
         context.__writes.push({ status: order.status, items: clone(items), stockAtWrite: clone(base.lists.stock) });
         return order.id;
     };
@@ -10429,7 +10445,7 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
         Calculator._currentOrderStatus = ${JSON.stringify(status)};
         Calculator.items = [Object.assign(Calculator.getEmptyItem(1), {
             product_name: 'Лимон', quantity: 100, sell_price_item: 5900, pieces_per_hour: 100, weight_grams: 10,
-            tirage_allocation: { stock: ${Number(stock)}, partner: 40, gift: 20, stock_price: 5900, partner_note: 'художница' },
+            tirage_allocation: { stock: ${Number(stock)}, partner: ${80 - Number(stock)}, gift: 20, stock_price: 5900, partner_note: 'художница' },
         })];
         Calculator.hardwareItems = [];
         Calculator.packagingItems = [];
@@ -10451,13 +10467,13 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
         assert.equal(context.__writes.length, 0, 'autosave does not save it either');
         assert.equal(autosaveStatus(), BLOCKED);
 
-        // 40 на продажу: склад подстраивается (40 − 5) ещё до записи заказа, заказ сохраняется.
+        // 40 на продажу: сначала записывается заказ, потом склад подстраивается (40 − 5).
         context.__toasts = [];
         setForm(40, 'completed');
         await vm.runInContext('Calculator.saveOrder()', context);
         assert.equal(context.__writes.length, 1);
         assert.equal(context.__writes[0].status, 'completed');
-        assert.deepEqual(context.__writes[0].stockAtWrite.map(row => row.qty), [35]);
+        assert.deepEqual(context.__writes[0].stockAtWrite.map(row => row.qty), [25], 'the order is written before the stock');
         assert.deepEqual(lemonQty(), [35]);
         assert.ok(context.__toasts.includes('Заказ сохранен'));
         const stockSaves = base.saves.stock;
@@ -10466,12 +10482,50 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
         assert.equal(context.__writes.length, 2);
         assert.equal(base.saves.stock, stockSaves, 'the same split writes nothing to the stock');
 
+        // Заказ записан, а склад — нет: менеджер узнаёт об этом.
+        base.failSaves.add('stock');
+        context.__toasts = [];
+        setForm(42, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 3, 'the order is saved');
+        assert.deepEqual(lemonQty(), [35]);
+        assert.ok(context.__toasts.includes(SYNC_FAILED), 'the manager hears the stock did not follow');
+        assert.equal(context.__toasts.includes('Заказ сохранен'), false);
+        setForm(43, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(context.__writes.length, 4, 'autosave saves the order too');
+        assert.deepEqual(lemonQty(), [35]);
+        assert.equal(autosaveStatus(), SYNC_FAILED);
+        // Следующее сохранение догоняет склад.
+        base.failSaves.clear();
+        context.__toasts = [];
+        setForm(43, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.equal(context.__writes.length, 5);
+        assert.deepEqual(lemonQty(), [38]);
+        assert.ok(context.__toasts.includes('Заказ сохранен'));
+
+        // Заказ не записался — склад не трогается.
+        context.__orderWriteFails = true;
+        const stockSavesBeforeFailedWrite = base.saves.stock;
+        context.__toasts = [];
+        setForm(44, 'completed');
+        await vm.runInContext('Calculator.saveOrder()', context);
+        assert.ok(context.__toasts.some(message => message.startsWith('Ошибка сохранения')));
+        setForm(44, 'completed');
+        await vm.runInContext('Calculator._doAutosave()', context);
+        assert.equal(autosaveStatus(), 'Ошибка автосохранения');
+        assert.equal(context.__writes.length, 5);
+        assert.deepEqual(lemonQty(), [38], 'the stock follows only a saved order');
+        assert.equal(base.saves.stock, stockSavesBeforeFailedWrite);
+        context.__orderWriteFails = false;
+
         // Заказ не в «Готово»: склад не читается.
         context.__orderStatus = 'production_casting';
         const stockLoads = base.loads.stock;
         setForm(3, 'production_casting');
         await vm.runInContext('Calculator.saveOrder()', context);
-        assert.equal(context.__writes.length, 3);
+        assert.equal(context.__writes.length, 6);
         assert.equal(base.loads.stock, stockLoads);
     } finally {
         await vm.runInContext('Calculator.resetForm()', context);
