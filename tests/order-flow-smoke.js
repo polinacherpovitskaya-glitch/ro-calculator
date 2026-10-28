@@ -10059,6 +10059,7 @@ async function smokeTirageReadyGoodsTransfer(context) {
         async computeOrderRealCost(orderId, options) {
             context.__realCostCalls.push({ orderId: Number(orderId), options: clone(options === undefined ? null : options) });
             const value = context.__realCosts[Number(orderId)];
+            if (value instanceof Error) throw value;
             return value === undefined || value === null ? null : clone(value);
         },
     };
@@ -10168,6 +10169,22 @@ async function smokeTirageReadyGoodsTransfer(context) {
         assert.deepEqual(clone(base.lists.sales), [saleBefore], 'recorded sales keep their cost');
         assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9301, options: { fresh: true } }]);
         assert.equal(await vm.runInContext('Warehouse.recalcOrderReadyGoodsCost(9301)', context), 0, 'nothing to update the second time');
+        // «Факт» не ответил или упал: пересчёт отказывается — плановая себестоимость не затирает
+        // замороженную реальную, позиции и история как были, ничего не записано.
+        const beforeRefusal = clone({ stock: base.lists.stock, history: base.lists.history, saves: base.saves });
+        const recalcError = console.error;
+        console.error = () => {};
+        try {
+            for (const unavailable of [null, new Error('timesheet unavailable')]) {
+                context.__realCosts[9301] = unavailable;
+                const outcome = await vm.runInContext(`Warehouse.recalcOrderReadyGoodsCost(9301).then(count => 'updated ' + count, error => error.message)`, context);
+                assert.equal(outcome, 'READY_GOODS_REAL_COST_UNAVAILABLE', `«Факт» ${unavailable === null ? 'gave nothing' : 'threw'}: refused`);
+                assert.deepEqual(clone({ stock: base.lists.stock, history: base.lists.history, saves: base.saves }), beforeRefusal, 'nothing changes');
+            }
+        } finally {
+            console.error = recalcError;
+        }
+        context.__realCosts[9301] = { realTotal: 150000 };
 
         // 9. Возврат без продаж снимает позиции только этого заказа.
         context.__toasts = [];
@@ -11276,6 +11293,25 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.deepEqual(clone(context.__toasts), ['Не удалось пересчитать себестоимость — нет связи с общей базой. Попробуйте ещё раз.']);
         assert.equal(run('OrderDetail.tirageRecalcBusy'), false);
         assert.equal(base.lists.stock.find(row => Number(row.order_id) === 9601).cost_per_unit, 5000, 'nothing half-written');
+        // «Факт» сейчас не отвечает (или нечего ему сказать): пересчёт не ставит плановую себестоимость
+        // вместо реальной, а так и говорит; шапка не перечитывается.
+        for (const unavailable of [null, new Error('timesheet unavailable')]) {
+            context.__realCosts[9601] = unavailable;
+            context.__realCostCalls = [];
+            context.__toasts = [];
+            const noFactError = console.error;
+            console.error = () => {};
+            try {
+                await run('OrderDetail.recalcTirageCost()');
+            } finally {
+                console.error = noFactError;
+            }
+            assert.deepEqual(clone(context.__toasts), ['Не удалось пересчитать себестоимость — «Факт» сейчас недоступен. Попробуйте позже.']);
+            assert.equal(base.lists.stock.find(row => Number(row.order_id) === 9601).cost_per_unit, 5000, 'the frozen cost stays');
+            assert.deepEqual(clone(context.__realCostCalls), [{ orderId: 9601, options: { fresh: true } }], 'only the recalc asked «Факт»');
+            assert.equal(run('OrderDetail.tirageRecalcBusy'), false);
+            assert.ok(statsText().includes('Себестоимость 150 000 ₽'), 'the header keeps the last real cost');
+        }
 
         // 11. Всё продано — пересчитывать нечего, кнопки нет, а проданное видно.
         base.lists.stock = base.lists.stock.map(row => (Number(row.order_id) === 9601 ? { ...row, qty: 0 } : row));

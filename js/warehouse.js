@@ -7773,24 +7773,34 @@ const Warehouse = {
         return matched;
     },
 
-    // Cost of one paid piece per line (allocateRealCostToRows): the order's real production cost
-    // from «Факт», read with a fresh timesheet because the number is about to be stored; without
-    // it — the planned cost of the order, split the same way.
-    async _getTirageUnitCosts(orderId, tirage) {
-        let productionCost = tirage.lines.reduce((sum, line) => sum + line.planCost, 0) + tirage.orderLevelCost;
-        if (typeof Factual !== 'undefined' && Factual && typeof Factual.computeOrderRealCost === 'function') {
-            try {
-                const real = await Factual.computeOrderRealCost(orderId, { fresh: true });
-                const realTotal = Number(real && real.realTotal);
-                if (Number.isFinite(realTotal) && realTotal > 0) productionCost = realTotal;
-            } catch (error) {
-                console.error('Ready goods: the real cost of the order failed, the plan is used:', error);
-            }
+    // The order's real production cost from «Факт», read with a fresh timesheet because the number
+    // is about to be stored; null when «Факт» cannot tell (no answer, an error, nothing in it).
+    async _getOrderRealProductionCost(orderId) {
+        if (typeof Factual === 'undefined' || !Factual || typeof Factual.computeOrderRealCost !== 'function') return null;
+        try {
+            const real = await Factual.computeOrderRealCost(orderId, { fresh: true });
+            const realTotal = Number(real && real.realTotal);
+            return Number.isFinite(realTotal) && realTotal > 0 ? realTotal : null;
+        } catch (error) {
+            console.error('Ready goods: «Факт» could not count the real cost of the order:', error);
+            return null;
         }
+    },
+
+    // Cost of one paid piece per line (allocateRealCostToRows) out of the order's production cost.
+    _allocateTirageUnitCosts(tirage, productionCost) {
         return allocateRealCostToRows(
             tirage.lines.map(line => ({ key: line.key, planCost: line.planCost, paidQty: line.paidQty })),
             productionCost,
         );
+    },
+
+    // What a new position is frozen at: the real cost from «Факт»; when «Факт» cannot tell — the
+    // planned cost of the order, split the same way (a later «Пересчитать себестоимость» fixes it).
+    async _getTirageUnitCosts(orderId, tirage) {
+        const realCost = await this._getOrderRealProductionCost(orderId);
+        const plannedCost = tirage.lines.reduce((sum, line) => sum + line.planCost, 0) + tirage.orderLevelCost;
+        return this._allocateTirageUnitCosts(tirage, realCost === null ? plannedCost : realCost);
     },
 
     // Reads the lists for a write: the order's positions, the line of each, what each sold, and
@@ -7997,7 +8007,8 @@ const Warehouse = {
 
     // «Пересчитать себестоимость» (FinTablo caught up): the unsold pieces of the order's «на
     // продажу» positions get today's real cost; recorded sales keep theirs. Returns how many
-    // positions were updated.
+    // positions were updated. Rejects with READY_GOODS_REAL_COST_UNAVAILABLE — nothing changed —
+    // when «Факт» cannot tell the real cost: the plan must not overwrite a real cost frozen earlier.
     async recalcOrderReadyGoodsCost(orderId) {
         const data = await loadOrder(orderId);
         if (!data || !data.items) return 0;
@@ -8007,7 +8018,9 @@ const Warehouse = {
     async _recalcTiragePositionsCost(orderId, data) {
         const tirage = this._getTirageLines(data);
         // «Факт» first: between the read of the lists and their patch only the saves are awaited.
-        const unitCosts = await this._getTirageUnitCosts(orderId, tirage);
+        const realCost = await this._getOrderRealProductionCost(orderId);
+        if (realCost === null) throw new Error('READY_GOODS_REAL_COST_UNAVAILABLE');
+        const unitCosts = this._allocateTirageUnitCosts(tirage, realCost);
         const stores = await this._loadReadyGoodsForWrite();
         const positions = stores.stock.filter(item => this._isOrderTiragePosition(item, orderId) && (parseFloat(item.qty) || 0) > 0);
         if (positions.length === 0) return 0;
