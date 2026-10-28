@@ -43,10 +43,10 @@ Test `tests/factual-real-cost-smoke.js`.
   (строки `YYYY-MM-DD`) или `null`.
 - `indirectPerHour`: число, тот же `params.indirectPerHour`, что идёт в косвенные.
 
-- [ ] Тест: заказ с записями табеля на `casting` (2 человека, 2 даты) и `assembly` → `stages`
+- [x] Тест: заказ с записями табеля на `casting` (2 человека, 2 даты) и `assembly` → `stages`
       длиной 4, правильные `factHours`, `people` по убыванию, даты; `indirectPerHour` > 0. Падает.
-- [ ] Реализовать (аддитивно: прежние поля результата без изменений).
-- [ ] `node tests/factual-real-cost-smoke.js`, `node tests/factual-smoke.js` — зелёные. Коммит.
+- [x] Реализовать (аддитивно: прежние поля результата без изменений).
+- [x] `node tests/factual-real-cost-smoke.js`, `node tests/factual-smoke.js` — зелёные. Коммит.
 
 ---
 
@@ -102,7 +102,7 @@ Create `tests/order-card-smoke.js`; Modify `.github/workflows/deploy-pages.yml` 
   `rub: null`; статьи, где `used − plan` по модулю ≥ max(500 ₽, 2 % плана), кроме зарплатных и
   косвенных, — «<статья>: <факт> вместо <план>» с ₽).
 
-- [ ] `tests/order-card-smoke.js`: загружает `js/calculator.js` и `js/order-detail.js` в `vm`
+- [x] `tests/order-card-smoke.js`: загружает `js/calculator.js` и `js/order-detail.js` в `vm`
       (заглушки `document`, `App`, как в соседних смоуках) и проверяет на данных из макета:
       Лимон (срок 26.10, сегодня 28.10, табель 18 из 12,1, сборка 8 из 1,6, нет ТЗ, партнёр без
       «кому») → красное «Горит», причины начинаются с «Срок прошёл 26 октября.»; Миллениум
@@ -113,7 +113,7 @@ Create `tests/order-card-smoke.js`; Modify `.github/workflows/deploy-pages.yml` 
       next «Сборка». `typeParts` для Лимона: Сток 30, Партнёру 50, Маркетинг 20; для marketing —
       одна доля «Маркетинг». `stageHoursRows` сливает срезание без плана. `stockLabel` — все 4
       случая. `formatDayMonth`. Падает.
-- [ ] Реализовать `OrderCardLogic`. Смоук зелёный, `node tests/order-flow-smoke.js` зелёный. Коммит.
+- [x] Реализовать `OrderCardLogic`. Смоук зелёный, `node tests/order-flow-smoke.js` зелёный. Коммит.
 
 ---
 
@@ -157,15 +157,15 @@ Create `tests/order-card-smoke.js`; Modify `.github/workflows/deploy-pages.yml` 
 - Убрать: кнопки вкладок, `renderProductionTab`, `renderFilesTab` и их поля, значок
   `#od-status-badge` (оставить пустой скрытый элемент, если на него смотрят снаружи).
 
-- [ ] Обновить `tests/order-flow-smoke.js` под новое поведение: `changeStatus('completed')` вместо
+- [x] Обновить `tests/order-flow-smoke.js` под новое поведение: `changeStatus('completed')` вместо
       очереди `prompt`; `#od-tirage-slot` ищется в `#od-what`, а не в `#od-tab-info`; тексты
       `#od-stats` — новые плитки (Срок/Скорость/Склад/Маржа/Оплата; «ожидаем, если продадим 30 шт.»,
       «считаем по факту», «план X %» остаются подписями в «Марже» или в деньгах панели);
       клик-редактирование `_fieldRow` открывает поле. Тест падает до реализации.
-- [ ] Реализовать. Проверить вручную в харнесе (`reference_calc_card_preview_and_smoke_harness`
+- [x] Реализовать. Проверить вручную в харнесе (`reference_calc_card_preview_and_smoke_harness`
       в памяти) или в `vm`: Лимон из `tests/order-flow-smoke.js` (`lemonOrderData`) рисуется без
       ошибок, все id на месте.
-- [ ] `node --check js/*.js`; `node tests/order-flow-smoke.js`, `tests/order-card-smoke.js`,
+- [x] `node --check js/*.js`; `node tests/order-flow-smoke.js`, `tests/order-card-smoke.js`,
       `tests/tirage-allocation-smoke.js`, `tests/partial-delivery-smoke.js`,
       `tests/factual-real-cost-smoke.js` — зелёные. Коммит.
 
@@ -176,8 +176,8 @@ Create `tests/order-card-smoke.js`; Modify `.github/workflows/deploy-pages.yml` 
 **Files:** `js/version.json`, `js/app.js`, `index.html` (4 якоря версии, `?v=` у
 `js/order-detail.js`, `js/factual.js`, `js/app.js`, `css/style.css`).
 
-- [ ] `git fetch origin main`, версия = main + 1 (сейчас v485). `node tests/version-smoke.js`.
-- [ ] Весь шаг verify из `.github/workflows/deploy-pages.yml` локально — exit 0.
-- [ ] Посмотреть карточку в браузере (харнес) на Лимоне и на закрытом заказе; поправить то, что
+- [x] `git fetch origin main`, версия = main + 1 (сейчас v485). `node tests/version-smoke.js`.
+- [x] Весь шаг verify из `.github/workflows/deploy-pages.yml` локально — exit 0.
+- [x] Посмотреть карточку в браузере (харнес) на Лимоне и на закрытом заказе; поправить то, что
       выглядит не как в макете.
-- [ ] PR: спецификация, план, код; в описании — что изменилось для менеджеров и что не входит.
+- [x] PR: спецификация, план, код; в описании — что изменилось для менеджеров и что не входит.
