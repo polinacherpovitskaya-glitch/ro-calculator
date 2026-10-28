@@ -442,6 +442,39 @@ async function smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge) {
     assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => row.id), [1, 2]);
 }
 
+// A record without an id cannot be matched on the server: the merge appends every copy of
+// it. The warehouse screens clone each row before saving, so such a row used to come back
+// once more on every save (1 → 2 → 4 → 8). It is never sent; the save says so in the console.
+async function smokeReadyGoodsRecordWithoutIdIsNeverPatched(blobMerge) {
+    for (const store of READY_GOODS_STORES) {
+        const server = createServer(blobMerge);
+        server.settings.set(store.key, JSON.stringify([{ id: 1, qty: 5 }, { product_name: 'Без id', qty: 2 }]));
+        const tab = createTab(server);
+        const warnings = [];
+        tab.console.warn = (...args) => { warnings.push(args); };
+        for (let round = 0; round < 3; round += 1) {
+            await run(tab, `(async () => {
+                const rows = (await ${store.load}()).map(row => ({ ...row }));
+                rows[0].qty += 1;
+                await ${store.save}(rows);
+            })()`);
+        }
+        assert.deepEqual(
+            serverList(server, store),
+            [{ id: 1, qty: 8 }, { product_name: 'Без id', qty: 2 }],
+            `${store.name}: the row without id stays one row, the other row is saved`,
+        );
+        const patches = server.patches.filter(entry => entry.target === store.target);
+        assert.equal(patches.length, 3, `${store.name}: every save still sends its change`);
+        patches.forEach(entry => assert.deepEqual(entry.patch.upserts.map(row => row.id), [1], `${store.name}: no record without id is sent`));
+        assert.ok(warnings.length > 0, `${store.name}: the skipped row is reported in the console`);
+        // A save with nothing else to send is not sent at all.
+        await run(tab, `(async () => { const rows = (await ${store.load}()).map(row => ({ ...row })); await ${store.save}(rows); })()`);
+        assert.equal(server.patches.filter(entry => entry.target === store.target).length, 3, `${store.name}: nothing to send, nothing sent`);
+        assert.deepEqual(server.settingsWrites, [], `${store.name}: no whole-list write`);
+    }
+}
+
 async function main() {
     const blobMerge = await import(pathToFileURL(path.join(__dirname, '..', 'ops/api/src/compat-blob-patch.js')).href);
     await smokeTwoTabsKeepEachOthersReservations(blobMerge);
@@ -455,6 +488,7 @@ async function main() {
     await smokeReadyGoodsConsumerCopiesDoNotLookChanged(blobMerge);
     await smokeReadyGoodsWholeWriteOnlyWhenPatchRouteIsMissing(blobMerge);
     await smokeUnknownBlobTargetFallsBackToWholeWrite(blobMerge);
+    await smokeReadyGoodsRecordWithoutIdIsNeverPatched(blobMerge);
     await smokeReadyGoodsRefuseSaveAfterFailedReload(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }

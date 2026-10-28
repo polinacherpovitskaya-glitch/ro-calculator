@@ -7965,6 +7965,14 @@ async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue =
         let merged;
         if (blobTarget && Array.isArray(normalized)) {
             const patch = _diffRecordBlob(blobTarget, normalized);
+            // A record without an id cannot be matched on the server, which appends
+            // every copy it gets: a cloned legacy row would come back once more on
+            // each save (1 → 2 → 4 → 8). Such a row is never sent.
+            const withoutId = patch.upserts.filter(record => _blobRecordId(record) === null);
+            if (withoutId.length > 0) {
+                console.warn(`save ${blobTarget}: skipped ${withoutId.length} record(s) without id`, withoutId);
+                patch.upserts = patch.upserts.filter(record => _blobRecordId(record) !== null);
+            }
             if (_isEmptyBlobPatch(patch)) {
                 setLocal(localKey, normalized);
                 return normalized;
