@@ -32,6 +32,8 @@ function createServer(blobMerge) {
         patchError: null,
         // When set ({ key, promise }), the next read of that settings row waits for the promise.
         readGate: null,
+        // Settings keys whose next read fails (once each), like a slow read that timed out.
+        failNextRead: new Set(),
         settingsWrites: [],
         patches: [],
     };
@@ -64,6 +66,10 @@ function createServer(blobMerge) {
                     if (server.failReads) return { data: null, error: { code: '503', message: 'slow' } };
                     if (table === 'settings') {
                         const key = filters.find(([column]) => column === 'key')?.[1];
+                        if (server.failNextRead.has(key)) {
+                            server.failNextRead.delete(key);
+                            return { data: null, error: { code: '503', message: 'slow' } };
+                        }
                         if (server.readGate && server.readGate.key === key) {
                             const gate = server.readGate;
                             server.readGate = null;
@@ -618,6 +624,75 @@ async function smokeTirageRecalcKeepsASaleMadeMeanwhile(blobMerge) {
     assert.deepEqual(serverList(server, READY_GOODS_STORES[0]).map(row => `${row.qty}:${row.cost_per_unit}`), ['28:4033.33']);
 }
 
+// A read that does not reach the shared base hands back an empty list and marks the store
+// «shared-unavailable» — for the whole tab. If another screen of the tab then reads the same list
+// successfully, the store looks shared again. Each scenario below fails one read of this tab
+// (`failedKey`) while a slow read of another list (`slowKey`) keeps the operation waiting, and
+// lets another screen read the failed list successfully in between.
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function withFlippedReadyGoodsRead(server, tab, { failedKey, slowKey }, operation) {
+    // The tab is on the shared base, as after opening any screen.
+    await run(tab, 'Promise.all([loadReadyGoods(), loadReadyGoodsHistory(), loadSalesRecords()])');
+    let openSlowRead = null;
+    server.failNextRead.add(failedKey);
+    server.readGate = { key: slowKey, promise: new Promise(resolve => { openSlowRead = resolve; }) };
+    const outcome = run(tab, operation).then(value => ({ value }), error => ({ error: String(error && error.message) }));
+    await sleep(20);
+    // Another screen of this tab (card «Тираж», stats, the sold check) reads the list successfully.
+    await run(tab, 'loadReadyGoods()');
+    assert.equal(run(tab, 'getReadyGoodsSourceStatus().ready_goods.source'), 'shared-settings', 'the store looks shared again');
+    openSlowRead();
+    return outcome;
+}
+const PROBE_STOCK = [...OTHER_ROWS, { id: 3, product_name: 'Кружка', qty: 1, location_type: 'our' }];
+const stockView = server => serverList(server, READY_GOODS_STORES[0]).map(row => `${row.product_name}:${row.qty}`);
+
+// The transfer's own read of the stock failed. Neither a tirage transfer nor a B2C one may take
+// that empty list for the stock: a patch from it removed every row (Брелок, Значок, Кружка → only
+// the new position). Nothing is written, and the transfer says so.
+async function smokeTransferRefusesItsFailedStockRead(blobMerge) {
+    const b2cOrder = orderId => ({
+        order: { id: orderId, order_name: 'Лимон', client_name: 'B2C', status: 'completed', production_purpose: 'commercial' },
+        items: [{ id: orderId * 1000 + 1, order_id: orderId, item_number: 1, item_type: 'product', printings: '[]', product_name: 'Лимон', quantity: 100, cost_total: 971.35, sell_price_item: 5900 }],
+    });
+    const variants = [
+        { name: 'tirage', orderId: 9705, order: tirageOrder(9705, [LEMON_LINE]) },
+        { name: 'B2C', orderId: 9706, order: b2cOrder(9706) },
+    ];
+    for (const variant of variants) {
+        const server = createServer(blobMerge);
+        seedReadyGoods(server, PROBE_STOCK);
+        const tab = createWarehouseTab(server, { [variant.orderId]: variant.order });
+        const outcome = await withFlippedReadyGoodsRead(server, tab,
+            { failedKey: 'ready_goods_stock_json', slowKey: 'ready_goods_history_json' },
+            `Warehouse.moveOrderToReadyGoods(${variant.orderId}, 'Лимон')`);
+        assert.deepEqual(outcome, { error: 'READY_GOODS_SHARED_UNAVAILABLE' }, `${variant.name}: the transfer is refused`);
+        assert.deepEqual(stockView(server), ['Брелок:4', 'Значок:10', 'Кружка:1'], `${variant.name}: the stock survives intact`);
+        assert.deepEqual(server.patches, [], `${variant.name}: nothing is sent`);
+        assert.deepEqual(server.settingsWrites, [], `${variant.name}: no whole write either`);
+        // Once the base answers, the same transfer goes through.
+        assert.equal(await run(tab, `Warehouse.moveOrderToReadyGoods(${variant.orderId}, 'Лимон')`), 1);
+        assert.deepEqual(stockView(server), ['Брелок:4', 'Значок:10', 'Кружка:1', `Лимон:${variant.name === 'B2C' ? 100 : 30}`]);
+    }
+}
+
+// The card's «Тираж» block: the stock read failed, the sales read is slow. A failed read is not
+// «nothing on the stock» — the summary rejects, so the block stays as it was.
+async function smokeTirageStockSummaryRefusesItsFailedRead(blobMerge) {
+    const server = createServer(blobMerge);
+    seedReadyGoods(server, [...PROBE_STOCK, {
+        id: 9707001, product_name: 'Лимон', order_name: 'Лимон', order_id: 9707, order_item_number: 1, order_line_key: null,
+        source: 'tirage', location_type: 'our', qty: 30, cost_per_unit: 4033.33, sale_price: 5900,
+    }]);
+    const tab = createWarehouseTab(server, { 9707: tirageOrder(9707, [LEMON_LINE]) });
+    const outcome = await withFlippedReadyGoodsRead(server, tab,
+        { failedKey: 'ready_goods_stock_json', slowKey: 'ready_goods_sales_records_json' },
+        'Warehouse.getOrderTirageStockSummary(9707)');
+    assert.deepEqual(outcome, { error: 'READY_GOODS_SHARED_UNAVAILABLE' }, 'a failed read is not an empty stock');
+    const summary = await run(tab, 'Warehouse.getOrderTirageStockSummary(9707)');
+    assert.deepEqual(JSON.parse(JSON.stringify(summary)), { inStock: 30, total: 30, frozen: 120999.9, soldQty: 0, soldRevenue: 0 });
+}
+
 async function main() {
     const blobMerge = await import(pathToFileURL(path.join(__dirname, '..', 'ops/api/src/compat-blob-patch.js')).href);
     await smokeTwoTabsKeepEachOthersReservations(blobMerge);
@@ -637,6 +712,8 @@ async function main() {
     await smokeTirageTransferPatchesItsOwnRead(blobMerge);
     await smokeTirageSyncDecidesOnAFreshRead(blobMerge);
     await smokeTirageRecalcKeepsASaleMadeMeanwhile(blobMerge);
+    await smokeTransferRefusesItsFailedStockRead(blobMerge);
+    await smokeTirageStockSummaryRefusesItsFailedRead(blobMerge);
     console.log('warehouse blob patch smoke checks passed');
 }
 

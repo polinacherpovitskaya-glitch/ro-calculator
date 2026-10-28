@@ -7568,12 +7568,24 @@ const Warehouse = {
     // this read and the saves nothing else is awaited.
     async _loadReadyGoodsForWrite() {
         const [stock, history, sales] = await Promise.all([
-            loadReadyGoods(),
-            loadReadyGoodsHistory(),
-            loadSalesRecords(),
+            this._readSharedReadyGoodsStore('ready_goods'),
+            this._readSharedReadyGoodsStore('ready_goods_history'),
+            this._readSharedReadyGoodsStore('sales_records'),
         ]);
-        if (!this._isReadyGoodsSharedAvailable()) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
-        return { stock: stock || [], history: history || [], sales: sales || [] };
+        return { stock, history, sales };
+    },
+
+    // Reads one ready goods list ('ready_goods' | 'ready_goods_history' | 'sales_records') and
+    // rejects with READY_GOODS_SHARED_UNAVAILABLE unless it came from the shared base. A read that
+    // did not get there does not throw: the loader marks the store «shared-unavailable» and hands
+    // back an empty list. That mark is one for the whole tab, so it is checked right when this read
+    // is back — later, another screen's successful read of the same list has turned it back to
+    // «shared», and the empty list would pass for the stock (a patch from it removes every row).
+    async _readSharedReadyGoodsStore(storeKey) {
+        const loaders = { ready_goods: loadReadyGoods, ready_goods_history: loadReadyGoodsHistory, sales_records: loadSalesRecords };
+        const list = await loaders[storeKey]();
+        if (!this._isReadyGoodsStoreShared(storeKey)) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        return list || [];
     },
 
     // Sales of an order's positions: a sale points at its position (ready_goods_id, as «Списать
@@ -7621,17 +7633,16 @@ const Warehouse = {
     // { inStock: pieces on the stock, total: pieces that went on sale (stock + sold), frozen: ₽
     // cost of the unsold pieces, soldQty: pieces sold, soldRevenue: ₽ of those sales }. An order
     // without positions gives zeros. One read of the stock and one of the sales; nothing is written.
-    // Rejects with READY_GOODS_SHARED_UNAVAILABLE when either store could not be read: the loaders
-    // do not throw then, they mark the store «shared-unavailable» and hand back an empty list, which
-    // would read as «nothing on the stock». Only the two stores read here are checked — the history
-    // is not read, so _isReadyGoodsSharedAvailable (all three) would refuse for the wrong reason.
+    // Rejects with READY_GOODS_SHARED_UNAVAILABLE when either store could not be read: the empty
+    // list a failed read hands back would read as «nothing on the stock». Each store is checked
+    // when its own read is back (_readSharedReadyGoodsStore); the history is not read here, so it
+    // does not matter.
     async getOrderTirageStockSummary(orderId) {
-        const [stock, sales] = await Promise.all([loadReadyGoods(), loadSalesRecords()]);
-        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
-        const bothShared = !!sourceStatus
-            && [sourceStatus.ready_goods, sourceStatus.sales_records].every(item => item && item.source === 'shared-settings');
-        if (!bothShared) throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
-        const positions = (stock || []).filter(item => this._isOrderTiragePosition(item, orderId));
+        const [stock, sales] = await Promise.all([
+            this._readSharedReadyGoodsStore('ready_goods'),
+            this._readSharedReadyGoodsStore('sales_records'),
+        ]);
+        const positions = stock.filter(item => this._isOrderTiragePosition(item, orderId));
         const empty = { inStock: 0, total: 0, frozen: 0, soldQty: 0, soldRevenue: 0 };
         if (positions.length === 0) return empty;
         const sold = this._countOrderReadyGoodsSales(positions, sales, orderId);
@@ -8056,6 +8067,12 @@ const Warehouse = {
         const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
         const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
         return sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
+    },
+
+    _isReadyGoodsStoreShared(storeKey) {
+        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
+        const item = sourceStatus ? sourceStatus[storeKey] : null;
+        return !!item && item.source === 'shared-settings';
     },
 
     _getSeedPhotoMapBySku() {
