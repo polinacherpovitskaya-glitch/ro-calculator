@@ -210,6 +210,7 @@ const OrderDetail = {
         const purpose = normalizeProductionPurpose(this.currentFinancial?.purpose || o.production_purpose);
         const isNonCommercial = isNonCommercialProductionPurpose(purpose);
         const isLeftoverAssembly = purpose === 'leftover_assembly';
+        const purposeMeta = getProductionPurposeMeta(purpose);
         const revenue = isNonCommercial ? 0 : calculatedRevenue;
         const loss = Math.max(0, Number(this.currentFinancial?.loss || o.total_cost_plan || 0));
 
@@ -282,7 +283,7 @@ const OrderDetail = {
                 ${revenueCaption}
             </div>
             <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Маржа'}</div>
+                <div class="stat-label">${isNonCommercial ? (purpose === 'marketing' ? 'Расход на маркетинг' : 'Некоммерческие расходы') : 'Маржа'}</div>
                 <div class="stat-value ${isNonCommercial || shownMargin < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(shownMargin)}</div>
                 ${marginCaption}
                 ${marginNote}
@@ -296,7 +297,7 @@ const OrderDetail = {
             <div class="stat-card">
                 <div class="stat-label">${isNonCommercial || isLeftoverAssembly ? 'Тип работ' : 'Оплата'}</div>
                 <div class="stat-value">${isNonCommercial
-                    ? (purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / образец')
+                    ? `${purposeMeta.icon} ${purposeMeta.shortLabel}`
                     : isLeftoverAssembly
                         ? '↙ Сборка из остатков'
                         : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>

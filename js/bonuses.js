@@ -282,13 +282,14 @@ function bonusesStatusLabel(status) {
 
 function renderOrdersTable(entry) {
     const rows = (entry.orders || []).map((o) => {
-        const stock = o.purpose === 'stock_sample';
-        const approve = stock
+        // Сток и маркетинг — внутренняя работа цеха: в зачёт только с отметкой.
+        const internal = o.purpose === 'stock_sample' || o.purpose === 'marketing';
+        const approve = internal
             ? `<label><input type="checkbox" class="bn-approve" data-order="${bonusesEscape(o.id)}" ${o.approved ? 'checked' : ''} ${entry.resultStatus !== 'open' ? 'disabled' : ''}> в зачёт</label>`
             : (o.included ? 'да' : 'нет');
         const onTime = o.onTime === null ? '—' : (o.onTime ? 'да' : 'нет');
         return `<tr>
-            <td><a href="#order-detail/${bonusesEscape(o.id)}">${bonusesEscape(o.name || `#${o.id}`)}</a>${stock ? ' <span class="bn-muted">склад</span>' : ''}</td>
+            <td><a href="#order-detail/${bonusesEscape(o.id)}">${bonusesEscape(o.name || `#${o.id}`)}</a>${internal ? ` <span class="bn-muted">${o.purpose === 'marketing' ? 'маркетинг' : 'склад'}</span>` : ''}</td>
             <td class="num">${formatHours(o.hoursPlan)}</td>
             <td class="num">${formatHours(o.hoursFact)}</td>
             <td>${bonusesEscape(o.deadline || '—')}</td>
