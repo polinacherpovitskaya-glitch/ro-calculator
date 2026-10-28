@@ -413,8 +413,9 @@ const Factual = {
         const lastDate = {};
         stageKeys.forEach(stage => {
             people[stage] = Array.from(stagePeople[stage], ([name, hours]) => ({ name, hours: round2(hours) }))
-                .sort((a, b) => b.hours - a.hours);
-            [firstDate[stage], lastDate[stage]] = stageDates[stage];
+                .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name, 'ru'));
+            firstDate[stage] = stageDates[stage][0];
+            lastDate[stage] = stageDates[stage][1];
         });
 
         return {
@@ -1921,7 +1922,8 @@ async _loadFactSummaries() {
     },
 
     // Real production cost of one order: { rows, planTotal, realTotal, salaryReal } (see
-    // _buildRealCostBreakdown) plus hours — planned, and from the timesheet. `hasTimesheet` is false
+    // _buildRealCostBreakdown) plus hours — planned, and from the timesheet — and `stages` (hours,
+    // people and dates per production stage, _buildStageHours) with `indirectPerHour`. `hasTimesheet` is false
     // when nobody logged hours on the order: then the whole cost is the plan — realTotal = planTotal
     // (spec: «Если табеля нет совсем — вся себестоимость плановая»), while the rows still show what
     // «Факт» has (a FinTablo fact, say). The card header and the ready goods stock use realTotal.

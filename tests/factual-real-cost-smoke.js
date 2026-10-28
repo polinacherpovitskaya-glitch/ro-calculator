@@ -352,10 +352,11 @@ async function smokeStages(context, run) {
     context.__employees = [{ id: 1, name: 'Женя', pay_base_salary_month: 0, pay_base_hours_month: 0, pay_overtime_hour_rate: 400 }];
     const dated = (entry, date) => ({ ...entry, date });
     context.__timeEntries = [
-        // выливание: Женя 3 + 0.5 ч, Аня 1.5 + 0.1 + 0.2 ч (0.1 + 0.2 — не 0.3 в двоичной дроби: округляем)
+        // выливание: Женя 3 + 0.5 ч, Аня 1.5 + 0.7 + 0.1 + 0.2 ч (в двоичной дроби это 2.5000000000000004: округляем)
         dated(timeEntry('casting', 3, 304), '2026-10-05'),
         dated(timeEntry('casting', 0.5, 304), '2026-10-07'),
         dated({ ...timeEntry('casting', 1.5, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-07'),
+        dated({ ...timeEntry('casting', 0.7, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-06'),
         dated({ ...timeEntry('casting', 0.1, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-06'),
         dated({ ...timeEntry('casting', 0.2, 304), employee_id: undefined, worker_name: 'Аня' }, '2026-10-06'),
         // сборка: Женя и «Оля», у которой в записи только employee_name (ставка — общая 500 ₽/ч)
@@ -376,9 +377,9 @@ async function smokeStages(context, run) {
 
     // плановые часы — те же, что делят legacy-часы: выливание 2, срезание 1, сборка 1, упаковка 0
     assert.deepEqual(result.stages.map(s => s.planHours), [2, 1, 1, 0]);
-    // фактические часы и зарплата — как в строках «Факта»: 3 + 0.5 + 1.5 + 0.1 + 0.2 = 5.3 ч
-    assert.deepEqual(result.stages.map(s => s.factHours), [5.3, 0, 3, 0]);
-    assert.equal(casting.salary, 3.5 * 400 + 1.8 * 500, 'Женя по ставке сотрудника, Аня — по общей');
+    // фактические часы и зарплата — как в строках «Факта»: 3 + 0.5 + 1.5 + 0.7 + 0.1 + 0.2 = 6 ч
+    assert.deepEqual(result.stages.map(s => s.factHours), [6, 0, 3, 0]);
+    assert.equal(casting.salary, 3.5 * 400 + 2.5 * 500, 'Женя по ставке сотрудника, Аня — по общей');
     assert.equal(assembly.salary, 1 * 400 + 2 * 500);
     assert.deepEqual([trim.salary, packaging.salary], [0, 0]);
     const rowUsed = key => result.rows.find(r => r.key === key).used;
@@ -389,7 +390,7 @@ async function smokeStages(context, run) {
     assert.equal(result.stages.reduce((sum, s) => sum + s.factHours, 0), result.hoursFact, 'сумма этапов — это hoursFact');
 
     // люди: часы суммируются по имени, по убыванию, округлены до 0.01
-    assert.deepEqual(casting.people, [{ name: 'Женя', hours: 3.5 }, { name: 'Аня', hours: 1.8 }]);
+    assert.deepEqual(casting.people, [{ name: 'Женя', hours: 3.5 }, { name: 'Аня', hours: 2.5 }]);
     assert.deepEqual(assembly.people, [{ name: 'Оля', hours: 2 }, { name: 'Женя', hours: 1 }], 'имя берётся и из employee_name');
     assert.deepEqual([trim.people, packaging.people], [[], []]);
 
