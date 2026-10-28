@@ -10539,6 +10539,93 @@ async function smokeTirageCompletedOrderSaveFollowsReadyGoods(context) {
     }
 }
 
+// Ещё одна вкладка с тем же складом готовой продукции (своё чтение списков).
+function createReadyGoodsTab(server) {
+    const tab = createContext();
+    runScript(tab, 'js/warehouse.js');
+    stubRuntime(tab);
+    useReadyGoodsBase(tab, null, server);
+    vm.runInContext('Warehouse.renderStats = () => {}; Warehouse.renderReadyGoodsView = () => {};', tab);
+    return tab;
+}
+
+// Новые записи готовой продукции — позиции, продажи, история — пишутся патчами, и запись с тем же
+// id заменяет прежнюю. Записи, созданные в одну миллисекунду (в этой вкладке или в соседних),
+// получают разные id и все остаются в общей базе.
+async function smokeReadyGoodsRecordsCreatedInOneMillisecondKeepTheirIds(context) {
+    const originals = Object.fromEntries([...READY_GOODS_STUB_NAMES, 'loadOrder'].map(name => [name, context[name]]));
+    const base = useReadyGoodsBase(context);
+    const b2cOrder = (id, name, quantity) => ({
+        order: { id, order_name: name, client_name: 'B2C', status: 'completed' },
+        items: [{ id: id * 1000 + 1, order_id: id, item_number: 1, item_type: 'product', product_name: name, quantity, cost_total: 50 }],
+    });
+    const orders = { 9601: b2cOrder(9601, 'Брелок', 4), 9602: b2cOrder(9602, 'Значок', 6) };
+    context.loadOrder = async (orderId) => clone(orders[Number(orderId)] || null);
+    vm.runInContext(`
+        globalThis.__sameMsOriginals = { toast: App.toast, renderStats: Warehouse.renderStats, renderReadyGoodsView: Warehouse.renderReadyGoodsView };
+        App.toast = () => {};
+        Warehouse.renderStats = () => {};
+        Warehouse.renderReadyGoodsView = () => {};
+    `, context);
+    const fillAdd = (doc, name) => {
+        doc.getElementById('rg-add-name').value = name;
+        doc.getElementById('rg-add-qty').value = '2';
+        doc.getElementById('rg-add-cost').value = '10';
+        doc.getElementById('rg-add-location').value = 'our';
+        doc.getElementById('rg-add-set').value = '';
+    };
+    const fillWriteOff = doc => {
+        doc.getElementById('rg-wo-product').value = '0';
+        doc.getElementById('rg-wo-qty').value = '1';
+        doc.getElementById('rg-wo-channel').value = 'website';
+        doc.getElementById('rg-wo-revenue').value = '300';
+        doc.getElementById('rg-wo-payout').value = '300';
+        doc.getElementById('rg-wo-notes').value = '';
+    };
+    const realNow = Date.now;
+    const realRandom = Math.random;
+    Date.now = () => 1761552000000;
+    Math.random = () => 0;
+    try {
+        // B2C-партии, добавление вручную и продажи — всё в одну миллисекунду в этой вкладке.
+        await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9601, 'B2C 1')`, context);
+        await vm.runInContext(`Warehouse.moveOrderToReadyGoods(9602, 'B2C 2')`, context);
+        fillAdd(context.document, 'Ручная 1');
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        fillAdd(context.document, 'Ручная 2');
+        await vm.runInContext('Warehouse.doAddReadyGoods()', context);
+        fillWriteOff(context.document);
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        fillWriteOff(context.document);
+        await vm.runInContext('Warehouse.doWriteOff()', context);
+        assert.deepEqual(base.lists.stock.map(row => `${row.product_name}:${row.qty}`), ['Брелок:2', 'Значок:6', 'Ручная 1:2', 'Ручная 2:2']);
+        assert.deepEqual(base.lists.history.map(entry => entry.type), ['from_order', 'from_order', 'manual_add', 'manual_add', 'writeoff', 'writeoff']);
+        assert.equal(base.lists.sales.length, 2, 'both sales are recorded');
+
+        // Две другие вкладки добавляют вручную в ту же миллисекунду: у каждой своя позиция.
+        const randoms = [0.25, 0.75];
+        for (const [index, tab] of [createReadyGoodsTab(base), createReadyGoodsTab(base)].entries()) {
+            Math.random = () => randoms[index];
+            fillAdd(tab.document, `Вкладка ${index + 1}`);
+            await vm.runInContext('Warehouse.doAddReadyGoods()', tab);
+        }
+        assert.deepEqual(base.lists.stock.slice(4).map(row => row.product_name), ['Вкладка 1', 'Вкладка 2']);
+        ['stock', 'history', 'sales'].forEach(list => {
+            const ids = base.lists[list].map(row => row.id);
+            assert.ok(ids.every(id => Number.isSafeInteger(id)), `${list}: numeric ids below 2^53`);
+        });
+    } finally {
+        Date.now = realNow;
+        Math.random = realRandom;
+        Object.assign(context, originals);
+        vm.runInContext(`
+            App.toast = globalThis.__sameMsOriginals.toast;
+            Warehouse.renderStats = globalThis.__sameMsOriginals.renderStats;
+            Warehouse.renderReadyGoodsView = globalThis.__sameMsOriginals.renderReadyGoodsView;
+        `, context);
+    }
+}
+
 // План производства меняет статус так же, как доска: «Готово» переносит «на продажу» на склад,
 // возврат с проданным запрещён, без продаж — снимает позицию.
 async function smokeProductionPlanStatusSyncsReadyGoods(context) {
@@ -10689,6 +10776,7 @@ async function main() {
     await smokeTirageReadyGoodsSyncToSplit(context);
     await smokeTirageCompletedOrderSaveFollowsReadyGoods(context);
     await smokeProductionPlanStatusSyncsReadyGoods(context);
+    await smokeReadyGoodsRecordsCreatedInOneMillisecondKeepTheirIds(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);

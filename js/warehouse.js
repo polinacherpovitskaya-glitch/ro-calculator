@@ -7267,7 +7267,7 @@ const Warehouse = {
             // Record sale
             const records = await loadSalesRecords();
             records.push({
-                id: Date.now(),
+                id: this._newReadyGoodsId(),
                 ready_goods_id: item.id,
                 product_name: item.product_name,
                 order_name: item.order_name || '',
@@ -7287,7 +7287,7 @@ const Warehouse = {
             // History
             const history = await loadReadyGoodsHistory();
             history.push({
-                id: Date.now(),
+                id: this._newReadyGoodsId(),
                 type: 'writeoff',
                 product_name: item.product_name,
                 location_type: this._normalizeReadyGoodsLocation(item.location_type),
@@ -7383,7 +7383,7 @@ const Warehouse = {
         try {
             const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
             rg.push({
-                id: Date.now(),
+                id: this._newReadyGoodsId(),
                 product_name: name,
                 order_name: 'Ручное добавление',
                 order_id: null,
@@ -7399,7 +7399,7 @@ const Warehouse = {
 
             const history = await loadReadyGoodsHistory();
             history.push({
-                id: Date.now(),
+                id: this._newReadyGoodsId(),
                 type: 'manual_add',
                 product_name: name,
                 location_type: locationType,
@@ -7453,7 +7453,7 @@ const Warehouse = {
             const costPerUnit = qty > 0 ? Math.round(costTotal * 100) / 100 : 0;
 
             rg.push({
-                id: Date.now() + addedCount,
+                id: this._newReadyGoodsId(),
                 product_name: item.product_name || 'Товар',
                 order_name: orderName || 'Заказ',
                 order_id: orderId,
@@ -7466,7 +7466,7 @@ const Warehouse = {
             });
 
             history.push({
-                id: Date.now() + addedCount + 50000,
+                id: this._newReadyGoodsId(),
                 type: 'from_order',
                 product_name: item.product_name || 'Товар',
                 order_name: orderName,
@@ -7512,7 +7512,7 @@ const Warehouse = {
                     return;
                 }
                 history.push({
-                    id: this._nextReadyGoodsHistoryId(),
+                    id: this._newReadyGoodsId(),
                     type: 'return_to_order',
                     product_name: item.product_name || 'Товар',
                     order_name: item.order_name || orderName || 'Заказ',
@@ -7547,11 +7547,15 @@ const Warehouse = {
         return run;
     },
 
-    // A history row needs its own id: a save is a patch, and a row with the same id replaces the
-    // older one. Milliseconds × 1000 plus a counter of this tab.
-    _nextReadyGoodsHistoryId() {
-        this._readyGoodsHistorySeq = ((this._readyGoodsHistorySeq || 0) + 1) % 1000;
-        return Date.now() * 1000 + this._readyGoodsHistorySeq;
+    // Id of a new ready goods record (a stock position, a sale, a history row). Saves are patches
+    // and a record with the same id replaces the older one — also one that another tab created in
+    // the same millisecond. Milliseconds × 1000 plus a random 0–999 (stays below 2^53), and
+    // strictly growing within this tab. Tirage positions keep their own id (_tiragePositionId).
+    _newReadyGoodsId() {
+        let id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        if (this._lastReadyGoodsId && id <= this._lastReadyGoodsId) id = this._lastReadyGoodsId + 1;
+        this._lastReadyGoodsId = id;
+        return id;
     },
 
     // All three ready goods lists are read once before a write: a save is a patch against the
@@ -7752,7 +7756,7 @@ const Warehouse = {
         const employee = App.getCurrentEmployeeName() || '';
         const addHistory = (entry) => {
             stores.history.push({
-                id: this._nextReadyGoodsHistoryId(),
+                id: this._newReadyGoodsId(),
                 order_name: name,
                 order_id: Number(orderId),
                 location_type: 'our',
@@ -7920,7 +7924,7 @@ const Warehouse = {
             const current = parseFloat(item.cost_per_unit) || 0;
             if (!(next > 0) || next === current) return;
             stores.history.push({
-                id: this._nextReadyGoodsHistoryId(),
+                id: this._newReadyGoodsId(),
                 type: 'cost_recalc',
                 product_name: item.product_name || 'Товар',
                 order_name: name,
