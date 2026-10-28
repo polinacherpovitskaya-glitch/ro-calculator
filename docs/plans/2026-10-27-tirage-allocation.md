@@ -207,6 +207,6 @@ assert.equal(b.rows.some(r => r.key === 'taxes'), false);
 
 ### Task 7: Версия, полный прогон, PR
 
-- [ ] **Step 1:** `git fetch origin main && git show origin/main:js/version.json` → поднять до `max(main)+1` (ожидаем `v482`) в 4 местах и `?v=` изменённых файлов.
-- [ ] **Step 2:** прогнать все `node tests/*.js` из `deploy-pages.yml` (ожидаемо падает только `task-notification-smoke.js` локально — нет `bot/`) и `cd ops/api && node --test test/compat-blob-patch.test.js test/atomic-order-save-unit.test.js test/compat-rows-narrow.test.js`.
+- [x] **Step 1:** `git fetch origin main && git show origin/main:js/version.json` → поднять до `max(main)+1` (ожидаем `v482`) в 4 местах и `?v=` изменённых файлов.
+- [x] **Step 2:** прогнать все `node tests/*.js` из `deploy-pages.yml` (ожидаемо падает только `task-notification-smoke.js` локально — нет `bot/`) и `cd ops/api && node --test test/compat-blob-patch.test.js test/atomic-order-save-unit.test.js test/compat-rows-narrow.test.js`.
 - [ ] **Step 3:** коммит `Bump version v481 -> v482`, пуш ветки `claude/tirage-allocation`, PR со спекой и планом.
