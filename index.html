@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=432">
+  <link rel="stylesheet" href="css/style.css?v=433">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v484';
+        const CURRENT_HTML_VERSION = 'v485';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v484</span></span>
+            <span>Калькулятор <span id="app-version">v485</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -656,39 +656,26 @@
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
+        <!-- Карточка заказа без вкладок (docs/specs/2026-10-28-order-card-redesign.md). Блоки рисует
+             js/order-detail.js; раскрывающееся открывается прямо под своей кнопкой. -->
         <div id="page-order-detail" class="page">
-            <div class="page-header">
-                <div class="flex gap-8" style="align-items:center">
-                    <button class="btn btn-outline btn-sm" onclick="App.navigate('orders')">&larr; Назад</button>
-                    <h1 id="od-title" style="margin:0">Заказ</h1>
-                    <span class="badge" id="od-status-badge"></span>
+            <div class="odc">
+                <section class="odc-card odc-top" aria-label="Заказ с первого взгляда">
+                    <div id="od-head" class="odc-head-wrap">
+                        <h1 id="od-title" class="odc-title">Заказ</h1>
+                    </div>
+                    <div id="od-type" class="odc-type" aria-label="Тип заказа и как продаём"></div>
+                    <div id="od-stats" class="odc-tiles"></div>
+                    <div id="od-money" class="odc-money" aria-label="Деньги"></div>
+                    <div id="od-panel" class="odc-panel" hidden></div>
+                    <div id="od-stages" class="odc-stages"></div>
+                </section>
+                <div class="odc-columns">
+                    <section id="od-what" class="odc-card odc-what" aria-label="Что делаем"></section>
+                    <div id="od-progress" class="odc-side"></div>
                 </div>
-                <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="OrderDetail.cloneOrder()">&#10697; Копировать</button>
-                    <button class="btn btn-outline" onclick="OrderDetail.openInCalculator()">&#9998; Калькулятор</button>
-                    <button class="btn btn-primary" onclick="OrderDetail.changeStatus()">Сменить статус</button>
-                </div>
+                <section id="od-more" class="odc-card odc-more" aria-label="Подробности заказа"></section>
             </div>
-
-            <div class="stats-grid" id="od-stats"></div>
-
-            <div class="od-tabs">
-                <button class="od-tab-btn active" data-tab="info" onclick="OrderDetail.switchTab('info')">&#128196; Информация</button>
-                <button class="od-tab-btn" data-tab="production" onclick="OrderDetail.switchTab('production')">&#9881; Производство</button>
-                <button class="od-tab-btn" data-tab="files" onclick="OrderDetail.switchTab('files')">&#128193; Файлы</button>
-                <button class="od-tab-btn" data-tab="items" onclick="OrderDetail.switchTab('items')">&#128230; Изделия</button>
-                <button class="od-tab-btn" data-tab="hardware" onclick="OrderDetail.switchTab('hardware')">&#128295; Фурнитура</button>
-                <button class="od-tab-btn" data-tab="tasks" onclick="OrderDetail.switchTab('tasks')">&#9745; Задачи</button>
-                <button class="od-tab-btn" data-tab="china" onclick="OrderDetail.switchTab('china')">&#127464;&#127475; Китай</button>
-            </div>
-
-            <div id="od-tab-info" class="od-tab-content"></div>
-            <div id="od-tab-production" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-files" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-items" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-hardware" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-tasks" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-china" class="od-tab-content" style="display:none"></div>
         </div>
 
         <!-- ========== PRODUCTION PLAN ========== -->
@@ -3654,9 +3641,9 @@
 <script src="js/supabase.js?v=482"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=483"></script>
-<script src="js/app.js?v=484"></script>
+<script src="js/app.js?v=485"></script>
 <script src="js/tpa.js?v=4"></script>
-<script src="js/order-detail.js?v=483"></script>
+<script src="js/order-detail.js?v=485"></script>
 <script src="js/orders.js?v=483"></script>
 <script src="js/production_plan.js?v=482"></script>
 <script src="js/analytics.js?v=46g"></script>
@@ -3672,7 +3659,7 @@
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=27"></script>
 <script src="js/indirect_costs.js?v=9"></script>
-<script src="js/factual.js?v=482"></script>
+<script src="js/factual.js?v=485"></script>
 <script src="js/production_load.js?v=409"></script>
 <script src="js/bonuses.js?v=24"></script>
 <script src="js/china.js?v=165"></script>

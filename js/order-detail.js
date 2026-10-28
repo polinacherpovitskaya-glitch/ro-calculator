@@ -11,31 +11,487 @@ const PAYMENT_STATUSES = [
     { key: 'special',       label: 'Особые условия',      color: 'red' },
 ];
 
-const HARDWARE_STATUSES = [
-    { key: 'discussion',      label: 'Обсуждение',       color: 'gray' },
-    { key: 'from_stock',      label: 'Из наличия',       color: 'blue' },
-    { key: 'ordered_waiting', label: 'Заказана, ждём',   color: 'orange' },
-    { key: 'arrived',         label: 'Приехала',         color: 'green' },
-    { key: 'not_needed',      label: 'Не нужна',         color: 'gray' },
-    { key: 'to_make',         label: 'Сделать',          color: 'yellow' },
-];
-
 // Plastic is always PP, print type is set at printing level — removed from UI
+
+// =============================================
+// Логика карточки заказа — чистые функции без DOM: этапы, доли тиража, метки склада, часы по
+// этапам, вердикт («лицо») с причинами и причины расхождения маржи. Правила — спецификация
+// docs/specs/2026-10-28-order-card-redesign.md («Вердикт»). Даты — строки YYYY-MM-DD, «сегодня»
+// передаётся снаружи. Тест: tests/order-card-smoke.js.
+// =============================================
+
+const OrderCardLogic = {
+    MONTHS_GENITIVE: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа',
+        'сентября', 'октября', 'ноября', 'декабря'],
+
+    // Строка этапов по порядку. «Образец» виден, только пока заказ — образец; печать, сборка и
+    // упаковка — если они есть в заказе (или заказ уже на этом этапе).
+    STAGE_STEPS: [
+        { value: 'draft', label: 'Черновик' },
+        { value: 'sample', label: 'Образец', onlyWhenCurrent: true },
+        { value: 'production_casting', label: 'Выливание' },
+        { value: 'production_printing', label: 'Печать', when: 'hasPrinting' },
+        { value: 'production_hardware', label: 'Сборка', when: 'hasHardware' },
+        { value: 'production_packaging', label: 'Упаковка', when: 'hasPackaging' },
+        { value: 'delivery', label: 'Доставка' },
+        { value: 'completed', label: 'Готово' },
+    ],
+    // Прежние статусы, которые строка этапов показывает как свои.
+    STATUS_ALIASES: { calculated: 'draft', production: 'production_casting', in_production: 'production_casting' },
+    // Где по табелю этап и где по статусу заказ: срезание — часть литья; доставка и «Готово» —
+    // дальше всех этапов табеля.
+    TIMESHEET_STAGE_LEVEL: { casting: 0, trim: 0, assembly: 1, packaging: 2 },
+    STATUS_STAGE_LEVEL: {
+        production_casting: 0, production_printing: 0, production_hardware: 1,
+        production_packaging: 2, delivery: 3, completed: 3,
+    },
+    // До упаковки: за 3 дня до срока такой заказ — риск.
+    BEFORE_PACKAGING: ['sample', 'production_casting', 'production_printing', 'production_hardware'],
+    PAID_STATUSES: ['paid_100', 'postpay_100'],
+    // Час цеха, когда зарплата этапа неизвестна, ₽ (ставка по плану). Вместе с косвенными за час
+    // им же сортируются причины без рублей (их рубли видит только администратор).
+    FALLBACK_SALARY_PER_HOUR: 550,
+    EPS: 1e-9,
+
+    // ---------- даты и числа ----------
+
+    _isoParts(value) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? '').trim());
+        if (!match) return null;
+        const y = Number(match[1]);
+        const m = Number(match[2]);
+        const d = Number(match[3]);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+        return { y, m, d };
+    },
+
+    _dayNumber(value) {
+        const parts = OrderCardLogic._isoParts(value);
+        return parts ? Math.round(Date.UTC(parts.y, parts.m - 1, parts.d) / 86400000) : null;
+    },
+
+    // Дней от `from` до `to` (обе даты — YYYY-MM-DD или начало ISO-времени); null без одной из них.
+    _daysBetween(from, to) {
+        const a = OrderCardLogic._dayNumber(from);
+        const b = OrderCardLogic._dayNumber(to);
+        return a === null || b === null ? null : b - a;
+    },
+
+    _today(value) {
+        if (OrderCardLogic._isoParts(value)) return String(value).trim().slice(0, 10);
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    },
+
+    _num(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    },
+
+    _finiteOrNull(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    },
+
+    _formatNumber(value, maxDigits) {
+        const n = OrderCardLogic._num(value);
+        return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: maxDigits }).format(n === 0 ? 0 : n);
+    },
+
+    // Часы до десятой: 12,1; 8.
+    _formatHours(value) {
+        return OrderCardLogic._formatNumber(value, 1);
+    },
+
+    // Проценты до десятой, через пробел: «30,1 %».
+    _formatPct(value) {
+        return `${OrderCardLogic._formatNumber(value, 1)} %`;
+    },
+
+    // '2026-10-26' → '26 октября'; пустая строка, если даты нет.
+    formatDayMonth(value) {
+        const parts = OrderCardLogic._isoParts(value);
+        return parts ? `${parts.d} ${OrderCardLogic.MONTHS_GENITIVE[parts.m - 1]}` : '';
+    },
+
+    _normalizeStatus(status) {
+        const key = String(status || '').trim();
+        return OrderCardLogic.STATUS_ALIASES[key] || key || 'draft';
+    },
+
+    // Подпись этапа строки этапов для статуса: «Выливание», «Готово»; '' — у отменённого.
+    stageLabel(status) {
+        const value = OrderCardLogic._normalizeStatus(status);
+        const step = OrderCardLogic.STAGE_STEPS.find(item => item.value === value);
+        return step ? step.label : '';
+    },
+
+    // Зарплатные строки и «Косвенные» в разбивке «Факта» — их видит только администратор.
+    isSalaryRow(row) {
+        return !!row && (row.isSalary === true || String(row.key || '').startsWith('salary_') || row.key === 'indirect_production');
+    },
+
+    // ---------- этапы ----------
+
+    // { list: [{ value, label, state: 'done'|'current'|'todo' }], next: { value, label } | null }.
+    // У отменённого заказа текущего этапа и следующего нет.
+    stages({ status, hasPrinting = false, hasHardware = false, hasPackaging = false } = {}) {
+        const current = OrderCardLogic._normalizeStatus(status);
+        const flags = { hasPrinting: !!hasPrinting, hasHardware: !!hasHardware, hasPackaging: !!hasPackaging };
+        const steps = OrderCardLogic.STAGE_STEPS.filter(step => step.value === current
+            || (!step.onlyWhenCurrent && (!step.when || flags[step.when])));
+        const currentIndex = steps.findIndex(step => step.value === current);
+        const list = steps.map((step, index) => ({
+            value: step.value,
+            label: step.label,
+            state: currentIndex < 0 || index > currentIndex ? 'todo' : (index === currentIndex ? 'current' : 'done'),
+        }));
+        const nextStep = currentIndex >= 0 && currentIndex < steps.length - 1 ? steps[currentIndex + 1] : null;
+        return { list, next: nextStep ? { value: nextStep.value, label: nextStep.label } : null };
+    },
+
+    // ---------- часы по этапам ----------
+
+    _stageRow(stage) {
+        const num = OrderCardLogic._num;
+        return {
+            key: stage.key,
+            label: stage.label,
+            planHours: round2(num(stage.planHours)),
+            factHours: round2(num(stage.factHours)),
+            salary: round2(num(stage.salary)),
+            people: (Array.isArray(stage.people) ? stage.people : [])
+                .map(person => ({ name: String(person?.name || ''), hours: round2(num(person?.hours)) })),
+            firstDate: stage.firstDate || null,
+            lastDate: stage.lastDate || null,
+        };
+    },
+
+    // Литьё и срезание одной строкой: часы, зарплата, люди (по убыванию часов) и даты вместе.
+    _mergeCastingAndTrim(casting, trim) {
+        const hoursByName = new Map();
+        [...casting.people, ...trim.people].forEach(person => {
+            if (!person.name) return;
+            hoursByName.set(person.name, round2((hoursByName.get(person.name) || 0) + person.hours));
+        });
+        const people = [...hoursByName.entries()]
+            .map(([name, hours]) => ({ name, hours }))
+            .sort((a, b) => b.hours - a.hours);
+        const firstDates = [casting.firstDate, trim.firstDate].filter(Boolean).sort();
+        const lastDates = [casting.lastDate, trim.lastDate].filter(Boolean).sort();
+        return {
+            key: 'casting',
+            label: 'Литьё и срезание',
+            planHours: round2(casting.planHours + trim.planHours),
+            factHours: round2(casting.factHours + trim.factHours),
+            salary: round2(casting.salary + trim.salary),
+            people,
+            firstDate: firstDates[0] || null,
+            lastDate: lastDates[lastDates.length - 1] || null,
+        };
+    },
+
+    // Строки «Как идёт» из `stages` «Факта» (computeOrderRealCost): срезание без своего плана
+    // показывается вместе с литьём; этапы без плана и без часов не выводятся.
+    // Строка: { key, label, planHours, factHours, salary, people, firstDate, lastDate }.
+    stageHoursRows(stages) {
+        const list = (Array.isArray(stages) ? stages : []).filter(stage => stage && stage.key);
+        const castingStage = list.find(stage => stage.key === 'casting');
+        const trimStage = list.find(stage => stage.key === 'trim');
+        const mergeTrim = !!castingStage && !!trimStage && !(OrderCardLogic._num(trimStage.planHours) > 0);
+        const rows = [];
+        list.forEach(stage => {
+            if (mergeTrim && stage === trimStage) return;
+            if (mergeTrim && stage === castingStage) {
+                rows.push(OrderCardLogic._mergeCastingAndTrim(OrderCardLogic._stageRow(castingStage), OrderCardLogic._stageRow(trimStage)));
+                return;
+            }
+            rows.push(OrderCardLogic._stageRow(stage));
+        });
+        return rows.filter(row => row.planHours > 0 || row.factHours > 0);
+    },
+
+    // Подпись самого дальнего этапа табеля с часами, который дальше этапа статуса, или null:
+    // «по табелю уже идёт сборка, а статус — выливание».
+    timesheetAhead({ status, stageRows } = {}) {
+        const statusLevel = OrderCardLogic.STATUS_STAGE_LEVEL[OrderCardLogic._normalizeStatus(status)];
+        if (statusLevel === undefined) return null;
+        let furthest = null;
+        (Array.isArray(stageRows) ? stageRows : []).forEach(row => {
+            const level = OrderCardLogic.TIMESHEET_STAGE_LEVEL[row?.key];
+            if (level === undefined || level <= statusLevel || !(OrderCardLogic._num(row.factHours) > 0)) return;
+            if (!furthest || level >= furthest.level) furthest = { level, label: row.label };
+        });
+        return furthest ? furthest.label : null;
+    },
+
+    // ---------- тип заказа и как продаём ----------
+
+    // Доли тиража: [{ key, label, qty, how }], key ∈ commercial|stock|partner|marketing|rework|b2c.
+    // tirageLines — строки с разметкой ({ name, quantity, split }, OrderDetail._collectTirageLines),
+    // products — все изделия заказа ({ quantity }), по ним считается тираж (без них — по строкам
+    // разметки); штуки без разметки — клиенту.
+    typeParts({ purpose, clientName, tirageLines, products, stockPrice } = {}) {
+        const kind = normalizeProductionPurpose(purpose);
+        const count = value => Math.max(0, Math.round(OrderCardLogic._num(value)));
+        const lines = (Array.isArray(tirageLines) ? tirageLines : []).filter(Boolean);
+        const productsQty = (Array.isArray(products) ? products : [])
+            .reduce((sum, product) => sum + count(product?.quantity ?? product?.qty), 0);
+        const linesQty = lines.reduce((sum, line) => sum + count(line.quantity), 0);
+        const totalQty = productsQty > 0 ? productsQty : linesQty;
+        const client = String(clientName || '').trim();
+        const whole = (key, label, how) => (totalQty > 0 ? [{ key, label, qty: totalQty, how }] : []);
+
+        if (kind === 'marketing') return whole('marketing', 'Маркетинг', 'дарим, не продаём');
+        if (kind === 'stock_sample') return whole('stock', 'Сток', 'делаем на склад');
+        if (kind === 'rework') return whole('rework', 'Переделка брака', 'переделываем брак');
+        if (isB2CClientName(client)) return whole('b2c', 'B2C', 'всё на склад готовой продукции');
+
+        const splits = lines.map(line => line.split).filter(split => split && typeof split === 'object');
+        const sum = part => splits.reduce((total, split) => total + count(split[part]), 0);
+        const notes = field => [...new Set(splits.map(split => String(split[field] || '').trim()).filter(Boolean))].join(', ');
+        const withNote = (text, note) => (note ? `${text} — ${note}` : text);
+        const stock = sum('stock');
+        const partner = sum('partner');
+        const marketing = sum('gift') + sum('sample');
+        const commercial = Math.max(0, totalQty - stock - partner - marketing);
+        const ownPrice = OrderCardLogic._num(stockPrice);
+        const linePrice = OrderCardLogic._num((splits.find(split => count(split.stock) > 0) || {}).stock_price);
+        const price = ownPrice > 0 ? ownPrice : linePrice;
+        return [
+            { key: 'commercial', label: 'Коммерция', qty: commercial, how: withNote('по счёту клиенту', client) },
+            { key: 'stock', label: 'Сток', qty: stock, how: price > 0 ? `продаём сами со склада по ${formatRub(price)}` : 'продаём сами со склада' },
+            { key: 'partner', label: 'Партнёру', qty: partner, how: withNote('бесплатно', notes('partner_note')) },
+            { key: 'marketing', label: 'Маркетинг', qty: marketing, how: withNote('дарим', notes('gift_note')) },
+        ].filter(part => part.qty > 0);
+    },
+
+    // ---------- склад ----------
+
+    // Метка строки фурнитуры/упаковки (строки OrderDetail.renderHardwareTab): нужно — targetQty,
+    // а без него plannedQty; резерв — currentReserveQty; свободно на складе — availableQty.
+    stockLabel(row) {
+        const r = row || {};
+        const num = OrderCardLogic._num;
+        const eps = 1e-6;
+        const need = Math.max(0, num(r.targetQty) || num(r.plannedQty));
+        const reserve = Math.max(0, num(r.currentReserveQty));
+        const free = Math.max(0, num(r.availableQty));
+        const qty = value => OrderCardLogic._formatNumber(value, 2);
+        if (r.ready) return { tone: 'green', text: 'собрано, списано' };
+        if (!(need > 0)) return { tone: 'gray', text: 'не нужно' };
+        if (reserve + eps >= need) return { tone: 'blue', text: `в резерве · на складе ${qty(free)}` };
+        if (reserve + free + eps >= need) return { tone: 'gray', text: `есть на складе ${qty(free)}` };
+        return { tone: 'red', text: `не хватает ${qty(Math.ceil(need - reserve - free - eps))}` };
+    },
+
+    // ---------- вердикт ----------
+
+    // { tone: 'green'|'yellow'|'red'|'gray', verdict, reasons (до 4, сначала самые серьёзные) }.
+    health(input = {}) {
+        const status = OrderCardLogic._normalizeStatus(input.status);
+        const today = OrderCardLogic._today(input.today);
+        if (status === 'cancelled' || status === 'deleted') return { tone: 'gray', verdict: 'Отменён', reasons: [] };
+        if (status === 'draft') {
+            const sinceStart = OrderCardLogic._daysBetween(input.deadlineStart, today);
+            if (sinceStart !== null && sinceStart > 0) {
+                return {
+                    tone: 'yellow',
+                    verdict: 'Пора запускать',
+                    reasons: [`Старт по плану был ${OrderCardLogic.formatDayMonth(input.deadlineStart)}, заказ ещё черновик.`],
+                };
+            }
+            return { tone: 'gray', verdict: 'Черновик', reasons: [] };
+        }
+        if (status === 'completed') return OrderCardLogic._healthCompleted(input);
+        return OrderCardLogic._healthInWork(input, status, today);
+    },
+
+    // Образец, производство, доставка.
+    _healthInWork(input, status, today) {
+        const L = OrderCardLogic;
+        const red = [];
+        const yellow = [];
+        const good = [];
+        const daysLeft = L._daysBetween(today, input.deadlineEnd);
+        const hoursPlan = L._num(input.hoursPlan);
+        const hoursFact = L._num(input.hoursFact);
+        const stageLabel = input.statusStageLabel || L.stageLabel(status);
+        const hoursText = `Часов по табелю ${L._formatHours(hoursFact)} вместо ${L._formatHours(hoursPlan)}.`;
+        const overdue = daysLeft !== null && daysLeft < 0;
+        const hoursRed = hoursPlan > 2 && hoursFact > hoursPlan * 1.5 + L.EPS;
+        const hoursYellow = !hoursRed && hoursPlan > 0 && hoursFact > hoursPlan * 1.15 + L.EPS;
+        const shortage = (Array.isArray(input.stock?.shortageNames) ? input.stock.shortageNames : [])
+            .map(name => String(name || '').trim()).filter(Boolean);
+        const paymentStatus = String(input.paymentStatus || '');
+        // Некоммерческому заказу (маркетинг, сток, переделка) счёт не нужен.
+        const clientQty = isNonCommercialProductionPurpose(input.purpose) ? 0 : L._num(input.clientQty);
+
+        if (overdue) red.push(`Срок прошёл ${L.formatDayMonth(input.deadlineEnd)}.`);
+        if (hoursRed) red.push(hoursText);
+        if (!overdue && daysLeft !== null && daysLeft <= 3 && L.BEFORE_PACKAGING.includes(status)) {
+            yellow.push(`До срока ${daysLeft} дн., а заказ ещё на этапе «${stageLabel}».`);
+        }
+        if (hoursYellow) yellow.push(hoursText);
+        if (shortage.length) yellow.push(`На складе не хватает: ${shortage.join(', ')}.`);
+        if (input.timesheetStageLabel) yellow.push(`По табелю уже идёт «${input.timesheetStageLabel}», а в статусе — «${stageLabel}».`);
+        if (input.notesEmpty) yellow.push('Нет ТЗ для цеха.');
+        if (clientQty > 0 && (!paymentStatus || paymentStatus === 'not_sent')) yellow.push('Счёт клиенту не выставлен.');
+        if (input.partnerWithoutNote) yellow.push('Не указано, кому уходит партнёрская доля.');
+
+        if (red.length) return { tone: 'red', verdict: 'Горит', reasons: [...red, ...yellow].slice(0, 4) };
+        if (yellow.length) return { tone: 'yellow', verdict: 'Есть риски', reasons: yellow.slice(0, 4) };
+
+        if (paymentStatus === 'paid_100') good.push('Оплачено 100 %.');
+        if (daysLeft !== null) good.push(`До срока ${daysLeft} дн.`);
+        if (hoursPlan > 0 && hoursFact > 0) good.push(`По часам сделано ${Math.round((hoursFact / hoursPlan) * 100)} %.`);
+        return { tone: 'green', verdict: 'Идёт по плану', reasons: good.slice(0, 4) };
+    },
+
+    // «Готово»: опоздание — дата сдачи (completedAt) против срока (deadlineEnd).
+    _healthCompleted(input) {
+        const L = OrderCardLogic;
+        const red = [];
+        const yellow = [];
+        const good = [];
+        const lateDays = L._daysBetween(input.deadlineEnd, input.completedAt);
+        const late = lateDays !== null && lateDays > 0;
+        const lateText = late
+            ? `Сдали ${L.formatDayMonth(input.completedAt)}, срок был ${L.formatDayMonth(input.deadlineEnd)} — на ${lateDays} дн. позже.`
+            : '';
+        const marginPlan = L._finiteOrNull(input.marginPlan);
+        const marginNow = L._finiteOrNull(input.marginNow);
+        const marginBad = !isNonCommercialProductionPurpose(input.purpose)
+            && marginPlan !== null && marginNow !== null && marginPlan - marginNow > 10 + L.EPS;
+        const paymentStatus = String(input.paymentStatus || '');
+        const clientQty = isNonCommercialProductionPurpose(input.purpose) ? 0 : L._num(input.clientQty);
+        const unpaid = clientQty > 0 && !L.PAID_STATUSES.includes(paymentStatus);
+        const paymentLabel = (PAYMENT_STATUSES.find(item => item.key === paymentStatus) || PAYMENT_STATUSES[0]).label;
+        const noTimesheet = !input.hasTimesheet;
+        const missingStages = noTimesheet ? [] : (Array.isArray(input.stageRows) ? input.stageRows : [])
+            .filter(row => row && L._num(row.planHours) > 0 && !(L._num(row.factHours) > 0));
+
+        if (late && lateDays > 7) red.push(lateText);
+        if (marginBad) red.push(`Маржа ${L._formatPct(marginNow)} вместо ${L._formatPct(marginPlan)}.`);
+        if (late && lateDays <= 7) yellow.push(lateText);
+        if (unpaid) yellow.push(`Деньги не пришли: «${paymentLabel}».`);
+        if (noTimesheet) yellow.push('В табель не внесли ни часа.');
+        missingStages.forEach(row => yellow.push(`Этап «${row.label}» в табель не внесли.`));
+        if (lateDays !== null && !late) good.push('Сдали в срок.');
+        if (paymentStatus === 'paid_100') good.push('Оплачено 100 %.');
+
+        const reasons = [...red, ...yellow, ...good].slice(0, 4);
+        if (red.length) return { tone: 'red', verdict: 'Закрыт плохо', reasons };
+        if (late) return { tone: 'yellow', verdict: 'Сдали с опозданием', reasons };
+        if (unpaid) return { tone: 'yellow', verdict: 'Сдали, ждём деньги', reasons };
+        if (yellow.length) return { tone: 'yellow', verdict: 'Закрыт с вопросами', reasons };
+        return { tone: 'green', verdict: 'Закрыт хорошо', reasons };
+    },
+
+    // ---------- почему маржа другая ----------
+
+    // { planPct, nowPct, deltaPp, deltaRub, reasons: [{ text, rub }] } — до 3 причин по модулю ₽.
+    // deltaRub = planTotal − realTotal: на сколько больше (+) или меньше (−) заказ заработает.
+    // rub у причины — тоже изменение заработка. Этап — когда часов по табелю больше или меньше
+    // плана на 0,5 ч и больше; этап без часов в табеле не причина: «Факт» считает его по плану.
+    // Рубли этапа (зарплата и косвенные) — только при canSeeSalary, иначе null. Статья
+    // себестоимости (кроме зарплаты и косвенных) — когда «взято в расчёт» отличается от плана на
+    // max(500 ₽, 2 % плана статьи). Вход — поля realCost «Факта» по отдельности (rows, planTotal,
+    // realTotal, indirectPerHour) или сам realCost.
+    marginReasons(input = {}) {
+        const L = OrderCardLogic;
+        const real = input.realCost && typeof input.realCost === 'object' ? input.realCost : {};
+        const rows = Array.isArray(input.rows) ? input.rows : (Array.isArray(real.rows) ? real.rows : []);
+        const stageRows = Array.isArray(input.stageRows) ? input.stageRows : [];
+        const planTotal = L._finiteOrNull(input.planTotal ?? real.planTotal);
+        const realTotal = L._finiteOrNull(input.realTotal ?? real.realTotal);
+        const indirectPerHour = L._num(input.indirectPerHour ?? real.indirectPerHour);
+        const planPct = L._finiteOrNull(input.planPct);
+        const nowPct = L._finiteOrNull(input.nowPct);
+        const canSeeSalary = !!input.canSeeSalary;
+        const hasTimesheet = input.hasTimesheet ?? real.hasTimesheet;
+        const candidates = [];
+
+        // Без табеля «Факт» берёт всю себестоимость по плану — объяснять нечего.
+        if (hasTimesheet !== false) {
+            stageRows.forEach(row => {
+                if (!row) return;
+                const fact = L._num(row.factHours);
+                const plan = L._num(row.planHours);
+                if (!(fact > 0)) return;
+                const deltaHours = round2(fact - plan);
+                if (Math.abs(deltaHours) < 0.5 - L.EPS) return;
+                const salary = L._num(row.salary);
+                const salaryPerHour = salary > 0 ? salary / fact : L.FALLBACK_SALARY_PER_HOUR;
+                const rub = Math.round(-deltaHours * (salaryPerHour + indirectPerHour));
+                candidates.push({
+                    text: `${row.label}: ${L._formatHours(fact)} ч вместо ${L._formatHours(plan)}`,
+                    rub: canSeeSalary ? rub : null,
+                    weight: canSeeSalary ? Math.abs(rub) : Math.abs(deltaHours) * (L.FALLBACK_SALARY_PER_HOUR + indirectPerHour),
+                });
+            });
+            rows.forEach(row => {
+                if (!row || L.isSalaryRow(row)) return;
+                const plan = L._num(row.plan);
+                const used = L._num(row.used);
+                const diff = round2(used - plan);
+                if (Math.abs(diff) < Math.max(500, Math.abs(plan) * 0.02) - L.EPS) return;
+                const rub = Math.round(-diff);
+                candidates.push({
+                    text: `${row.label || row.key}: ${formatRub(Math.round(used))} вместо ${formatRub(Math.round(plan))}`,
+                    rub,
+                    weight: Math.abs(rub),
+                });
+            });
+        }
+        candidates.sort((a, b) => b.weight - a.weight);
+        return {
+            planPct,
+            nowPct,
+            deltaPp: planPct !== null && nowPct !== null ? round2(nowPct - planPct) : null,
+            deltaRub: planTotal !== null && realTotal !== null ? Math.round(planTotal - realTotal) : null,
+            reasons: candidates.slice(0, 3).map(({ text, rub }) => ({ text, rub })),
+        };
+    },
+};
+
+// Иконки карточки — inline SVG (без эмодзи), цвет — currentColor.
+const ORDER_CARD_ICONS = {
+    back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>',
+    dots: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>',
+    chevron: '<svg class="odc-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>',
+    check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>',
+    arrow: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg>',
+    close: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>',
+};
 
 const OrderDetail = {
     currentOrder: null,
     currentItems: [],
-    currentFinancial: null,
-    currentTab: 'info',
     deliveryScheduleDraft: [],
     // Честная шапка: реальная себестоимость заказа из «Факта» и склад его штук «на продажу».
     // Приходят после показа карточки (см. _beginHonestNumbers). realCostState: 'none' — не нужна
     // или не пришла, 'loading' — ждём «Факт», 'ready' — ответ в currentRealCost.
     currentRealCost: null,
     realCostState: 'none',
-    realCostDetailsOpen: false,
     tirageStock: null,
     tirageRecalcBusy: false,
+    // Фурнитура и упаковка заказа со склада (строки _buildHardwareRows): hardwareState 'loading' —
+    // читаем склад, 'ready' — строки в hardwareRows, 'error' — склад не прочитался, 'none' — склада нет.
+    hardwareRows: null,
+    hardwareState: 'none',
+    // Что раскрыто: панель под плитками ('money' | 'payment' | 'stock' | null), меню «⋯» и его вид
+    // ('main' | 'stages' | 'cancel'), строки внизу (moreOpen[key]) и «График сдачи».
+    openPanel: null,
+    menuOpen: false,
+    menuView: 'main',
+    moreOpen: {},
+    moreCounts: {},
+    deliveryOpen: false,
+    statusBusy: false,
+    // ТЗ, которое ещё не сохранилось (или не сохранилось из-за связи): перерисовка его не теряет.
+    briefDraft: null,
 
     // ==========================================
     // LOAD
@@ -44,6 +500,8 @@ const OrderDetail = {
     async load(orderId) {
         if (!orderId) { App.navigate('orders'); return; }
 
+        // Фокус в поле прошлой карточки: уход из поля сохраняет его в тот заказ, пока он ещё на экране.
+        this._blurCardFocus();
         const data = await loadOrder(orderId);
         if (!data) {
             App.toast('Заказ не найден');
@@ -55,58 +513,368 @@ const OrderDetail = {
         this.currentItems = data.items || [];
         this.deliveryScheduleDraft = normalizeDeliverySchedule(data.order?.delivery_schedule, 0).schedule;
         this._beginHonestNumbers();
-        this.currentFinancial = this.buildLiveFinancialMeta();
-        this.currentTab = 'info';
+        // Поставили фокус, пока заказ читался, — тоже убрать: прежнее поле в новой карточке не остаётся,
+        // а его уход из фокуса ничего не пишет (поле знает свой заказ, см. _fromOtherCard).
+        this._blurCardFocus();
 
-        this.renderHeader();
-        this.renderStats();
-        this.renderInfoTab();
-        // Реальная себестоимость и склад приходят позже и дорисовываются сами: карточка их не ждёт.
-        void this.loadRealCost();
-        void this.loadTirageStock();
-        this.renderProductionTab();
-        this.renderFilesTab();
-        this.renderItemsTab();
-        await this.renderHardwareTab();
-        await this.renderTasksTab();
-        this.renderChinaTab();
+        // Всё, что есть в самом заказе, — сразу. «Факт», склад готовой продукции, фурнитура, задачи
+        // и Китай дорисовываются, когда ответят: карточка их не ждёт.
+        this.renderAll();
+        this._inBackground(this.loadRealCost(), 'loadRealCost');
+        this._inBackground(this.loadTirageStock(), 'loadTirageStock');
+        this._inBackground(this.loadHardwareRows(), 'loadHardwareRows');
+        this._inBackground(this.renderTasksTab(), 'renderTasksTab');
+        this._inBackground(this.renderChinaTab(), 'renderChinaTab');
 
-        // Show first tab
-        this.switchTab('info');
         if (data.repaired_duplicates) {
             App.toast('Дубли позиций в заказе были автоматически исправлены');
         }
     },
 
-    // ==========================================
-    // TABS
-    // ==========================================
-
-    switchTab(tab) {
-        this.currentTab = tab;
-        document.querySelectorAll('.od-tab-btn').forEach(b => {
-            b.classList.toggle('active', b.dataset.tab === tab);
-        });
-        document.querySelectorAll('.od-tab-content').forEach(c => {
-            c.style.display = c.id === 'od-tab-' + tab ? '' : 'none';
-        });
-        if (tab === 'hardware') {
-            void this.renderHardwareTab();
+    // То, что дорисовывается само: ошибка не роняет карточку, а остаётся в консоли.
+    _inBackground(promise, label) {
+        if (promise && typeof promise.catch === 'function') {
+            promise.catch(error => console.warn(`OrderDetail.${label} failed:`, error));
         }
     },
 
+    // Вся карточка из того, что уже известно.
+    renderAll() {
+        const model = this._model();
+        this.renderHeader(model);
+        this.renderType(model);
+        this.renderStats(model);
+        this.renderMoney(model);
+        this.renderPanel(model);
+        this.renderStages(model);
+        this.renderWhat(model);
+        this.renderProgress(model);
+        this.renderMore();
+        this.renderItemsTab();
+        this.renderInfoTab();
+    },
+
+    // Сегодня по часам браузера: YYYY-MM-DD.
+    _today() {
+        if (typeof App !== 'undefined' && App && typeof App.todayLocalYMD === 'function') return App.todayLocalYMD();
+        return OrderCardLogic._today();
+    },
+
+    _setHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+        return el;
+    },
+
+    // Сейчас пишут в этом поле (или внутри этого блока) — его не перерисовываем. «Пишут» — только в поле
+    // ввода: кнопка в фокусе (например, «Сохранить график» после нажатия) перерисовке не мешает.
+    _typingIn(id) {
+        if (typeof document === 'undefined') return false;
+        const box = document.getElementById(id);
+        const active = document.activeElement;
+        if (!box || !this._isTextEntry(active)) return false;
+        return box === active || (typeof box.contains === 'function' && box.contains(active));
+    },
+
+    _isTextEntry(el) {
+        if (!el || typeof el !== 'object') return false;
+        if (el.isContentEditable) return true;
+        const tag = String(el.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        if (tag !== 'INPUT') return false;
+        return !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(String(el.type || 'text').toLowerCase());
+    },
+
+    // Открывают другой заказ, а фокус ещё в поле прошлой карточки: убрать его, чтобы его ТЗ или поле не
+    // осталось на экране нового заказа (перерисовка поля в фокусе не трогает).
+    _blurCardFocus() {
+        if (typeof document === 'undefined') return;
+        const page = document.getElementById('page-order-detail');
+        const active = document.activeElement;
+        if (!page || !active || active === document.body || typeof page.contains !== 'function' || !page.contains(active)) return;
+        if (typeof active.blur === 'function') active.blur();
+    },
+
+    // Поле пишет только в тот заказ, в котором его нарисовали: data-order и data-token рядом с полем.
+    _fieldOwner() {
+        return `data-order="${this._escAttr(this.currentOrder && this.currentOrder.id)}" data-token="${this._escAttr(this._honestToken || 0)}"`;
+    },
+
+    // Значение пришло из поля прошлой карточки (или прошлого открытия этой) — не писать.
+    _fromOtherCard(owner) {
+        if (!owner || owner.orderId === undefined || owner.orderId === null || owner.orderId === '') return false;
+        return !this._isCurrent(Number(owner.token), owner.orderId);
+    },
+
+    // Тип строки заказа: product (и пустой), pendant, hardware, packaging, extra_cost.
+    _itemType(item) {
+        return String(item?.item_type || 'product').trim().toLowerCase();
+    },
+
+    _paymentStatus(key) {
+        return PAYMENT_STATUSES.find(item => item.key === key) || PAYMENT_STATUSES[0];
+    },
+
+    // Ответ, который пришёл позже, — про эту же открытую карточку? Номер открытия и id заказа (объект
+    // заказа обработчики фурнитуры подменяют свежим, поэтому сравнивать объекты нельзя).
+    _isCurrent(token, orderId) {
+        return Number(token || 0) === Number(this._honestToken || 0)
+            && !!this.currentOrder && Number(this.currentOrder.id) === Number(orderId);
+    },
+
     // ==========================================
-    // HEADER
+    // MODEL: всё, что нужно блокам, одним расчётом
     // ==========================================
 
-    renderHeader() {
-        const o = this.currentOrder;
-        document.getElementById('od-title').textContent = o.order_name || 'Без названия';
+    // Деньги, доли тиража, «Факт», склад и вердикт.
+    _model() {
+        const o = this.currentOrder || {};
+        const items = Array.isArray(this.currentItems) ? this.currentItems : [];
+        const financial = this.buildLiveFinancialMeta();
+        const purpose = normalizeProductionPurpose(financial.purpose || o.production_purpose);
+        const nonCommercial = isNonCommercialProductionPurpose(purpose);
+        const leftover = purpose === 'leftover_assembly';
+        const status = OrderCardLogic._normalizeStatus(o.status);
+        const today = this._today();
+        const real = this.realCostState === 'ready' && this.currentRealCost ? this.currentRealCost : null;
+        const realView = !nonCommercial && !leftover ? this._buildRealCostView(financial) : null;
+        const stageRows = real ? OrderCardLogic.stageHoursRows(real.stages) : [];
+        // Штуки заказа: подвесы, если они есть (бланки внутри подвеса — его части, а не ещё штуки),
+        // иначе изделия; у сборки из остатков без изделий — её количество.
+        const pendantLines = items.filter(item => this._itemType(item) === 'pendant');
+        const productLines = pendantLines.length ? pendantLines : items.filter(item => this._itemType(item) === 'product');
+        const leftoverData = leftover && typeof normalizeLeftoverAssembly === 'function'
+            ? normalizeLeftoverAssembly(o.leftover_assembly) : (o.leftover_assembly || {});
+        const products = productLines.length
+            ? productLines.map(item => ({ quantity: item.quantity }))
+            : (leftover ? [{ quantity: leftoverData && leftoverData.quantity }] : []);
+        const totalQty = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
+        const tirageLines = Array.isArray(financial.tirageLines) ? financial.tirageLines : [];
+        const parts = OrderCardLogic.typeParts({ purpose, clientName: o.client_name, tirageLines, products });
+        const clientPart = parts.find(part => part.key === 'commercial') || null;
+        const clientQty = clientPart ? clientPart.qty : 0;
+        const stockRows = this.hardwareState === 'ready' && Array.isArray(this.hardwareRows) ? this.hardwareRows : [];
+        const shortageNames = stockRows.filter(row => OrderCardLogic.stockLabel(row).tone === 'red').map(row => row.itemName);
+        const hoursPlan = Number(financial.hours || o.total_hours_plan || 0);
+        const hoursFact = real ? Number(real.hoursFact) || 0 : 0;
+        const marginPlan = Number(financial.marginPercent || o.margin_percent_plan || 0);
+        const marginNow = realView && realView.marginPercent !== null ? realView.marginPercent : null;
+        const completedAt = this._completedAt(o);
+        const health = OrderCardLogic.health({
+            status,
+            today,
+            deadlineStart: o.deadline_start || o.deadline,
+            deadlineEnd: o.deadline_end,
+            completedAt,
+            hoursPlan,
+            hoursFact,
+            // Оплата — только про клиентскую долю: у подарка или стока «оплачено» — не довод.
+            paymentStatus: clientQty > 0 ? o.payment_status : '',
+            purpose,
+            clientQty,
+            stock: { shortageNames },
+            notesEmpty: !String(o.notes || '').trim(),
+            // Пока «Факт» не ответил, про табель ничего не известно — и не жалуемся.
+            hasTimesheet: real ? !!real.hasTimesheet : true,
+            stageRows,
+            timesheetStageLabel: real ? OrderCardLogic.timesheetAhead({ status, stageRows }) : null,
+            statusStageLabel: OrderCardLogic.stageLabel(status),
+            partnerWithoutNote: tirageLines.some(line => Number(line?.split?.partner) > 0 && !String(line?.split?.partner_note || '').trim()),
+            marginPlan,
+            marginNow,
+        });
+        return {
+            order: o, items, financial, purpose, nonCommercial, leftover, status, today,
+            completed: status === 'completed', completedAt, real, realView, stageRows, products, totalQty,
+            tirageLines, parts, clientPart, clientQty, stockRows, hoursPlan, hoursFact, marginPlan, marginNow, health,
+        };
+    },
 
-        const st = STATUS_OPTIONS.find(s => s.value === o.status);
-        const badge = document.getElementById('od-status-badge');
-        badge.textContent = st ? st.label : o.status;
-        badge.className = 'badge badge-' + this._statusColor(o.status);
+    // Когда заказ сдали: completed_at, а без него — время перехода в «Готово» из снимка заказа
+    // (calculator_data: status и updated_at пишет updateOrderStatus; правки полей их не трогают). Колонку
+    // updated_at не берём: её двигает любая правка, например отметка оплаты. Нет ни того, ни другого —
+    // null: ни опоздания, ни «закрыт D». Дата — по часам браузера (YYYY-MM-DD), а не по UTC: сдача после
+    // полуночи по Москве — уже этот день.
+    _completedAt(order) {
+        const o = order || {};
+        let raw = o.completed_at || null;
+        if (!raw && OrderCardLogic._normalizeStatus(o.status) === 'completed') {
+            const snapshot = this._orderSnapshot(o.calculator_data);
+            if (snapshot.status === 'completed' && snapshot.updated_at) raw = snapshot.updated_at;
+        }
+        if (!raw) return null;
+        const text = String(raw).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+        const date = new Date(text);
+        if (Number.isNaN(date.getTime())) return null;
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    },
+
+    // Снимок калькулятора заказа: JSON-строка (в старых строках — дважды закодированная) или объект.
+    _orderSnapshot(value) {
+        let parsed = value;
+        for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) {
+            try {
+                parsed = JSON.parse(parsed);
+            } catch (e) {
+                return {};
+            }
+        }
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    },
+
+    // ==========================================
+    // HEADER: «← Все заказы», «Калькулятор», меню «⋯», лицо и вердикт
+    // ==========================================
+
+    renderHeader(model) {
+        const m = model || this._model();
+        const o = m.order;
+        const h = m.health;
+        const title = `${o.order_name || 'Без названия'}${m.totalQty > 0 ? ` · ${this._formatQuantity(m.totalQty)} шт.` : ''}`;
+        const meta = [
+            String(o.manager_name || '').trim() || 'менеджер не указан',
+            String(o.client_name || '').trim() || 'клиента нет',
+        ];
+        if (m.completed && m.completedAt) meta.push(`закрыт ${OrderCardLogic.formatDayMonth(m.completedAt)}`);
+        const reasons = h.reasons.length
+            ? `<ul class="odc-reasons">${h.reasons.map(reason => `<li>${this._esc(reason)}</li>`).join('')}</ul>`
+            : '';
+        this._setHtml('od-head', `
+            ${this._renderToolbar()}
+            <div class="odc-head">
+                ${this._renderFace(h.tone, h.verdict)}
+                <div class="odc-head-main">
+                    <div class="odc-head-title">
+                        <h1 id="od-title" class="odc-title">${this._esc(title)}</h1>
+                        <span class="odc-verdict odc-tone-${h.tone}">${this._esc(h.verdict)}</span>
+                    </div>
+                    <div class="odc-head-meta">${this._esc(meta.join(' · '))}</div>
+                    ${reasons}
+                </div>
+            </div>`);
+    },
+
+    // Лицо заказа: зелёное улыбается, жёлтое ровное, красное грустное, серое (черновик, отменён) ровное.
+    _renderFace(tone, verdict) {
+        const mouth = {
+            green: 'M20 38 Q32 50 44 38',
+            red: 'M21 46 Q32 36 43 46',
+        }[tone] || 'M22 42 L42 42';
+        return `
+                <svg class="odc-face odc-face-${tone}" width="72" height="72" viewBox="0 0 64 64" role="img" aria-label="Заказ: ${this._escAttr(verdict)}">
+                    <circle class="odc-face-bg" cx="32" cy="32" r="29" stroke-width="3"></circle>
+                    <circle class="odc-face-ink" cx="23" cy="26" r="3.5"></circle>
+                    <circle class="odc-face-ink" cx="41" cy="26" r="3.5"></circle>
+                    <path class="odc-face-line" d="${mouth}" fill="none" stroke-width="3.5" stroke-linecap="round"></path>
+                </svg>`;
+    },
+
+    // Тип заказа и как продаём: полоса долей тиража и подписи к ним.
+    renderType(model) {
+        const m = model || this._model();
+        const total = m.parts.reduce((sum, part) => sum + part.qty, 0);
+        if (!m.parts.length || !(total > 0)) {
+            this._setHtml('od-type', '');
+            return;
+        }
+        const width = qty => Math.max(0, Math.min(100, Math.round((qty / total) * 1000) / 10));
+        this._setHtml('od-type', `
+            <div class="odc-type-bar" aria-hidden="true">${m.parts.map(part =>
+                `<span class="odc-type-seg odc-part-${part.key}" style="width:${width(part.qty)}%"></span>`).join('')}</div>
+            <div class="odc-type-labels">${m.parts.map(part =>
+                `<span><b class="odc-part-text-${part.key}">${this._esc(part.label)} ${this._formatQuantity(part.qty)}</b> — ${this._esc(part.how)}</span>`).join('')}</div>`);
+    },
+
+    _renderToolbar() {
+        const open = !!this.menuOpen;
+        return `
+            <div class="odc-toolbar">
+                <button type="button" class="odc-back" onclick="App.navigate('orders')">${ORDER_CARD_ICONS.back}Все заказы</button>
+                <div class="odc-toolbar-actions">
+                    <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Калькулятор</button>
+                    <div class="odc-menu-wrap">
+                        <button type="button" id="od-menu-btn" class="odc-btn odc-btn-icon"
+                            aria-label="Ещё: копировать, сменить этап, отменить" aria-haspopup="true"
+                            aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-menu"
+                            onclick="OrderDetail.toggleMenu()">${ORDER_CARD_ICONS.dots}</button>
+                        ${open ? `<div id="od-menu" class="odc-menu" role="menu">${this._renderMenu()}</div>` : ''}
+                    </div>
+                </div>
+            </div>`;
+    },
+
+    // Меню «⋯»: копировать, сменить этап (список этапов), отменить (с подтверждением в самом меню).
+    _renderMenu() {
+        const o = this.currentOrder || {};
+        const item = (onclick, text, extra = '') => `<button type="button" role="menuitem" class="odc-menu-item ${extra}" onclick="${onclick}">${text}</button>`;
+        if (this.menuView === 'stages') {
+            const options = (typeof STATUS_OPTIONS !== 'undefined' && Array.isArray(STATUS_OPTIONS) ? STATUS_OPTIONS : [])
+                .filter(option => option.value !== 'deleted');
+            return `
+                <div class="odc-menu-title">Перевести на этап</div>
+                ${options.map(option => (option.value === o.status
+                    ? `<div class="odc-menu-item odc-menu-current" aria-current="step">${this._esc(option.label)} · сейчас</div>`
+                    : item(`OrderDetail.changeStatus('${this._escAttr(option.value)}')`, this._esc(option.label), this.statusBusy ? 'is-busy' : '')
+                )).join('')}
+                ${item("OrderDetail.showMenu('main')", 'Назад', 'odc-menu-back')}`;
+        }
+        if (this.menuView === 'cancel') {
+            return `
+                <div class="odc-menu-title">Отменить заказ «${this._esc(o.order_name || 'Без названия')}»?</div>
+                ${item("OrderDetail.changeStatus('cancelled')", 'Да, отменить', 'odc-menu-danger')}
+                ${item("OrderDetail.showMenu('main')", 'Нет, оставить')}`;
+        }
+        return `
+            ${item('OrderDetail.cloneOrder()', 'Копировать заказ')}
+            ${item("OrderDetail.showMenu('stages')", 'Сменить этап…')}
+            ${o.status === 'cancelled' ? '' : item("OrderDetail.showMenu('cancel')", 'Отменить заказ', 'odc-menu-danger')}`;
+    },
+
+    toggleMenu() {
+        this.menuOpen = !this.menuOpen;
+        this.menuView = 'main';
+        if (this.menuOpen) this._bindMenuDismiss();
+        this.renderHeader();
+        this._focus(this.menuOpen ? '#od-menu .odc-menu-item' : '#od-menu-btn');
+    },
+
+    showMenu(view) {
+        this.menuOpen = true;
+        this.menuView = ['main', 'stages', 'cancel'].includes(view) ? view : 'main';
+        this._bindMenuDismiss();
+        this.renderHeader();
+        this._focus('#od-menu button.odc-menu-item');
+    },
+
+    closeMenu() {
+        if (!this.menuOpen) return;
+        this.menuOpen = false;
+        this.menuView = 'main';
+        this.renderHeader();
+        this._focus('#od-menu-btn');
+    },
+
+    // Перерисованная кнопка теряет фокус — возвращаем его тому, кто на её месте.
+    _focus(selector) {
+        if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return;
+        const el = document.querySelector(selector);
+        if (el && typeof el.focus === 'function') el.focus({ preventScroll: true });
+    },
+
+    // Меню закрывается щелчком мимо него и клавишей Escape.
+    _bindMenuDismiss() {
+        if (this._menuDismissBound || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+        this._menuDismissBound = true;
+        document.addEventListener('click', event => {
+            if (!this.menuOpen) return;
+            const target = event && event.target;
+            const inside = target && typeof target.closest === 'function' && target.closest('.odc-menu-wrap');
+            if (!inside) this.closeMenu();
+        });
+        document.addEventListener('keydown', event => {
+            if (this.menuOpen && event && event.key === 'Escape') this.closeMenu();
+        });
     },
 
     // ==========================================
@@ -130,6 +898,7 @@ const OrderDetail = {
             stockRevenue: 0,
             freeQty: 0,
             freeCost: 0,
+            planCost: Math.max(0, Number(this.currentOrder?.total_cost_plan || 0)),
             tirageLines: [],
         });
         if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
@@ -155,6 +924,11 @@ const OrderDetail = {
                 stockRevenue: Number(summary.stockRevenue || 0),
                 freeQty: Number(summary.freeQty || 0),
                 freeCost: Number(summary.freeCost || 0),
+                // Плановая себестоимость производства (изделия, фурнитура, упаковка, подвесы) — пока
+                // «Факт» не ответил.
+                planCost: typeof calculateNonCommercialWorkCost === 'function'
+                    ? calculateNonCommercialWorkCost(snapshot?.products, snapshot?.hardwareItems, snapshot?.packagingItems, snapshot?.pendantItems)
+                    : Math.max(0, Number(this.currentOrder?.total_cost_plan || 0)),
                 tirageLines: snapshotPurpose === 'commercial' ? this._collectTirageLines(snapshot?.products) : [],
             };
         } catch (e) {
@@ -200,126 +974,430 @@ const OrderDetail = {
         };
     },
 
-    renderStats() {
-        const o = this.currentOrder;
-        const ps = PAYMENT_STATUSES.find(s => s.key === o.payment_status) || PAYMENT_STATUSES[0];
-        this.currentFinancial = this.buildLiveFinancialMeta();
-        const calculatedRevenue = Number(this.currentFinancial?.revenue || o.total_revenue_plan || 0);
-        const marginPercent = Number(this.currentFinancial?.marginPercent || o.margin_percent_plan || 0);
-        const hours = Number(this.currentFinancial?.hours || o.total_hours_plan || 0);
-        const purpose = normalizeProductionPurpose(this.currentFinancial?.purpose || o.production_purpose);
-        const isNonCommercial = isNonCommercialProductionPurpose(purpose);
-        const isLeftoverAssembly = purpose === 'leftover_assembly';
-        const purposeMeta = getProductionPurposeMeta(purpose);
-        const revenue = isNonCommercial ? 0 : calculatedRevenue;
-        const loss = Math.max(0, Number(this.currentFinancial?.loss || o.total_cost_plan || 0));
-
-        // Крупная цифра в карточке и списке — живой пересчёт по текущим
-        // параметрам. Историческую маржу при продаже сохраняем подписью, когда
-        // она отличается, чтобы финансовый контекст заказа не терялся.
-        const storedMarginPct = Number(o.margin_percent_plan ?? o.margin_percent ?? 0);
-        const marginNote = !isNonCommercial && (storedMarginPct && Math.abs(storedMarginPct - marginPercent) >= 1)
-            ? `<div class="text-muted" style="font-size:11px;margin-top:2px;" title="Зафиксировано при сохранении заказа — по ценам и ставкам того дня. Крупная цифра — пересчёт по сегодняшним параметрам.">при продаже: ${formatPercent(storedMarginPct)}</div>`
-            : '';
-
-        // Честная шапка — у клиентского заказа: выручка с учётом разметки тиража, реальная маржа и
-        // себестоимость по «Факту» рядом с плановыми, часы по плану и по табелю. «Переделка»,
-        // «Сток / образец» и «Сборка из остатков» показывают то же, что и раньше.
-        const honest = !isNonCommercial && !isLeftoverAssembly;
-        const financial = this.currentFinancial || {};
-        const real = honest ? this._buildRealCostView(financial) : null;
-        const hasRealMargin = !!real && real.marginPercent !== null;
-        const shownMargin = hasRealMargin ? real.marginPercent : marginPercent;
-        const stockQty = honest ? Number(financial.stockQty || 0) : 0;
-        const freeQty = honest ? Number(financial.freeQty || 0) : 0;
-
-        const revenueCaption = stockQty > 0
-            ? this._caption(`ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.`)
-            : '';
-        // Подпись говорит, чья это цифра: пока «Факт» не ответил (или табеля нет) маржа плановая.
-        let marginCaption = '';
-        if (honest) {
-            if (!hasRealMargin) marginCaption = this._caption('план');
-            else if (!real.hasTimesheet) marginCaption = this._caption('по плану');
-            else marginCaption = this._caption(`план ${formatPercent(marginPercent)}`);
-        }
-        let costCard = '';
-        if (honest && this.realCostState === 'loading') {
-            costCard = `
-            <div class="stat-card">
-                <div class="stat-label">Себестоимость</div>
-                <div class="stat-value text-muted">…</div>
-                ${this._caption('считаем по факту')}
-            </div>`;
-        } else if (real && (real.realTotal > 0 || real.planTotal > 0)) {
-            costCard = `
-            <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
-                 title="Показать, из чего сложилась себестоимость"
-                 onclick="OrderDetail.toggleRealCostDetails()"
-                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();OrderDetail.toggleRealCostDetails();}">
-                <div class="stat-label">Себестоимость</div>
-                <div class="stat-value">${this._formatWhole(real.realTotal)}</div>
-                ${this._caption(real.hasTimesheet ? `план ${this._formatWhole(real.planTotal)}` : 'по плану')}
-                ${this._caption(`Разбивка ${this.realCostDetailsOpen ? '▴' : '▾'}`, 'color:var(--accent);')}
-            </div>`;
-        }
-        let hoursCaption = '';
-        if (real) {
-            hoursCaption = this._caption(real.hasTimesheet
-                ? `план ${this._formatHours(hours)} · табель ${this._formatHours(real.hoursFact)}`
-                : `план ${this._formatHours(hours)} · табеля нет`);
-        }
-        const freeLine = freeQty > 0
-            ? `<div style="grid-column:1 / -1;font-size:14px;color:var(--text-secondary);">Отдаём бесплатно: ${this._formatQuantity(freeQty)} шт. на ${this._formatWhole(financial.freeCost)} себестоимости</div>`
-            : '';
-        const details = real && this.realCostDetailsOpen
-            ? `<div style="grid-column:1 / -1;">${this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown())}</div>`
-            : '';
-
-        document.getElementById('od-stats').innerHTML = `
-            <div class="stat-card">
-                <div class="stat-label">Выручка</div>
-                <div class="stat-value">${formatRub(revenue)}</div>
-                ${revenueCaption}
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? (purpose === 'marketing' ? 'Расход на маркетинг' : 'Некоммерческие расходы') : 'Маржа'}</div>
-                <div class="stat-value ${isNonCommercial || shownMargin < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(shownMargin)}</div>
-                ${marginCaption}
-                ${marginNote}
-            </div>
-            ${costCard}
-            <div class="stat-card">
-                <div class="stat-label">Часы</div>
-                <div class="stat-value">${hours.toFixed(1)} ч</div>
-                ${hoursCaption}
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">${isNonCommercial || isLeftoverAssembly ? 'Тип работ' : 'Оплата'}</div>
-                <div class="stat-value">${isNonCommercial
-                    ? `${purposeMeta.icon} ${purposeMeta.shortLabel}`
-                    : isLeftoverAssembly
-                        ? '↙ Сборка из остатков'
-                        : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
-            </div>
-            ${freeLine}
-            ${details}
-        `;
+    // Пять плиток: Срок, Скорость, Склад, Маржа, Оплата. «Маржа», «Оплата» и «Склад» — кнопки: под
+    // плитками раскрывается панель (#od-panel) с деньгами, выбором оплаты или таблицей фурнитуры.
+    renderStats(model) {
+        const m = model || this._model();
+        this._setHtml('od-stats', `
+            ${this._deadlineTile(m)}
+            ${this._speedTile(m)}
+            ${this._stockTile(m)}
+            ${this._marginTile(m)}
+            ${this._paymentTile(m)}
+        `);
     },
 
-    // Подпись под крупной цифрой карточки: читаемого размера (14 px), приглушённая.
-    _caption(text, extraStyle = '') {
-        return `<div style="font-size:14px;color:var(--text-muted);margin-top:4px;line-height:1.35;${extraStyle}">${this._esc(text)}</div>`;
+    // «Срок»: сколько дней до срока (или сколько просрочено); у сданного — вовремя или на сколько позже.
+    _deadlineTile(m) {
+        const o = m.order;
+        const end = o.deadline_end;
+        const days = n => `${n} ${this._plural(n, 'день', 'дня', 'дней')}`;
+        if (m.status === 'cancelled') return this._tile({ label: 'Срок', value: '—', caption: 'заказ отменён', tone: 'muted' });
+        if (!OrderCardLogic._isoParts(end)) return this._tile({ label: 'Срок', value: '—', caption: 'срок не указан', tone: 'muted' });
+        if (m.completed) {
+            const late = OrderCardLogic._daysBetween(end, m.completedAt);
+            if (late === null) return this._tile({ label: 'Срок', value: 'Сдали', caption: `срок был ${this._shortDate(end)}` });
+            const caption = `сдали ${this._shortDate(m.completedAt)}, срок ${this._shortDate(end)}`;
+            if (late <= 0) return this._tile({ label: 'Срок', value: 'Вовремя', caption, tone: 'green' });
+            return this._tile({ label: 'Срок', value: `+${days(late)}`, caption, tone: late > 7 ? 'red' : 'yellow' });
+        }
+        const left = OrderCardLogic._daysBetween(m.today, end);
+        if (left < 0) return this._tile({ label: 'Срок', value: `−${days(-left)}`, caption: `сдать было до ${this._shortDate(end)}`, tone: 'red' });
+        const risky = left <= 3 && OrderCardLogic.BEFORE_PACKAGING.includes(m.status);
+        if (left === 0) return this._tile({ label: 'Срок', value: 'Сегодня', caption: `сдать ${this._shortDate(end)}`, tone: risky ? 'yellow' : '' });
+        return this._tile({ label: 'Срок', value: days(left), caption: `сдать до ${this._shortDate(end)}`, tone: risky ? 'yellow' : '' });
+    },
+
+    // «Скорость»: часы по табелю из плана.
+    _speedTile(m) {
+        const h = value => OrderCardLogic._formatHours(value);
+        const plan = m.hoursPlan;
+        if (m.real && m.real.hasTimesheet) {
+            const fact = m.hoursFact;
+            if (!(plan > 0)) return this._tile({ label: 'Скорость', value: `${h(fact)} ч`, caption: 'в плане часов нет' });
+            const tone = plan > 2 && fact > plan * 1.5 + OrderCardLogic.EPS ? 'red'
+                : (fact > plan * 1.15 + OrderCardLogic.EPS ? 'yellow' : 'green');
+            const caption = fact > plan + OrderCardLogic.EPS
+                ? `+${Math.round((fact / plan - 1) * 100)} % к плану`
+                : (m.completed ? 'в плане' : `по часам сделано ${Math.round((fact / plan) * 100)} %`);
+            return this._tile({ label: 'Скорость', value: `${h(fact)} ч из ${h(plan)}`, caption, tone });
+        }
+        if (m.real) {
+            return this._tile({ label: 'Скорость', value: 'Нет табеля', caption: `в плане ${h(plan)} ч`, tone: m.completed ? 'yellow' : 'muted' });
+        }
+        return this._tile({
+            label: 'Скорость',
+            value: `${h(plan)} ч`,
+            caption: this.realCostState === 'loading' ? 'по плану · считаем по табелю…' : 'по плану',
+        });
+    },
+
+    // «Маржа» у продаж: сейчас (по «Факту») и план. У некоммерческих — сколько это нам стоит.
+    _marginTile(m) {
+        if (m.nonCommercial) {
+            const money = this._moneyNumbers(m);
+            return this._tile({
+                label: m.purpose === 'marketing' ? 'Расход на маркетинг' : 'Некоммерческие расходы',
+                value: '−' + this._formatWhole(money.cost),
+                caption: money.costCaption,
+                tone: 'red',
+                panel: 'money',
+                more: 'из чего',
+            });
+        }
+        const real = m.realView;
+        const hasRealMargin = !!real && real.marginPercent !== null;
+        const shown = hasRealMargin ? real.marginPercent : m.marginPlan;
+        let caption = 'план';
+        if (m.leftover) caption = 'по плану';
+        else if (this.realCostState === 'loading' && !hasRealMargin) caption = 'план · считаем по факту';
+        else if (hasRealMargin && !real.hasTimesheet) caption = 'по плану';
+        else if (hasRealMargin) caption = `план ${formatPercent(m.marginPlan)} · ${this._formatPp(round2(shown - m.marginPlan))}`;
+        // Маржа, сохранённая при продаже (по ценам и ставкам того дня), — когда расходится с сегодняшним
+        // планом на 1 п.п. и больше: объясняет, почему в списке заказов другая цифра.
+        const stored = Number(m.order.margin_percent_plan ?? m.order.margin_percent ?? 0);
+        const note = stored && Math.abs(stored - m.marginPlan) >= 1
+            ? { text: `при продаже: ${formatPercent(stored)}`, title: 'Зафиксировано при сохранении заказа — по ценам и ставкам того дня.' }
+            : null;
+        return this._tile({
+            label: 'Маржа',
+            value: formatPercent(shown),
+            caption,
+            note,
+            tone: shown < 30 ? 'red' : 'green',
+            panel: 'money',
+            more: 'деньги',
+        });
+    },
+
+    // «Оплата»: статус обычным текстом. У некоммерческих и без клиентской доли оплата не нужна.
+    _paymentTile(m) {
+        const o = m.order;
+        if (m.nonCommercial) {
+            const caption = { marketing: 'это подарок', stock_sample: 'делаем на склад', rework: 'переделка брака' }[m.purpose] || 'не продаём';
+            return this._tile({ label: 'Оплата', value: 'Не нужна', caption, tone: 'muted' });
+        }
+        if (!(m.clientQty > 0)) {
+            return this._tile({ label: 'Оплата', value: 'Не нужна', caption: 'клиенту не продаём', tone: 'muted', panel: 'payment', more: 'изменить' });
+        }
+        const key = o.payment_status || 'not_sent';
+        const status = this._paymentStatus(key);
+        const paid = OrderCardLogic.PAID_STATUSES.includes(key);
+        const tone = paid ? 'green' : (m.completed || key === 'not_sent' ? 'yellow' : '');
+        return this._tile({ label: 'Оплата', value: status.label, tone, panel: 'payment', more: 'изменить' });
+    },
+
+    // Плитка: подпись, крупное значение и подпись под ним — текстом (экранируется). С panel — это
+    // кнопка, которая раскрывает панель под плитками (#od-panel).
+    _tile({ label, value, caption = '', note = null, tone = '', panel = '', more = '' }) {
+        const body = `
+                <span class="odc-tile-label">${this._esc(label)}</span>
+                <span class="odc-tile-value${tone ? ` odc-tone-${tone}` : ''}">${this._esc(value)}</span>
+                ${caption ? `<span class="odc-tile-caption">${this._esc(caption)}</span>` : ''}
+                ${note ? `<span class="odc-tile-caption" title="${this._escAttr(note.title || '')}">${this._esc(note.text)}</span>` : ''}`;
+        if (!panel) return `<div class="odc-tile">${body}</div>`;
+        const open = this.openPanel === panel;
+        return `
+            <button type="button" class="odc-tile odc-tile-button" data-od-panel="${panel}"
+                aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-panel"
+                onclick="OrderDetail.togglePanel('${panel}')">${body}
+                <span class="odc-tile-more">${this._esc(more || 'подробнее')} ${ORDER_CARD_ICONS.chevron}</span>
+            </button>`;
+    },
+
+    // «Склад»: фурнитура и упаковка заказа со склада (строки _buildHardwareRows).
+    _stockTile(m) {
+        const state = this.hardwareState;
+        const rows = Array.isArray(this.hardwareRows) ? this.hardwareRows : [];
+        let value = '…';
+        let caption = 'проверяем склад';
+        let tone = 'muted';
+        if (state === 'error') {
+            value = '—';
+            caption = 'склад не прочитался';
+        } else if (state === 'ready') {
+            const labels = rows.map(row => OrderCardLogic.stockLabel(row));
+            const shortage = labels.filter(label => label.tone === 'red').length;
+            const lines = (m ? m.items : (this.currentItems || []))
+                .filter(item => ['hardware', 'packaging'].includes(this._itemType(item)));
+            if (!rows.length && lines.length) {
+                value = 'Не на учёте';
+                caption = 'фурнитура и упаковка не со склада';
+            } else if (!rows.length) {
+                value = 'Не нужен';
+                caption = 'без фурнитуры и упаковки со склада';
+            } else if (labels.every(label => label.tone === 'green')) {
+                value = 'Всё собрано';
+                caption = 'собрано и списано';
+                tone = 'green';
+            } else if (shortage > 0) {
+                value = `Не хватает ${shortage}`;
+                caption = `из ${rows.length} поз.: ${rows.filter((row, index) => labels[index].tone === 'red').map(row => row.itemName).join(', ')}`;
+                tone = 'red';
+            } else {
+                value = 'Всё есть';
+                caption = this._stockSummary(labels);
+                tone = 'green';
+            }
+        } else if (state === 'none') {
+            value = '—';
+            caption = 'склад недоступен';
+        }
+        return this._tile({ label: 'Склад', value, caption, tone, panel: 'stock', more: 'фурнитура' });
+    },
+
+    // «2 в резерве, 1 собрано, 1 на складе».
+    _stockSummary(labels) {
+        const count = tone => labels.filter(label => label.tone === tone).length;
+        const parts = [];
+        if (count('blue')) parts.push(`${count('blue')} в резерве`);
+        if (count('green')) parts.push(`${count('green')} собрано`);
+        const free = labels.filter(label => label.tone === 'gray' && label.text !== 'не нужно').length;
+        if (free) parts.push(`${free} на складе`);
+        return parts.join(', ');
+    },
+
+    // ==========================================
+    // ДЕНЬГИ: строка под плитками (видна всегда)
+    // ==========================================
+
+    // Деньги заказа одним расчётом — для строки «Деньги» и панели. Себестоимость здесь — всё, что
+    // заказ стоит: производство («Факт», без него — план) и налоги с комиссиями по плану, так что
+    // «Заработаем» = выручка − себестоимость, а маржа — та же, что в плитке.
+    // Сборка из остатков считается по плану, как её плитка «Маржа»: «Факт» её деньги не трогает.
+    _moneyNumbers(m) {
+        const f = m.financial || {};
+        const real = m.leftover ? null : m.real;
+        const timesheet = !!(real && real.hasTimesheet);
+        const loading = !m.leftover && this.realCostState === 'loading';
+        const revenue = m.nonCommercial ? 0 : Math.max(0, Number(f.revenue || 0));
+        const stockRevenue = Math.max(0, Number(f.stockRevenue || 0));
+        const productionPlan = real ? Number(real.planTotal) || 0 : Math.max(0, Number(f.planCost || 0));
+        const productionNow = timesheet ? Number(real.realTotal) || 0 : productionPlan;
+        const overrun = timesheet ? (Number(real.realTotal) || 0) - (Number(real.planTotal) || 0) : 0;
+        if (m.nonCommercial) {
+            const planCost = Math.max(0, Number(f.loss || 0)) || productionPlan;
+            const cost = planCost + overrun;
+            let costCaption = 'по плану';
+            if (timesheet) costCaption = Math.round(cost) === Math.round(planCost) ? 'как в плане' : `по плану ${this._formatWhole(planCost)}`;
+            else if (loading) costCaption = 'по плану · считаем по табелю…';
+            return { revenue: 0, cost, planCost, costCaption, productionPlan, productionNow, timesheet };
+        }
+        const earnedPlan = f.totalEarned !== null && f.totalEarned !== undefined && Number.isFinite(Number(f.totalEarned))
+            ? Number(f.totalEarned)
+            : revenue * (Number(m.marginPlan) || 0) / 100;
+        const earned = earnedPlan - overrun;
+        const costPlan = revenue - earnedPlan;
+        const cost = costPlan + overrun;
+        let costCaption = 'с налогами · по плану';
+        if (timesheet) costCaption = Math.round(cost) === Math.round(costPlan) ? 'с налогами · как в плане' : `с налогами · по плану ${this._formatWhole(costPlan)}`;
+        else if (loading) costCaption = 'с налогами · считаем по табелю…';
+        const margin = revenue > 0 ? Math.round((earned * 100 / revenue) * 100) / 100 : 0;
+        return {
+            revenue, stockRevenue, clientRevenue: m.clientQty > 0 ? Math.max(0, revenue - stockRevenue) : 0,
+            earnedPlan, earned, costPlan, cost, costCaption, margin, productionPlan, productionNow, timesheet,
+            taxes: costPlan - productionPlan,
+        };
+    },
+
+    renderMoney(model) {
+        const m = model || this._model();
+        const money = this._moneyNumbers(m);
+        const cell = (label, value, caption, tone = '') => `
+            <div class="odc-money-cell">
+                <span class="odc-money-label">${this._esc(label)}</span>
+                <span class="odc-money-value${tone ? ` odc-tone-${tone}` : ''}">${this._esc(value)}</span>
+                ${caption ? `<span class="odc-money-caption">${this._esc(caption)}</span>` : ''}
+            </div>`;
+        if (m.nonCommercial) {
+            const how = (m.parts[0] && m.parts[0].how) || { marketing: 'дарим, не продаём', stock_sample: 'делаем на склад', rework: 'переделываем брак' }[m.purpose] || 'не продаём';
+            this._setHtml('od-money', `
+                ${cell('Не продаём', formatRub(0), how)}
+                ${cell('Стоит нам', this._formatWhole(money.cost), `${m.purpose === 'marketing' ? 'расход на маркетинг' : 'некоммерческие расходы'}, ${money.costCaption}`)}`);
+            return;
+        }
+        const stock = this.tirageStock;
+        const soldQty = stock ? Number(stock.soldQty) || 0 : 0;
+        const soldRevenue = stock ? Number(stock.soldRevenue) || 0 : 0;
+        // Продажи со склада: известны, когда склад прочитан; после «Готово» и без ответа — «продано 0».
+        const soldText = stock ? ` · продано ${this._formatQuantity(soldQty)}` : (m.completed ? ' · продано 0' : '');
+        const only = m.parts.length === 1;
+        const pieces = m.parts.map(part => {
+            const qty = `${this._formatQuantity(part.qty)} шт.`;
+            if (part.key === 'commercial') return only ? `${qty} · клиенту` : `${qty} клиенту`;
+            if (part.key === 'stock') {
+                const price = this._stockPrice(m.tirageLines);
+                return `${qty}${price > 0 ? ` по ${formatRub(price)}` : ''} со склада${soldText}`;
+            }
+            if (part.key === 'b2c') return `${qty} · B2C, со склада`;
+            return '';
+        }).filter(Boolean);
+
+        const key = m.order.payment_status || 'not_sent';
+        const status = this._paymentStatus(key);
+        const fromClient = key === 'paid_100' ? money.clientRevenue : (key === 'paid_50' ? money.clientRevenue / 2 : 0);
+        const received = fromClient + soldRevenue;
+        let receivedCaption;
+        if (!(m.clientQty > 0)) {
+            receivedCaption = soldRevenue > 0
+                ? `со склада: продано на ${this._formatWhole(soldRevenue)}`
+                : (m.parts.some(part => part.key === 'stock' || part.key === 'b2c') ? 'клиенту не продаём, деньги — с продаж со склада' : 'клиенту не продаём');
+        } else {
+            receivedCaption = key === 'postpay_100' ? 'постоплата: после сдачи' : status.label;
+            if (soldRevenue > 0) receivedCaption += ` + со склада ${this._formatWhole(soldRevenue)}`;
+        }
+        let receivedTone = '';
+        if (m.clientQty > 0 && money.clientRevenue > 0) {
+            if (fromClient + 0.5 >= money.clientRevenue) receivedTone = 'green';
+            else if (m.completed) receivedTone = 'yellow';
+        }
+        const earnedCaption = money.timesheet
+            ? `план ${this._formatWhole(money.earnedPlan)} · маржа ${formatPercent(money.margin)}`
+            : `по плану · маржа ${formatPercent(money.margin)}`;
+        this._setHtml('od-money', `
+            ${cell(m.clientQty > 0 ? 'Продали за' : 'Продаём за', this._formatWhole(money.revenue), pieces.join(' · '))}
+            ${cell('Получили', this._formatWhole(received), receivedCaption, receivedTone)}
+            ${cell('Себестоимость', this._formatWhole(money.cost), money.costCaption)}
+            ${cell(m.completed ? 'Заработали' : 'Заработаем', this._formatWhole(money.earned), earnedCaption, money.earned >= 0 ? 'green' : 'red')}`);
+    },
+
+    // Цена «на продажу», если у всех строк она одна; 0 — если разная или её нет.
+    _stockPrice(tirageLines) {
+        const prices = [...new Set((Array.isArray(tirageLines) ? tirageLines : [])
+            .filter(line => Number(line?.split?.stock) > 0)
+            .map(line => Number(line.split.stock_price) || 0))];
+        return prices.length === 1 ? prices[0] : 0;
+    },
+
+    // «−13,5 п.п.», «+2 п.п.».
+    _formatPp(value) {
+        const raw = Number(value) || 0;
+        const n = Math.sign(raw) * Math.round(Math.abs(round2(raw)) * 10) / 10;
+        const text = OrderCardLogic._formatNumber(Math.abs(n), 1);
+        return `${n > 0 ? '+' : (n < 0 ? '−' : '')}${text} п.п.`;
+    },
+
+    // «+157 200 ₽», «−30 500 ₽», «0 ₽».
+    _formatSignedRub(value) {
+        const n = Math.round(Number(value) || 0);
+        return `${n > 0 ? '+' : (n < 0 ? '−' : '')}${formatRub(Math.abs(n))}`;
+    },
+
+    // «26 окт.» — для плиток и полосы сроков.
+    _shortDate(value) {
+        const parts = OrderCardLogic._isoParts(value);
+        if (!parts) return '';
+        const months = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июня', 'июля', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
+        return `${parts.d} ${months[parts.m - 1]}`;
+    },
+
+    // ==========================================
+    // PANEL под плитками: деньги, оплата, склад
+    // ==========================================
+
+    togglePanel(name) {
+        const panels = ['money', 'payment', 'stock'];
+        this.openPanel = panels.includes(name) && this.openPanel !== name ? name : null;
+        const model = this._model();
+        this.renderStats(model);
+        this.renderPanel(model);
+        if (panels.includes(name)) this._focus(`#od-stats [data-od-panel="${name}"]`);
+        const panel = document.getElementById('od-panel');
+        if (this.openPanel && panel && typeof panel.scrollIntoView === 'function') {
+            panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    },
+
+    renderPanel(model) {
+        const panel = document.getElementById('od-panel');
+        if (!panel) return;
+        const name = this.openPanel;
+        panel.hidden = !name;
+        if (panel.dataset) panel.dataset.panel = name || '';
+        if (!name) {
+            panel.innerHTML = '';
+            return;
+        }
+        if (name === 'money') {
+            panel.innerHTML = this._renderMoneyPanel(model || this._model());
+        } else if (name === 'payment') {
+            panel.innerHTML = this._renderPaymentPanel();
+        } else if (name === 'stock') {
+            panel.innerHTML = '<div id="od-tab-hardware"></div>';
+            void this.renderHardwareTab();
+        }
+    },
+
+    // Деньги: выручка, производство, налоги, что остаётся, что отдаём бесплатно — и таблица «Факта»
+    // «Из чего сложилась себестоимость» (зарплата и косвенные — только администратору).
+    _renderMoneyPanel(m) {
+        const money = this._moneyNumbers(m);
+        const f = m.financial || {};
+        const line = (label, value, extra = '') => `<li class="${extra}"><span>${this._esc(label)}</span><span class="odc-lines-value">${this._esc(value)}</span></li>`;
+        const lines = [];
+        const production = money.timesheet ? 'Производство по «Факту»' : 'Производство по плану';
+        if (m.nonCommercial) {
+            if (money.timesheet) lines.push(line('По плану', this._formatWhole(money.planCost)));
+            lines.push(line(m.purpose === 'marketing' ? 'Стоит нам — расход на маркетинг' : 'Стоит нам — некоммерческие расходы', this._formatWhole(money.cost), 'odc-lines-total'));
+        } else {
+            const stockQty = Number(f.stockQty || 0);
+            lines.push(line(`Выручка${stockQty > 0 ? ` — ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.` : ''}`, this._formatWhole(money.revenue)));
+            if (money.productionNow > 0) lines.push(line(production, `−${this._formatWhole(money.productionNow)}`));
+            // Остаток до «Заработаем» — всегда отдельной строкой, и в минус, и в плюс: строки сходятся.
+            if (Math.abs(money.taxes) > 0.5) {
+                lines.push(line(money.productionNow > 0 ? 'Налоги, комиссии и прочее по плану' : 'Расходы по плану', this._formatSignedRub(-money.taxes)));
+            }
+            lines.push(line(m.completed ? 'Заработали' : 'Заработаем', this._formatWhole(money.earned), `odc-lines-total odc-tone-${money.earned >= 0 ? 'green' : 'red'}`));
+        }
+        const notes = [];
+        if (!m.nonCommercial && Number(f.freeQty) > 0) {
+            notes.push(`Отдаём бесплатно: ${this._formatQuantity(f.freeQty)} шт. на ${this._formatWhole(f.freeCost)} себестоимости — они уже внутри, их оплачивают проданные.`);
+        }
+        let details;
+        if (m.leftover) {
+            // Сборка из остатков считается по плану — таблицы «Факта» рядом с плановыми строками нет.
+            details = '<div class="odc-panel-note">Сборка из остатков считается по плану.</div>';
+        } else if (m.real) {
+            details = this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown());
+        } else {
+            details = `<div class="odc-panel-note">${this._esc(this.realCostState === 'loading'
+                ? 'Считаем себестоимость по табелю…'
+                : 'Себестоимость по табелю сейчас не посчитать — цифры по плану.')}</div>`;
+        }
+        return `
+            <div class="odc-money-panel">
+                <ul class="odc-lines">${lines.join('')}</ul>
+                ${notes.map(note => `<p class="odc-panel-note">${this._esc(note)}</p>`).join('')}
+                ${details}
+            </div>`;
+    },
+
+    _renderPaymentPanel() {
+        const current = (this.currentOrder && this.currentOrder.payment_status) || 'not_sent';
+        const options = PAYMENT_STATUSES.map(status =>
+            `<option value="${this._escAttr(status.key)}"${status.key === current ? ' selected' : ''}>${this._esc(status.label)}</option>`
+        ).join('');
+        return `
+            <div class="odc-field">
+                <label for="od-payment-select" class="odc-field-label">Статус оплаты</label>
+                <select id="od-payment-select" class="odc-select" onchange="OrderDetail.setPaymentStatus(this.value)">${options}</select>
+            </div>`;
+    },
+
+    async setPaymentStatus(value) {
+        const order = this.currentOrder;
+        if (!order || !PAYMENT_STATUSES.some(status => status.key === value)) return false;
+        if (value === (order.payment_status || 'not_sent')) return true;
+        const token = this._honestToken;
+        const saved = await this.saveField('payment_status', value);
+        // Не сохранилось — выбор показывает то, что записано.
+        if (!saved && this._isCurrent(token, order.id) && this.openPanel === 'payment') this.renderPanel();
+        return saved;
     },
 
     // Рубли без копеек: «121 000 ₽».
     _formatWhole(value) {
         return formatRub(Math.round(Number(value) || 0));
-    },
-
-    // Часы с десятой, без лишнего «.0»: 12.1, 18.
-    _formatHours(value) {
-        return String(Math.round((Number(value) || 0) * 10) / 10);
     },
 
     // ==========================================
@@ -332,16 +1410,24 @@ const OrderDetail = {
         this._honestToken = (this._honestToken || 0) + 1;
         this.currentRealCost = null;
         this.tirageStock = null;
-        this.realCostDetailsOpen = false;
         this.tirageRecalcBusy = false;
         this.realCostState = this._canLoadRealCost() ? 'loading' : 'none';
+        this.hardwareRows = null;
+        this.hardwareState = this._canLoadHardwareRows() ? 'loading' : 'none';
+        this.openPanel = null;
+        this.menuOpen = false;
+        this.menuView = 'main';
+        this.moreOpen = {};
+        this.moreCounts = {};
+        this.deliveryOpen = false;
+        this.statusBusy = false;
+        this.briefDraft = null;
     },
 
-    // Реальная себестоимость нужна клиентскому заказу; у «Переделки», «Стока / образца» и «Сборки из
-    // остатков» продажи нет, и карточка показывает прежнее.
+    // «Факт» читается у каждого заказа: часы по этапам, табель и то, во что заказ обошёлся, нужны
+    // и маркетингу, и переделке. Реальная маржа — только у продаж (_buildRealCostView зовут для них).
     _canLoadRealCost() {
         return !!(this.currentOrder && this.currentOrder.id)
-            && normalizeProductionPurpose(this.currentOrder.production_purpose) === 'commercial'
             && typeof Factual !== 'undefined' && !!Factual && typeof Factual.computeOrderRealCost === 'function';
     },
 
@@ -355,7 +1441,7 @@ const OrderDetail = {
     // Строки, которые страница «Факт» прячет от не-администраторов: зарплата по этапам и
     // «Косвенные» (часы × косвенные за час). Тот же признак, что у страницы.
     _isSalaryGatedRow(row) {
-        return !!row && (row.isSalary === true || String(row.key || '').startsWith('salary_') || row.key === 'indirect_production');
+        return OrderCardLogic.isSalaryRow(row);
     },
 
     // «Факт» считает заказ по свежему табелю — один раз на открытие карточки (и ещё раз, когда
@@ -371,7 +1457,7 @@ const OrderDetail = {
             console.warn('OrderDetail.loadRealCost failed:', error);
         }
         // Пока «Факт» считал, открыли другую карточку — этот ответ уже не про неё.
-        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        if (!this._isCurrent(token, orderId)) return null;
         if (real && Number.isFinite(Number(real.realTotal)) && Number.isFinite(Number(real.planTotal))) {
             this.currentRealCost = real;
             this.realCostState = 'ready';
@@ -379,13 +1465,23 @@ const OrderDetail = {
             // Нет ответа — шапка остаётся плановой. Прошлый удачный ответ при повторе не теряем.
             this.realCostState = 'none';
         }
-        this.renderStats();
+        this._renderRealCostDependents();
         return this.currentRealCost;
     },
 
+    // «Факт» ответил (или нет): вердикт, плитки, деньги и «Как идёт».
+    _renderRealCostDependents() {
+        const model = this._model();
+        this.renderHeader(model);
+        this.renderStats(model);
+        this.renderMoney(model);
+        if (this.openPanel === 'money') this.renderPanel(model);
+        this.renderProgress(model);
+    },
+
+    // Деньги заказа — панель под плитками; второе нажатие её закрывает.
     toggleRealCostDetails() {
-        this.realCostDetailsOpen = !this.realCostDetailsOpen;
-        this.renderStats();
+        this.togglePanel('money');
     },
 
     // Из чего сложилась себестоимость заказа: статьи «Факта», план и то, что взято в расчёт (по
@@ -441,14 +1537,15 @@ const OrderDetail = {
     },
 
     // ==========================================
-    // «ТИРАЖ» ON THE INFO TAB
+    // «ТИРАЖ» — в «Что делаем», под составом
     // ==========================================
 
     // Блок «Тираж»: как поделён тираж каждой строки изделия и что из «на продажу» лежит на складе
     // готовой продукции. Только просмотр: разметку меняют в калькуляторе. Пустая строка, если у
     // заказа нет разметки (а у B2C, «Переделки», «Стока / образца» и «Сборки из остатков» её нет).
-    renderTirageInfo() {
-        const lines = this._getTirageLines();
+    // lines — строки с разметкой, если они уже посчитаны (model.tirageLines); без них — посчитать.
+    renderTirageInfo(tirageLines) {
+        const lines = Array.isArray(tirageLines) ? tirageLines : this._getTirageLines();
         if (!lines.length) return '';
         const count = value => this._formatQuantity(value);
         const note = value => {
@@ -464,14 +1561,14 @@ const OrderDetail = {
             if (split.sample > 0) parts.push(`образцы ${count(split.sample)}`);
             return `
                 <div>
-                    <div style="font-size:15px;font-weight:600;">${this._esc(line.name)} · ${count(line.quantity)} шт.</div>
-                    <div style="font-size:14px;margin-top:2px;">${parts.join(' · ')}</div>
+                    <div class="odc-tirage-name">${this._esc(line.name)} · ${count(line.quantity)} шт.</div>
+                    <div class="odc-tirage-split">${parts.join(' · ')}</div>
                 </div>`;
         }).join('');
         return `
-        <div class="card" id="od-tirage-card" style="margin-top:16px;">
-            <div class="card-header"><h3>Тираж</h3></div>
-            <div style="display:grid;gap:14px;">${rows}${this._renderTirageStock()}
+        <div class="odc-tirage" id="od-tirage-card">
+            <h3 class="odc-h3">Тираж</h3>
+            <div class="odc-tirage-rows">${rows}${this._renderTirageStock()}
             </div>
         </div>`;
     },
@@ -492,23 +1589,29 @@ const OrderDetail = {
             : 'продано 0';
         // Пересчитывать есть что, только пока на складе лежат непроданные штуки.
         const button = Number(stock.inStock) > 0
-            ? `<div style="margin-top:10px;"><button type="button" class="btn btn-outline" style="font-size:14px;"
+            ? `<div class="odc-tirage-action"><button type="button" class="odc-btn"
                     onclick="OrderDetail.recalcTirageCost()" ${this.tirageRecalcBusy ? 'disabled' : ''}
                     title="Когда ФинТабло догнал: себестоимость непроданных штук на складе пересчитается, записи продаж останутся как были">${this.tirageRecalcBusy ? 'Пересчитываем…' : 'Пересчитать себестоимость'}</button></div>`
             : '';
         return `
-                <div style="border-top:1px solid var(--border);padding-top:12px;">
-                    <div style="font-size:15px;font-weight:600;">Склад готовой продукции</div>
-                    <div style="font-size:14px;margin-top:2px;" title="Заморожено — себестоимость непроданных штук на складе">На складе ${count(stock.inStock)} из ${count(stock.total)} · заморожено ${this._formatWhole(stock.frozen)} · ${sold}</div>
+                <div class="odc-tirage-stock">
+                    <div class="odc-tirage-name">Склад готовой продукции</div>
+                    <div class="odc-tirage-split" title="Заморожено — себестоимость непроданных штук на складе">На складе ${count(stock.inStock)} из ${count(stock.total)} · заморожено ${this._formatWhole(stock.frozen)} · ${sold}</div>
                     ${button}
                 </div>`;
     },
 
-    // Блок перерисовывается на месте: вкладку «Информация» целиком трогать нельзя — в ней могут
-    // править поле.
-    _renderTirageSlot() {
+    // Блок перерисовывается на месте: «Что делаем» целиком трогать нельзя — в нём пишут ТЗ.
+    _renderTirageSlot(tirageLines) {
         const slot = document.getElementById('od-tirage-slot');
-        if (slot) slot.innerHTML = this.renderTirageInfo();
+        if (slot) slot.innerHTML = this.renderTirageInfo(tirageLines);
+    },
+
+    // Склад готовой продукции пришёл (или ушёл): блок «Тираж» и строка «Деньги» — одним расчётом.
+    _renderTirageDependents() {
+        const model = this._model();
+        this._renderTirageSlot(model.tirageLines);
+        this.renderMoney(model);
     },
 
     // Склад штук «на продажу» этого заказа: читается, только если у заказа есть что продавать.
@@ -519,7 +1622,7 @@ const OrderDetail = {
         if (!forSale || typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.getOrderTirageStockSummary !== 'function') {
             if (this.tirageStock) {
                 this.tirageStock = null;
-                this._renderTirageSlot();
+                this._renderTirageDependents();
             }
             return null;
         }
@@ -532,9 +1635,9 @@ const OrderDetail = {
             console.warn('OrderDetail.loadTirageStock failed:', error);
             return this.tirageStock;
         }
-        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        if (!this._isCurrent(token, orderId)) return null;
         this.tirageStock = summary && Number(summary.total) > 0 ? summary : null;
-        this._renderTirageSlot();
+        this._renderTirageDependents();
         return this.tirageStock;
     },
 
@@ -569,85 +1672,494 @@ const OrderDetail = {
     },
 
     // ==========================================
-    // INFO TAB
+    // STAGES: строка этапов и «Перевести на «…»»
     // ==========================================
 
-    renderInfoTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-info');
+    // Что есть в заказе — от этого зависят этапы: печать, сборка, упаковка.
+    _stageFlags() {
+        const items = Array.isArray(this.currentItems) ? this.currentItems : [];
+        const type = item => this._itemType(item);
+        const printingsOf = item => {
+            const list = typeof parseOrderCalcJson === 'function'
+                ? parseOrderCalcJson(item.printings, [])
+                : (Array.isArray(item.printings) ? item.printings : []);
+            if (!Array.isArray(list)) return [];
+            return typeof getActivePrintings === 'function' ? getActivePrintings({ printings: list }) : list;
+        };
+        return {
+            hasPrinting: items.some(item => type(item) === 'product'
+                && (printingsOf(item).length > 0 || Number(item.sell_price_printing) > 0)),
+            hasHardware: items.some(item => type(item) === 'hardware' || type(item) === 'pendant'),
+            hasPackaging: items.some(item => type(item) === 'packaging'),
+        };
+    },
 
-        container.innerHTML = `
-        <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Основное</h3></div>
-                ${this._fieldRow('order_name', 'Название', o.order_name, 'text')}
-                ${this._fieldRow('client_name', 'Клиент', o.client_name, 'text')}
-                ${this._fieldRow('manager_name', 'Менеджер', o.manager_name, 'text')}
-                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Начало → Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
-                ${this._fieldRow('notes', 'Заметки', o.notes, 'textarea')}
+    _stagesModel() {
+        return OrderCardLogic.stages({ status: this.currentOrder && this.currentOrder.status, ...this._stageFlags() });
+    },
+
+    renderStages(cardModel) {
+        const o = this.currentOrder || {};
+        const model = this._stagesModel();
+        const steps = model.list.map(step => {
+            const current = step.state === 'current';
+            const finished = step.state === 'done' || (current && step.value === 'completed');
+            const cls = step.state === 'done' ? 'odc-step-done' : (current ? 'odc-step-current' : 'odc-step-todo');
+            return `<li class="odc-step ${cls}${current && step.value === 'completed' ? ' odc-step-final' : ''}"${current ? ' aria-current="step"' : ''}>${finished ? ORDER_CARD_ICONS.check : ''}<span>${this._esc(step.label)}</span></li>`;
+        }).join('');
+        let action = '';
+        if (model.next) {
+            action = `
+                <button type="button" class="odc-btn odc-btn-primary" onclick="OrderDetail.moveToNextStage()"${this.statusBusy ? ' disabled' : ''}>
+                    ${this.statusBusy ? 'Переводим…' : `Перевести на этап «${this._esc(model.next.label)}» ${ORDER_CARD_ICONS.arrow}`}
+                </button>`;
+        } else if (o.status === 'completed') {
+            // Сдали, а клиентская доля не оплачена — главное действие теперь оплата.
+            const m = cardModel || this._model();
+            if (!m.nonCommercial && m.clientQty > 0 && !OrderCardLogic.PAID_STATUSES.includes(o.payment_status || 'not_sent')) {
+                action = `
+                <button type="button" class="odc-btn odc-btn-primary" aria-expanded="${this.openPanel === 'payment' ? 'true' : 'false'}"
+                    aria-controls="od-panel" onclick="OrderDetail.togglePanel('payment')">Отметить оплату</button>`;
+            }
+        }
+        const note = o.status === 'cancelled' ? '<div class="odc-stages-note">Заказ отменён</div>' : '';
+        this._setHtml('od-stages', `<ol class="odc-steps" aria-label="Этапы заказа">${steps}</ol>${note}${action}`);
+    },
+
+    moveToNextStage() {
+        const next = this._stagesModel().next;
+        if (!next) return Promise.resolve();
+        return this.changeStatus(next.value);
+    },
+
+    // ==========================================
+    // «ЧТО ДЕЛАЕМ»: ТЗ для цеха, состав, тираж
+    // ==========================================
+
+    renderWhat(model) {
+        const o = this.currentOrder || {};
+        const m = model || this._model();
+        if (this._typingIn('od-brief')) {
+            // ТЗ сейчас пишут — его не трогаем: обновляется только состав и тираж.
+            this._setHtml('od-what-items', this._renderComposition(m));
+            this._renderTirageSlot(m.tirageLines);
+            return;
+        }
+        const text = this.briefDraft !== null && this.briefDraft !== undefined ? this.briefDraft : (o.notes || '');
+        this._setHtml('od-what', `
+            <h2 class="odc-h2">${o.status === 'completed' ? 'Что делали' : 'Что делаем'}</h2>
+            <label for="od-brief" class="odc-field-label">ТЗ для цеха — сохраняется само</label>
+            <textarea id="od-brief" class="odc-brief" rows="4" ${this._fieldOwner()}
+                placeholder="Что и сколько, цвет, нанесение, фурнитура и сборка, упаковка"
+                oninput="OrderDetail.setBriefDraft(this.value, { orderId: this.dataset.order, token: this.dataset.token })"
+                onblur="OrderDetail.saveBrief(this.value, { orderId: this.dataset.order, token: this.dataset.token })"
+                onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.blur();}">${this._esc(text)}</textarea>
+            <div id="od-what-items" class="odc-what-items">${this._renderComposition(m)}</div>
+            <div id="od-tirage-slot">${this.renderTirageInfo(m.tirageLines)}</div>`);
+    },
+
+    setBriefDraft(value, owner) {
+        if (!this._fromOtherCard(owner)) this.briefDraft = String(value ?? '');
+    },
+
+    // ТЗ сохраняется само, когда уходят из поля, — если изменилось. Не сохранилось — текст остаётся.
+    // owner — заказ и открытие, в котором поле нарисовано: ТЗ одного заказа в другой не пишется.
+    async saveBrief(value, owner) {
+        const order = this.currentOrder;
+        if (!order || this._fromOtherCard(owner)) return false;
+        const typed = String(value ?? '');
+        if (typed.trim() === String(order.notes || '').trim()) {
+            this.briefDraft = null;
+            return true;
+        }
+        this.briefDraft = typed;
+        const token = this._honestToken;
+        const saved = await this.saveField('notes', typed.trim());
+        if (saved && this._isCurrent(token, order.id) && this.briefDraft === typed) this.briefDraft = null;
+        return saved;
+    },
+
+    // Состав: изделия и подвесы (кол-во, цена, нанесение, цвет, фото цвета), под ними фурнитура и
+    // упаковка с меткой склада у каждой строки.
+    _renderComposition(model) {
+        const m = model || this._model();
+        const items = m.items;
+        const type = item => this._itemType(item);
+        const lines = items.filter(item => type(item) === 'product' || type(item) === 'pendant');
+        const products = lines.map(item => this._renderCompositionLine(item, type(item), m)).join('');
+        const anyPhoto = lines.some(item => type(item) === 'product' && this._colorPhotos(item).length > 0);
+        const supply = this._supplyLines(m);
+        const supplyHtml = supply.length
+            ? `<ul class="odc-supply" aria-label="Фурнитура и упаковка">${supply.map(row => `
+                <li><span>${this._esc(row.name)} <b>× ${this._esc(this._formatSupplyQty(row.qty))}</b></span><span class="odc-chip odc-chip-${row.tone}">${this._esc(row.text)}</span></li>`).join('')}
+              </ul>`
+            : '';
+        const empty = !lines.length
+            ? `<div class="odc-muted">${m.leftover ? 'Сборка из остатков — изделий в составе нет.' : 'В заказе нет изделий.'}</div>`
+            : '';
+        const photoNote = lines.some(item => type(item) === 'product') && !anyPhoto
+            ? '<div class="odc-caption">Фото цвета не приложено</div>'
+            : '';
+        return `${empty}${products}${supplyHtml}${photoNote}`;
+    },
+
+    _renderCompositionLine(item, kind, m) {
+        let name = String(item.product_name || '').trim();
+        let qty = Number(item.quantity) || 0;
+        if (kind === 'pendant') {
+            const data = typeof parseOrderCalcJson === 'function' ? parseOrderCalcJson(item.item_data, {}) : {};
+            const pendantName = String((data && data.name) || '').trim();
+            name = `Подвес «${pendantName || name || 'без названия'}»`;
+            if (!(qty > 0)) qty = Number(data && data.quantity) || 0;
+        }
+        const facts = [];
+        if (m.nonCommercial) {
+            if (Number(item.cost_total) > 0) facts.push(`себестоимость ${formatRub(Math.round(Number(item.cost_total)))} за шт.`);
+        } else if (Number(item.sell_price_item) > 0) {
+            facts.push(`${formatRub(Number(item.sell_price_item))} за шт.`);
+        }
+        if (kind === 'product') {
+            facts.push(this._printingText(item));
+            if (item.is_blank_mold) facts.push('бланк');
+        }
+        const colors = kind === 'product'
+            ? this._normalizeProductColors(item).map(color => color.name || color.number || (color.id ? `#${color.id}` : '')).filter(Boolean)
+            : [];
+        const photos = kind === 'product' ? this._colorPhotos(item) : [];
+        return `
+            <div class="odc-product">
+                <div class="odc-product-head">
+                    <span class="odc-product-name">${this._esc(name || 'Изделие')} — ${this._formatQuantity(qty)} шт.</span>
+                    <span class="odc-product-meta">${this._esc(facts.filter(Boolean).join(' · '))}</span>
+                </div>
+                ${colors.length ? `<div class="odc-product-colors">Цвет: ${this._esc(colors.join(', '))}</div>` : ''}
+                ${photos.length ? `<div class="odc-thumbs">${photos.map(photo => `
+                    <button type="button" class="odc-thumb-btn" aria-pressed="false" title="Увеличить: ${this._escAttr(photo.name)}"
+                        onclick="this.classList.toggle('is-big');this.setAttribute('aria-pressed', this.classList.contains('is-big') ? 'true' : 'false')">
+                        <img class="odc-thumb" src="${this._escAttr(photo.src)}" alt="Фото цвета: ${this._escAttr(photo.name)}" loading="lazy">
+                    </button>`).join('')}</div>` : ''}
+            </div>`;
+    },
+
+    // «УФ 150 ₽», «нанесение 150 ₽», «без нанесения».
+    _printingText(item) {
+        const list = typeof parseOrderCalcJson === 'function' ? parseOrderCalcJson(item.printings, []) : item.printings;
+        const active = Array.isArray(list) && typeof getActivePrintings === 'function'
+            ? getActivePrintings({ printings: list })
+            : (Array.isArray(list) ? list.filter(pr => pr && pr.name) : []);
+        if (active.length) {
+            return active.map(pr => {
+                const price = Number(pr.sell_price) || 0;
+                return `${String(pr.name || 'нанесение').trim()}${price > 0 ? ` ${formatRub(price)}` : ''}`;
+            }).join(', ');
+        }
+        const legacy = Number(item.sell_price_printing) || 0;
+        return legacy > 0 ? `нанесение ${formatRub(legacy)}` : 'без нанесения';
+    },
+
+    // Фото цвета из color_solution_attachment: объект или массив { name, type, data_url | data }.
+    // Только картинки (data:image/… или http/https) — остальное, например PDF, лежит в «Составе подробно».
+    _colorPhotos(item) {
+        let raw = item && item.color_solution_attachment;
+        if (typeof raw === 'string') {
+            const text = raw.trim();
+            if (/^data:image\//i.test(text)) raw = [{ data_url: text }];
+            else {
+                try {
+                    raw = JSON.parse(text);
+                } catch (e) {
+                    raw = null;
+                }
+            }
+        }
+        const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? [raw] : []);
+        return list.map(att => {
+            if (!att || typeof att !== 'object') return null;
+            const kind = String(att.type || '').trim().toLowerCase();
+            let src = String(att.data_url || '').trim();
+            if (!src && att.data) {
+                const data = String(att.data).trim();
+                src = /^data:/i.test(data) ? data : `data:${kind || 'image/jpeg'};base64,${data}`;
+            }
+            const image = /^data:image\/(png|jpe?g|gif|webp|avif|heic|heif);base64,/i.test(src) || /^https?:\/\//i.test(src);
+            return image ? { name: String(att.name || 'фото цвета'), src } : null;
+        }).filter(Boolean);
+    },
+
+    // Фурнитура и упаковка с меткой склада. Склад прочитан — строки склада (_buildHardwareRows) и то,
+    // что не на учёте склада; пока нет — строки заказа.
+    _supplyLines(m) {
+        const type = item => this._itemType(item);
+        const lines = m.items.filter(item => type(item) === 'hardware' || type(item) === 'packaging');
+        const onStock = item => {
+            const hardware = type(item) === 'hardware';
+            const source = String(item.source || (hardware ? item.hardware_source : item.packaging_source) || '').toLowerCase();
+            const id = Number(item.warehouse_item_id ?? (hardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id) ?? 0);
+            return source === 'warehouse' && id > 0;
+        };
+        const offStock = lines.filter(item => !onStock(item)).map(item => ({
+            name: item.product_name || 'Позиция',
+            qty: Number(item.quantity) || 0,
+            tone: 'gray',
+            text: 'не на учёте склада',
+        }));
+        if (this.hardwareState === 'ready') {
+            const rows = (Array.isArray(this.hardwareRows) ? this.hardwareRows : []).map(row => {
+                const label = OrderCardLogic.stockLabel(row);
+                return {
+                    name: row.itemName,
+                    qty: Number(row.targetQty) || Number(row.plannedQty) || 0,
+                    tone: label.tone,
+                    text: label.text,
+                };
+            });
+            return [...rows, ...offStock];
+        }
+        const waiting = this.hardwareState === 'loading' ? 'проверяем склад…' : (this.hardwareState === 'error' ? 'склад не прочитался' : 'склад недоступен');
+        return lines.map(item => ({
+            name: item.product_name || (onStock(item) ? 'Позиция со склада' : 'Позиция'),
+            qty: Number(item.quantity) || 0,
+            tone: 'gray',
+            text: onStock(item) ? waiting : 'не на учёте склада',
+        }));
+    },
+
+    _formatSupplyQty(value) {
+        return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(Number(value) || 0);
+    },
+
+    // ==========================================
+    // «КАК ИДЁТ»: маржа план → сейчас, сроки, часы по этапам, график сдачи
+    // ==========================================
+
+    renderProgress(model) {
+        const m = model || this._model();
+        const done = m.completed;
+        const margin = this._renderMarginCard(m);
+        const flow = `${this._renderTimeline(m)}${this._renderStageHours(m)}`;
+        if (this._typingIn('od-delivery-slot')) {
+            // В «Графике сдачи» сейчас пишут — его не трогаем: обновляется маржа, сроки и часы.
+            this._setHtml('od-progress-margin', margin);
+            this._setHtml('od-progress-flow', flow);
+            return;
+        }
+        this._setHtml('od-progress', `
+            <div id="od-progress-margin" class="odc-slot">${margin}</div>
+            <section class="odc-card" aria-label="${done ? 'Как шло' : 'Как идёт'}">
+                <h2 class="odc-h2">${done ? 'Как шло' : 'Как идёт'}</h2>
+                <div id="od-progress-flow" class="odc-progress-flow">${flow}</div>
+                ${this._renderDeliveryRow()}
+            </section>`);
+    },
+
+    // «Маржа: план → сейчас» у продаж: план, сейчас, разница в п.п. и ₽ (видна всем) и до трёх
+    // причин. Рубли у причин из зарплаты и косвенных — только администратору (marginReasons).
+    _renderMarginCard(m) {
+        if (m.nonCommercial || m.leftover) return '';
+        const title = `Маржа: план → ${m.completed ? 'факт' : 'сейчас'}`;
+        const plan = formatPercent(m.marginPlan);
+        const wrap = body => `
+            <section class="odc-card" aria-label="${this._escAttr(title)}">
+                <h2 class="odc-h2">${this._esc(title)}</h2>
+                ${body}
+            </section>`;
+        if (!m.real) {
+            return wrap(`<div class="odc-margin-line"><span class="odc-margin-big">${this._esc(plan)}</span></div>
+                <div class="odc-caption">${this._esc(this.realCostState === 'loading'
+                    ? 'Это план. Считаем по табелю…'
+                    : 'Это план: по табелю сейчас не посчитать.')}</div>`);
+        }
+        if (!m.real.hasTimesheet || m.marginNow === null) {
+            return wrap(`<div class="odc-margin-line"><span class="odc-margin-big">${this._esc(plan)}</span></div>
+                <div class="odc-caption">Табеля по заказу нет — маржа по плану.</div>`);
+        }
+        const why = OrderCardLogic.marginReasons({
+            realCost: this.currentRealCost,
+            planPct: m.marginPlan,
+            nowPct: m.marginNow,
+            stageRows: m.stageRows,
+            canSeeSalary: this._canSeeSalaryBreakdown(),
+            revenue: this._moneyNumbers(m).revenue,
+        });
+        const delta = Number(why.deltaPp) || 0;
+        const tone = delta < -0.05 ? 'red' : 'green';
+        const deltaText = Math.abs(delta) < 0.05
+            ? 'идём в план'
+            : `${this._formatPp(delta)}${why.deltaRub !== null ? ` · ${this._formatSignedRub(why.deltaRub)}` : ''}`;
+        const reasons = why.reasons.length
+            ? `<ul class="odc-lines">${why.reasons.map(reason => `
+                <li><span>${this._esc(reason.text)}</span>${reason.rub === null ? '' : `<span class="odc-lines-value odc-tone-${reason.rub < 0 ? 'red' : 'green'}">${this._esc(this._formatSignedRub(reason.rub))}</span>`}</li>`).join('')}
+              </ul>`
+            : '<div class="odc-caption">Часы по этапам и статьи себестоимости — как в плане.</div>';
+        return wrap(`
+            <div class="odc-margin-line">
+                <span class="odc-margin-big">${this._esc(plan)}</span>
+                <span aria-hidden="true" class="odc-margin-arrow">→</span>
+                <span class="odc-margin-big odc-tone-${tone}">${this._esc(formatPercent(m.marginNow))}</span>
+                <span class="odc-margin-delta odc-tone-${tone}">${this._esc(deltaText)}</span>
             </div>
-            <div class="card">
-                <div class="card-header"><h3>Контакты и ссылки</h3></div>
-                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'text')}
-                ${this._fieldRow('telegram', 'Telegram', o.telegram, 'text')}
-                ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
-                ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
-            </div>
-        </div>
-        <div id="od-tirage-slot">${this.renderTirageInfo()}</div>
-        ${this._renderDeliveryScheduleCard()}
-        `;
+            ${reasons}`);
+    },
+
+    // Полоса сроков: старт → срок → сегодня (или «сдали»), просрочка — красным.
+    _renderTimeline(m) {
+        const o = m.order;
+        const start = OrderCardLogic._isoParts(o.deadline_start || o.deadline) ? String(o.deadline_start || o.deadline).slice(0, 10) : null;
+        const end = OrderCardLogic._isoParts(o.deadline_end) ? String(o.deadline_end).slice(0, 10) : null;
+        if (!start && !end) return '<div class="odc-caption">Даты старта и срока не указаны.</div>';
+        const nowDate = m.completed ? (m.completedAt || null) : m.today;
+        const day = value => OrderCardLogic._dayNumber(value);
+        const from = start || end;
+        const points = [day(from), day(end || from)];
+        if (nowDate) points.push(day(nowDate));
+        const lo = Math.min(...points);
+        const hi = Math.max(...points);
+        const span = Math.max(1, hi - lo);
+        const pct = value => Math.max(0, Math.min(100, Math.round(((day(value) - lo) / span) * 1000) / 10));
+        const endPct = end ? pct(end) : 100;
+        const nowPct = nowDate ? pct(nowDate) : 0;
+        const startPct = pct(from);
+        const late = !!(end && nowDate && day(nowDate) > day(end));
+        const segments = [];
+        if (late) {
+            segments.push(`<span class="odc-timeline-seg odc-seg-${m.completed ? 'done' : 'past'}" style="margin-left:${startPct}%;width:${Math.max(0, endPct - startPct)}%"></span>`);
+            segments.push(`<span class="odc-timeline-seg odc-seg-late" style="width:${Math.max(0, nowPct - endPct)}%"></span>`);
+        } else if (nowDate && day(nowDate) > day(from)) {
+            segments.push(`<span class="odc-timeline-seg odc-seg-${m.completed ? 'done' : 'past'}" style="margin-left:${startPct}%;width:${Math.max(0, nowPct - startPct)}%"></span>`);
+        }
+        const labels = [];
+        if (start) labels.push({ at: day(start), text: `${this._shortDate(start)} · старт`, tone: '' });
+        if (end) labels.push({ at: day(end), text: `${this._shortDate(end)} · срок`, tone: '' });
+        if (m.completed) {
+            if (nowDate) labels.push({ at: day(nowDate), text: `${this._shortDate(nowDate)} · ${late ? 'сдали' : 'сдали в срок'}`, tone: late ? 'red' : 'green' });
+        } else {
+            labels.push({ at: day(nowDate), text: `сегодня ${OrderCardLogic._isoParts(nowDate).d}`, tone: late ? 'red' : 'strong' });
+        }
+        labels.sort((a, b) => a.at - b.at);
+        const aria = labels.map(label => label.text).join(', ');
+        return `
+            <div class="odc-timeline">
+                <div class="odc-timeline-bar" role="img" aria-label="${this._escAttr(aria)}">${segments.join('')}</div>
+                <div class="odc-timeline-labels">${labels.map(label =>
+                    `<span${label.tone ? ` class="odc-tone-${label.tone}"` : ''}>${this._esc(label.text)}</span>`).join('')}</div>
+            </div>`;
+    },
+
+    // Часы по этапам из табеля: «из плана», полоска, кто и когда. Срезание без своего плана — вместе
+    // с литьём (OrderCardLogic.stageHoursRows).
+    _renderStageHours(m) {
+        if (!m.real) {
+            return `<div class="odc-caption">${this._esc(this.realCostState === 'loading'
+                ? 'Часы по этапам считаем по табелю…'
+                : 'Табель сейчас не прочитать — часы по этапам появятся позже.')}</div>`;
+        }
+        if (!m.stageRows.length) return '<div class="odc-caption">Часов по этапам нет ни в плане, ни в табеле.</div>';
+        const h = value => OrderCardLogic._formatHours(value);
+        return `<div class="odc-hours">${m.stageRows.map(row => {
+            const plan = Number(row.planHours) || 0;
+            const fact = Number(row.factHours) || 0;
+            const ratio = plan > 0 ? fact / plan : (fact > 0 ? 1 : 0);
+            let tone = '';
+            if (plan > 0 && ratio > 1.5 + OrderCardLogic.EPS) tone = 'red';
+            else if (plan > 0 && ratio > 1.15 + OrderCardLogic.EPS) tone = 'yellow';
+            else if (m.completed && plan > 0 && !(fact > 0)) tone = 'yellow';
+            const value = plan > 0 ? `${h(fact)} из ${h(plan)} ч` : `${h(fact)} ч, в плане не было`;
+            const people = row.people.map(person => person.name).filter(Boolean).join(', ');
+            const dates = this._dateRange(row.firstDate, row.lastDate);
+            const caption = fact > 0
+                ? [people, dates].filter(Boolean).join(' · ')
+                : (m.completed && plan > 0 ? 'в табель не внесли' : 'не начинали');
+            return `
+                <div class="odc-hours-row">
+                    <div class="odc-hours-head"><span class="odc-hours-name">${this._esc(row.label)}</span><span class="${tone ? `odc-tone-${tone} odc-strong` : ''}">${this._esc(value)}</span></div>
+                    <div class="odc-bar"><span class="odc-bar-fill${tone ? ` odc-bar-${tone}` : ''}" style="width:${Math.round(Math.min(1, ratio) * 100)}%"></span></div>
+                    <span class="odc-caption">${this._esc(caption)}</span>
+                </div>`;
+        }).join('')}</div>`;
+    },
+
+    // «20 окт.», «20–23 окт.», «30 сент. – 2 окт.».
+    _dateRange(first, last) {
+        const a = OrderCardLogic._isoParts(first);
+        const b = OrderCardLogic._isoParts(last);
+        if (!a && !b) return '';
+        if (!a || !b || (a.y === b.y && a.m === b.m && a.d === b.d)) return this._shortDate(first || last);
+        if (a.y === b.y && a.m === b.m) return `${a.d}–${this._shortDate(last)}`;
+        return `${this._shortDate(first)} – ${this._shortDate(last)}`;
+    },
+
+    // «Сдаём одной партией» / «Сдаём в 3 партии» — раскрывает «График сдачи» под собой.
+    _renderDeliveryRow() {
+        const schedule = normalizeDeliverySchedule(this.currentOrder && this.currentOrder.delivery_schedule, 0).schedule;
+        const count = schedule.length;
+        const label = count > 1 ? `Сдаём в ${count} ${this._plural(count, 'партию', 'партии', 'партий')}` : 'Сдаём одной партией';
+        const dates = schedule.map(entry => OrderCardLogic.formatDayMonth(entry.date)).filter(Boolean).join(', ');
+        const open = !!this.deliveryOpen;
+        return `
+            <div class="odc-delivery">
+                <button type="button" class="odc-row-btn" aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-delivery-slot"
+                    onclick="OrderDetail.toggleDelivery()">
+                    <span class="odc-row-title">${this._esc(label)}</span>
+                    <span class="odc-row-sum">${this._esc(dates)}</span>
+                    ${ORDER_CARD_ICONS.chevron}
+                </button>
+                <div id="od-delivery-slot"${open ? '' : ' hidden'}>${open ? this._renderDeliveryScheduleCard() : ''}</div>
+            </div>`;
+    },
+
+    toggleDelivery() {
+        this.deliveryOpen = !this.deliveryOpen;
+        this.renderProgress();
     },
 
     _renderDeliveryScheduleCard() {
         const totalQuantity = getOrderProductionQuantity(this.currentItems);
         const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
         const hasRows = validation.schedule.length > 0;
-        const statusColor = !hasRows ? 'var(--text-muted)' : (validation.valid ? 'var(--green)' : 'var(--red)');
+        const statusTone = !hasRows ? 'muted' : (validation.valid ? 'green' : 'red');
         const statusText = !hasRows
             ? `Тираж: ${this._formatQuantity(totalQuantity)} шт. · сдаётся одной частью`
             : validation.valid
                 ? `Распределено ${this._formatQuantity(validation.total)} из ${this._formatQuantity(totalQuantity)} шт.`
                 : validation.errors[validation.errors.length - 1];
         const rows = this.deliveryScheduleDraft.map((entry, index) => `
-            <div data-delivery-row="${index}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(120px,.7fr) auto;gap:8px;align-items:center;">
-                <input type="date" class="od-status-select" value="${this._escAttr(entry.date || '')}"
-                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value)">
-                <input type="number" class="od-status-select" min="1" step="1" value="${this._escAttr(entry.quantity || '')}"
+            <div class="odc-delivery-line" data-delivery-row="${index}">
+                <input type="date" class="odc-input" aria-label="Дата партии ${index + 1}" value="${this._escAttr(entry.date || '')}" ${this._fieldOwner()}
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value, { orderId: this.dataset.order, token: this.dataset.token })">
+                <input type="number" class="odc-input" min="1" step="1" aria-label="Количество в партии ${index + 1}" value="${this._escAttr(entry.quantity || '')}" ${this._fieldOwner()}
                     placeholder="Количество"
-                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value)">
-                <button class="btn btn-sm btn-outline" type="button"
-                    onclick="OrderDetail.removeDeliveryScheduleRow(${index})" title="Удалить партию">✕</button>
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value, { orderId: this.dataset.order, token: this.dataset.token })">
+                <button class="odc-btn odc-btn-icon" type="button" aria-label="Удалить партию ${index + 1}"
+                    onclick="OrderDetail.removeDeliveryScheduleRow(${index})">${ORDER_CARD_ICONS.close}</button>
             </div>
         `).join('');
 
         return `
-        <div class="card" id="od-delivery-schedule-card" style="margin-top:16px;">
-            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div class="odc-delivery-card" id="od-delivery-schedule-card">
+            <div class="odc-delivery-head">
                 <div>
-                    <h3>График сдачи</h3>
-                    <div style="font-size:12px;color:${statusColor};margin-top:3px;">${this._esc(statusText)}</div>
+                    <h3 class="odc-h3">График сдачи</h3>
+                    <div class="odc-caption odc-tone-${statusTone}">${this._esc(statusText)}</div>
                 </div>
-                <button class="btn btn-sm btn-outline" type="button" onclick="OrderDetail.addDeliveryScheduleRow()">+ Партия</button>
+                <button class="odc-btn" type="button" onclick="OrderDetail.addDeliveryScheduleRow()">+ Партия</button>
             </div>
-            <div style="padding:12px 16px 16px;">
-                ${hasRows
-                    ? `<div style="display:grid;gap:8px;">${rows}</div>`
-                    : '<div class="text-muted" style="font-size:12px;">Добавьте даты и количество, если тираж нужно сдавать частями.</div>'}
-                ${validation.errors.length
-                    ? `<div style="font-size:12px;color:var(--red);margin-top:10px;">${validation.errors.map(error => this._esc(error)).join('<br>')}</div>`
-                    : ''}
-                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-                    <button class="btn btn-sm btn-success" type="button" onclick="OrderDetail.saveDeliverySchedule()">Сохранить график</button>
-                </div>
+            ${hasRows
+                ? `<div class="odc-delivery-lines">${rows}</div>`
+                : '<div class="odc-caption">Добавьте даты и количество, если тираж нужно сдавать частями.</div>'}
+            ${validation.errors.length
+                ? `<div class="odc-caption odc-tone-red">${validation.errors.map(error => this._esc(error)).join('<br>')}</div>`
+                : ''}
+            <div class="odc-delivery-actions">
+                <button class="odc-btn odc-btn-primary" type="button" onclick="OrderDetail.saveDeliverySchedule()">Сохранить график</button>
             </div>
         </div>`;
     },
 
     _renderDeliveryScheduleOnly() {
         const previous = document.getElementById('od-delivery-schedule-card');
-        if (!previous) {
-            this.renderInfoTab();
+        if (!previous || typeof previous.replaceWith !== 'function') {
+            this.deliveryOpen = true;
+            this.renderProgress();
             return;
         }
         const wrapper = document.createElement('div');
@@ -656,8 +2168,8 @@ const OrderDetail = {
         if (next) previous.replaceWith(next);
     },
 
-    updateDeliveryScheduleDraft(index, field, value) {
-        if (!this.deliveryScheduleDraft[index]) return;
+    updateDeliveryScheduleDraft(index, field, value, owner) {
+        if (this._fromOtherCard(owner) || !this.deliveryScheduleDraft[index]) return;
         this.deliveryScheduleDraft[index][field] = field === 'quantity' ? Number(value) : value;
     },
 
@@ -675,6 +2187,9 @@ const OrderDetail = {
     },
 
     async saveDeliverySchedule() {
+        const order = this.currentOrder;
+        if (!order) return;
+        const token = this._honestToken;
         const totalQuantity = getOrderProductionQuantity(this.currentItems);
         const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
         if (!validation.valid) {
@@ -689,15 +2204,23 @@ const OrderDetail = {
         }
         try {
             const snapshot = await updateOrderCalculatorData(
-                this.currentOrder.id,
+                order.id,
                 { delivery_schedule: validation.schedule },
                 siblingUpdates
             );
-            this.currentOrder.calculator_data = JSON.stringify(snapshot);
-            this.currentOrder.delivery_schedule = validation.schedule;
-            if (siblingUpdates.deadline_end) this.currentOrder.deadline_end = siblingUpdates.deadline_end;
-            this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
-            this.renderInfoTab();
+            const saved = { calculator_data: JSON.stringify(snapshot), delivery_schedule: validation.schedule, ...siblingUpdates };
+            Object.assign(order, saved);
+            if (this._isCurrent(token, order.id)) {
+                // Обработчики фурнитуры могли подменить объект заказа свежим — запись видна и в нём.
+                Object.assign(this.currentOrder, saved);
+                this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
+                // Срок мог сдвинуться на последнюю партию: шапка, плитки и «Как идёт» — заново.
+                const model = this._model();
+                this.renderHeader(model);
+                this.renderStats(model);
+                this.renderProgress(model);
+                this.renderInfoTab();
+            }
             App.toast(validation.schedule.length ? 'График сдачи сохранён' : 'График сдачи удалён');
         } catch (error) {
             console.error('OrderDetail.saveDeliverySchedule error:', error);
@@ -709,56 +2232,108 @@ const OrderDetail = {
         return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(value) || 0);
     },
 
-    // ==========================================
-    // PRODUCTION TAB
-    // ==========================================
-
-    renderProductionTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-production');
-
-        container.innerHTML = `
-        <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Статусы</h3></div>
-                ${this._fieldRowSelect('payment_status', 'Статус оплаты', o.payment_status || 'not_sent', PAYMENT_STATUSES)}
-            </div>
-        </div>
-        `;
+    // 1 партию, 2 партии, 5 партий.
+    _plural(value, one, few, many) {
+        const n = Math.abs(Math.round(Number(value) || 0));
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+        return many;
     },
 
     // ==========================================
-    // FILES TAB
+    // ВНИЗУ: строки, которые раскрываются под собой
     // ==========================================
 
-    renderFilesTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-files');
+    MORE_ROWS: [
+        { key: 'items', title: 'Состав подробно' },
+        { key: 'info', title: 'Данные заказа и контакты' },
+        { key: 'tasks', title: 'Задачи' },
+        { key: 'china', title: 'Закупки в Китае' },
+    ],
+
+    // Строки и контейнеры под ними рисуются раз на открытие карточки: содержимое контейнеров
+    // (#od-tab-items, #od-tab-info, #od-tab-tasks, #od-tab-china) рисуют прежние функции.
+    renderMore() {
+        const rows = this.MORE_ROWS.map(row => {
+            const open = !!this.moreOpen[row.key];
+            return `
+            <div class="odc-more-row">
+                <button type="button" class="odc-row-btn odc-more-btn" id="od-more-btn-${row.key}"
+                    aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-tab-${row.key}"
+                    onclick="OrderDetail.toggleMore('${row.key}')">
+                    <span class="odc-row-title">${this._esc(row.title)}</span>
+                    <span class="odc-row-sum" id="od-more-sum-${row.key}">${this._esc(this._moreSummary(row.key))}</span>
+                    ${ORDER_CARD_ICONS.chevron}
+                </button>
+                <div id="od-tab-${row.key}" class="odc-more-body"${open ? '' : ' hidden'}></div>
+            </div>`;
+        }).join('');
+        this._setHtml('od-more', rows);
+    },
+
+    toggleMore(key) {
+        if (!this.MORE_ROWS.some(row => row.key === key)) return;
+        const open = !this.moreOpen[key];
+        this.moreOpen = { ...this.moreOpen, [key]: open };
+        const button = document.getElementById(`od-more-btn-${key}`);
+        if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const body = document.getElementById(`od-tab-${key}`);
+        if (body) body.hidden = !open;
+    },
+
+    // Сводка справа от строки: «3 позиции», «Telegram, CRM», «нет», «2».
+    _moreSummary(key) {
+        const o = this.currentOrder || {};
+        if (key === 'items') {
+            const count = (Array.isArray(this.currentItems) ? this.currentItems : [])
+                .filter(item => ['product', 'pendant', 'hardware', 'packaging'].includes(this._itemType(item))).length;
+            return count ? `${count} ${this._plural(count, 'позиция', 'позиции', 'позиций')}` : 'нет';
+        }
+        if (key === 'info') {
+            const filled = [
+                ['delivery_address', 'адрес'], ['telegram', 'Telegram'], ['crm_link', 'CRM'], ['fintablo_link', 'Финтабло'],
+            ].filter(([field]) => String(o[field] || '').trim()).map(([, label]) => label);
+            return filled.length ? filled.join(', ') : 'контактов и ссылок нет';
+        }
+        const count = this.moreCounts[key];
+        if (count === undefined || count === null) return '…';
+        return count > 0 ? String(count) : 'нет';
+    },
+
+    _setMoreSummary(key) {
+        const el = document.getElementById(`od-more-sum-${key}`);
+        if (el) el.textContent = this._moreSummary(key);
+    },
+
+    // ==========================================
+    // «ДАННЫЕ ЗАКАЗА И КОНТАКТЫ»
+    // ==========================================
+
+    renderInfoTab() {
+        const o = this.currentOrder || {};
+        const container = document.getElementById('od-tab-info');
+        if (!container) return;
 
         container.innerHTML = `
         <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Файлы проекта</h3></div>
-                ${this._fieldRow('print_file_url', 'Файл печати', o.print_file_url, 'url')}
-                ${this._fieldRow('cutting_file_url', 'Файл резки/формы', o.cutting_file_url, 'url')}
-                ${this._fieldRow('delivery_documents_url', 'Документы доставки', o.delivery_documents_url, 'url')}
+            <div class="odc-fields">
+                <h3 class="odc-h3">Заказ</h3>
+                ${this._fieldRow('order_name', 'Название', o.order_name, 'text')}
+                ${this._fieldRow('client_name', 'Клиент', o.client_name, 'text')}
+                ${this._fieldRow('manager_name', 'Менеджер', o.manager_name, 'text')}
+                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Начало → Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
             </div>
-            <div class="card">
-                <div class="card-header"><h3>Референсы</h3></div>
-                ${this._fieldRow('reference_urls', 'URL референсов', o.reference_urls, 'textarea')}
-                ${this._renderReferenceLinks(o.reference_urls)}
+            <div class="odc-fields">
+                <h3 class="odc-h3">Контакты и ссылки</h3>
+                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'text')}
+                ${this._fieldRow('telegram', 'Telegram', o.telegram, 'text')}
+                ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
+                ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
-        </div>
-        `;
-    },
-
-    _renderReferenceLinks(urls) {
-        if (!urls) return '<p class="text-muted" style="padding:8px 16px;font-size:12px;">Нет референсов</p>';
-        const links = urls.split(',').map(u => u.trim()).filter(Boolean);
-        if (links.length === 0) return '';
-        return `<div style="padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;">
-            ${links.map((u, i) => `<a href="${this._escAttr(u)}" target="_blank" class="od-url-link" title="${this._escAttr(u)}">Референс ${i + 1}</a>`).join('')}
         </div>`;
+        this._setMoreSummary('info');
     },
 
     // ==========================================
@@ -767,6 +2342,8 @@ const OrderDetail = {
 
     renderItemsTab() {
         const container = document.getElementById('od-tab-items');
+        if (!container) return;
+        this._setMoreSummary('items');
         const products = this.currentItems.filter(i => i.item_type === 'product' || !i.item_type);
         const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
         const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
@@ -822,10 +2399,10 @@ const OrderDetail = {
             for (const [setName, group] of setGroups) {
                 const setQty = group.products.reduce((s, p) => s + (parseFloat(p.item.quantity) || 0), 0);
                 html += `<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:10px;padding:12px;">`;
-                html += `<h3 style="margin:0 0 8px;display:flex;align-items:center;gap:6px;">&#128230; ${this._esc(setName)} <span class="text-muted" style="font-size:13px;font-weight:400;">(${setQty} шт)</span></h3>`;
+                html += `<h3 style="margin:0 0 8px;display:flex;align-items:center;gap:6px;">${this._esc(setName)} <span class="text-muted" style="font-size:14px;font-weight:400;">(${setQty} шт)</span></h3>`;
 
                 if (group.products.length > 0) {
-                    html += '<div style="margin-bottom:6px;font-size:12px;font-weight:600;color:#6b7280;">Изделия:</div>';
+                    html += '<div style="margin-bottom:6px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Изделия:</div>';
                     group.products.forEach(({ item, idx }) => {
                         html += this._renderItemCard(item, 'product');
                         const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
@@ -839,11 +2416,11 @@ const OrderDetail = {
                     });
                 }
                 if (group.hw.length > 0) {
-                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128297; Фурнитура:</div>';
+                    html += '<div style="margin-top:8px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Фурнитура:</div>';
                     group.hw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
                 }
                 if (group.pkg.length > 0) {
-                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128230; Упаковка:</div>';
+                    html += '<div style="margin-top:8px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Упаковка:</div>';
                     group.pkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
                 }
                 html += '</div>';
@@ -869,11 +2446,11 @@ const OrderDetail = {
             const noSetHw = orderHardware.filter(i => !i.marketplace_set_name);
             const noSetPkg = orderPackaging.filter(i => !i.marketplace_set_name);
             if (noSetHw.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая фурнитура</h3>';
                 html += noSetHw.map(item => this._renderItemCard(item, 'hardware')).join('');
             }
             if (noSetPkg.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая упаковка</h3>';
                 html += noSetPkg.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
@@ -897,11 +2474,11 @@ const OrderDetail = {
                 });
             }
             if (orderHardware.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая фурнитура</h3>';
                 html += orderHardware.map(item => this._renderItemCard(item, 'hardware')).join('');
             }
             if (orderPackaging.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая упаковка</h3>';
                 html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
@@ -910,214 +2487,272 @@ const OrderDetail = {
         }
 
         if (!html) {
-            html = '<div class="empty-state"><div class="empty-icon">&#128230;</div><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
+            html = '<div class="empty-state"><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
         }
 
         container.innerHTML = html;
     },
 
+    // Склад фурнитуры читается, когда есть Warehouse с нужными функциями.
+    _canLoadHardwareRows() {
+        return !!(this.currentOrder && this.currentOrder.id)
+            && typeof Warehouse !== 'undefined' && !!Warehouse
+            && typeof Warehouse._collectWarehouseDemandFromOrderItems === 'function';
+    },
+
+    // Фурнитура и упаковка заказа со склада: по строке на позицию склада — план, цель, факт, резерв,
+    // свободно и «собрано». Читает склад, резервы и историю; Warehouse.allItems / allReservations
+    // обновляются, как раньше в renderHardwareTab. Ошибка чтения — исключение.
+    async _buildHardwareRows() {
+        const orderId = Number(this.currentOrder && this.currentOrder.id || 0);
+        if (!orderId) return [];
+        const items = this.currentItems || [];
+        await Warehouse._ensureProjectHardwareStateLoaded();
+        const [warehouseItems, reservations, history] = await Promise.all([
+            loadWarehouseItems(),
+            loadWarehouseReservations(),
+            loadWarehouseHistory(),
+        ]);
+
+        Warehouse.allItems = Array.isArray(warehouseItems) ? warehouseItems : [];
+        Warehouse.allReservations = Array.isArray(reservations) ? reservations : [];
+
+        const byItemId = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
+        const historyDeltaMap = Warehouse._buildProjectHardwareHistoryDeltaMap(history || []);
+        const demandRows = Warehouse._collectWarehouseDemandFromOrderItems(items);
+        const activeReservations = reservations || [];
+
+        return demandRows
+            .map(row => {
+                const itemId = Number(row.warehouse_item_id || 0);
+                const whItem = byItemId.get(itemId) || {};
+                const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
+                const targetQty = Warehouse._buildProjectHardwareTargetQty(orderId, itemId, plannedQty, historyDeltaMap);
+                const actualQty = Warehouse._getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history || []);
+                const ready = Warehouse._computeProjectHardwareReadyState(orderId, itemId, plannedQty, history || [], historyDeltaMap);
+                const currentReserveQty = Warehouse._getProjectHardwareReservedQtyForOrderItem(activeReservations, orderId, itemId);
+                const totalReservedQty = round2(Warehouse._getActiveReservationsForItem(itemId)
+                    .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
+                const stockQty = round2(parseFloat(whItem.qty || 0) || 0);
+                const availableQty = Math.max(0, round2(stockQty - totalReservedQty));
+                const reserveHint = ready
+                    ? 'Уже собрано'
+                    : (Math.abs(currentReserveQty - targetQty) <= 0.000001
+                        ? 'Резерв совпадает'
+                        : (currentReserveQty < targetQty ? 'Резерв неполный' : 'Резерв скорректирован'));
+                return {
+                    itemId,
+                    itemName: whItem.name || (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
+                    itemSku: whItem.sku || '',
+                    itemKind: Warehouse._projectSupplyKindLabel(row.material_type || whItem.category || 'hardware'),
+                    plannedQty,
+                    targetQty,
+                    actualQty,
+                    ready,
+                    unit: String(whItem.unit || 'шт').trim() || 'шт',
+                    stockTruth: this._buildProjectHardwareStockTruth({
+                        orderId,
+                        itemId,
+                        item: whItem,
+                        currentReserveQty,
+                        totalReservedQty,
+                        stockQty,
+                        availableQty,
+                        reservations: activeReservations,
+                        history: history || [],
+                    }),
+                    currentReserveQty,
+                    availableQty,
+                    reserveHint,
+                };
+            })
+            .sort((a, b) => String(a.itemName).localeCompare(String(b.itemName), 'ru'));
+    },
+
+    // Склад для плитки «Склад», меток в составе и причин вердикта — в фоне, после показа карточки.
+    async loadHardwareRows() {
+        const order = this.currentOrder;
+        if (!order || !this._canLoadHardwareRows()) return null;
+        const token = this._honestToken;
+        const orderId = order.id;
+        let rows;
+        try {
+            rows = await this._buildHardwareRows();
+        } catch (error) {
+            console.warn('OrderDetail.loadHardwareRows failed:', error);
+            if (!this._isCurrent(token, orderId)) return null;
+            this.hardwareState = 'error';
+            this._renderHardwareDependents();
+            return null;
+        }
+        if (!this._isCurrent(token, orderId)) return null;
+        this._setHardwareRows(rows);
+        return rows;
+    },
+
+    _setHardwareRows(rows) {
+        this.hardwareRows = Array.isArray(rows) ? rows : [];
+        this.hardwareState = 'ready';
+        this._renderHardwareDependents();
+    },
+
+    // Склад пришёл: шапка (чего не хватает), плитка «Склад», метки в составе.
+    _renderHardwareDependents() {
+        const model = this._model();
+        this.renderHeader(model);
+        this.renderStats(model);
+        this.renderWhat(model);
+    },
+
+    // Таблица фурнитуры в панели «Склад». true — нарисована (панель открыта), false — рисовать некуда.
     async renderHardwareTab() {
         const container = document.getElementById('od-tab-hardware');
-        if (!container || !this.currentOrder) return;
+        if (!container || !this.currentOrder) return false;
 
         const orderId = Number(this.currentOrder.id || 0);
         if (!orderId) {
             container.innerHTML = '<div class="empty-state"><p>Заказ не найден</p></div>';
-            return;
+            return true;
         }
 
-        container.innerHTML = `<div class="card"><p class="text-muted" style="padding:16px">Загружаем фурнитуру заказа…</p></div>`;
+        const token = this._honestToken;
+        container.innerHTML = '<p class="odc-muted">Загружаем фурнитуру заказа…</p>';
 
+        let rows;
         try {
-            await Warehouse._ensureProjectHardwareStateLoaded();
-            const [warehouseItems, reservations, history] = await Promise.all([
-                loadWarehouseItems(),
-                loadWarehouseReservations(),
-                loadWarehouseHistory(),
-            ]);
-
-            Warehouse.allItems = Array.isArray(warehouseItems) ? warehouseItems : [];
-            Warehouse.allReservations = Array.isArray(reservations) ? reservations : [];
-
-            const byItemId = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
-            const historyDeltaMap = Warehouse._buildProjectHardwareHistoryDeltaMap(history || []);
-            const demandRows = Warehouse._collectWarehouseDemandFromOrderItems(this.currentItems || []);
-            const activeReservations = reservations || [];
-
-            if (!demandRows.length) {
-                container.innerHTML = `
-                    <div class="card">
-                        <div class="empty-state">
-                            <div class="empty-icon">&#128295;</div>
-                            <p>В заказе пока нет складской фурнитуры или упаковки.</p>
-                            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-                                <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
-                                <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть фурнитуру для проектов</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                return;
-            }
-
-            const rows = demandRows
-                .map(row => {
-                    const itemId = Number(row.warehouse_item_id || 0);
-                    const whItem = byItemId.get(itemId) || {};
-                    const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
-                    const targetQty = Warehouse._buildProjectHardwareTargetQty(orderId, itemId, plannedQty, historyDeltaMap);
-                    const actualQty = Warehouse._getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history || []);
-                    const ready = Warehouse._computeProjectHardwareReadyState(orderId, itemId, plannedQty, history || [], historyDeltaMap);
-                    const currentReserveQty = Warehouse._getProjectHardwareReservedQtyForOrderItem(activeReservations, orderId, itemId);
-                    const totalReservedQty = round2(Warehouse._getActiveReservationsForItem(itemId)
-                        .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
-                    const stockQty = round2(parseFloat(whItem.qty || 0) || 0);
-                    const availableQty = Math.max(0, round2(stockQty - totalReservedQty));
-                    const reserveHint = ready
-                        ? 'Уже собрано'
-                        : (Math.abs(currentReserveQty - targetQty) <= 0.000001
-                            ? 'Резерв совпадает'
-                            : (currentReserveQty < targetQty ? 'Резерв неполный' : 'Резерв скорректирован'));
-                    return {
-                        itemId,
-                        itemName: whItem.name || (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
-                        itemSku: whItem.sku || '',
-                        itemKind: Warehouse._projectSupplyKindLabel(row.material_type || whItem.category || 'hardware'),
-                        plannedQty,
-                        targetQty,
-                        actualQty,
-                        ready,
-                        unit: String(whItem.unit || 'шт').trim() || 'шт',
-                        stockTruth: this._buildProjectHardwareStockTruth({
-                            orderId,
-                            itemId,
-                            item: whItem,
-                            currentReserveQty,
-                            totalReservedQty,
-                            stockQty,
-                            availableQty,
-                            reservations: activeReservations,
-                            history: history || [],
-                        }),
-                        currentReserveQty,
-                        availableQty,
-                        reserveHint,
-                    };
-                })
-                .sort((a, b) => String(a.itemName).localeCompare(String(b.itemName), 'ru'));
-
-            const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
-            const totalTarget = round2(rows.reduce((sum, row) => sum + row.targetQty, 0));
-            const totalReserved = round2(rows.reduce((sum, row) => sum + row.currentReserveQty, 0));
-            const totalReady = rows.filter(row => row.ready).length;
-
-            container.innerHTML = `
-                <div class="card" style="margin-bottom:12px;">
-                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-                        <div>
-                            <h3 style="margin:0 0 6px;">Фурнитура и упаковка заказа</h3>
-                            <div class="text-muted" style="font-size:13px;">
-                                Меняйте здесь фактическое количество и сборку по заказу. Резерв на складе пересчитается автоматически.
-                            </div>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
-                            <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть на складе</button>
-                        </div>
-                    </div>
-                    <div class="stats-grid" style="margin-top:12px;">
-                        <div class="stat-card"><div class="stat-label">Позиций</div><div class="stat-value">${rows.length}</div></div>
-                        <div class="stat-card"><div class="stat-label">План</div><div class="stat-value">${totalPlanned} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">Факт / цель</div><div class="stat-value">${totalTarget} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">В резерве</div><div class="stat-value">${totalReserved} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">Собрано</div><div class="stat-value">${totalReady} / ${rows.length}</div></div>
-                    </div>
-                </div>
-
-                <div class="card" style="padding:0;">
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Комплектующая</th>
-                                    <th class="text-right">План</th>
-                                    <th class="text-right">Резерв</th>
-                                    <th class="text-right">Факт</th>
-                                    <th class="text-right">Доступно сейчас</th>
-                                    <th>Собрано</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${rows.map(row => `
-                                    <tr>
-                                        <td>
-                                            <div style="font-weight:600;">${this._esc(row.itemName)}</div>
-                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemKind)}</div>
-                                            ${row.itemSku ? `<div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemSku)}</div>` : ''}
-                                            ${this._renderProjectHardwareStockTruth(row.stockTruth, row)}
-                                        </td>
-                                        <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
-                                        <td class="text-right">
-                                            <div style="font-weight:700;">${row.currentReserveQty}</div>
-                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.reserveHint)}</div>
-                                        </td>
-                                        <td class="text-right">
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                value="${row.actualQty === null || row.actualQty === undefined ? '' : row.actualQty}"
-                                                placeholder="${row.plannedQty}"
-                                                style="width:96px;text-align:right;"
-                                                onblur="OrderDetail.setProjectHardwareActualQty(${row.itemId}, this.value)"
-                                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-                                            >
-                                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">если пусто — по плану</div>
-                                        </td>
-                                        <td class="text-right" style="font-weight:700;">${row.availableQty}</td>
-                                        <td>
-                                            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                                                <input type="checkbox" ${row.ready ? 'checked' : ''} onchange="OrderDetail.toggleProjectHardwareReady(${row.itemId}, this.checked)">
-                                                <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
-                                            </label>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
+            rows = await this._buildHardwareRows();
         } catch (error) {
             console.error('renderHardwareTab error', error);
+            if (this._isCurrent(token, orderId)) container.innerHTML = '<p class="odc-muted">Не удалось загрузить фурнитуру заказа.</p>';
+            return true;
+        }
+        // Пока склад читался, открыли другую карточку: этот ответ не рисуем — ни таблицу, ни плитку.
+        if (!this._isCurrent(token, orderId)) return true;
+        // Таблица свежее, чем то, что видят плитка и состав, — они перерисовываются по ней.
+        this.hardwareRows = rows;
+        this.hardwareState = 'ready';
+        this._renderHardwareDependents();
+
+        if (!rows.length) {
             container.innerHTML = `
-                <div class="card">
-                    <p class="text-muted" style="padding:16px;">Не удалось загрузить фурнитуру заказа.</p>
+                <div class="empty-state">
+                    <p>В заказе пока нет складской фурнитуры или упаковки.</p>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                        <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                        <button type="button" class="odc-btn" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть фурнитуру для проектов</button>
+                    </div>
                 </div>
             `;
+            return true;
         }
+
+        const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
+        const totalTarget = round2(rows.reduce((sum, row) => sum + row.targetQty, 0));
+        const totalReserved = round2(rows.reduce((sum, row) => sum + row.currentReserveQty, 0));
+        const totalReady = rows.filter(row => row.ready).length;
+
+        container.innerHTML = `
+            <div class="odc-hw-head">
+                <div>
+                    <h3 class="odc-h3">Фурнитура и упаковка заказа</h3>
+                    <div class="odc-caption">
+                        Меняйте здесь фактическое количество и сборку по заказу. Резерв на складе пересчитается автоматически.
+                    </div>
+                </div>
+                <div class="odc-hw-actions">
+                    <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                    <button type="button" class="odc-btn" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть на складе</button>
+                </div>
+            </div>
+            <div class="odc-hw-totals">
+                <span>Позиций: <b>${rows.length}</b></span>
+                <span>План: <b>${totalPlanned} шт</b></span>
+                <span>Факт / цель: <b>${totalTarget} шт</b></span>
+                <span>В резерве: <b>${totalReserved} шт</b></span>
+                <span>Собрано: <b>${totalReady} / ${rows.length}</b></span>
+            </div>
+            <div class="table-wrap">
+                <table class="odc-hw-table">
+                    <thead>
+                        <tr>
+                            <th>Комплектующая</th>
+                            <th class="text-right">План</th>
+                            <th class="text-right">Резерв</th>
+                            <th class="text-right">Факт</th>
+                            <th class="text-right">Доступно сейчас</th>
+                            <th>Собрано</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>
+                                    <div style="font-weight:600;">${this._esc(row.itemName)}</div>
+                                    <div class="odc-caption">${this._esc(row.itemKind)}</div>
+                                    ${row.itemSku ? `<div class="odc-caption">${this._esc(row.itemSku)}</div>` : ''}
+                                    ${this._renderProjectHardwareStockTruth(row.stockTruth, row)}
+                                </td>
+                                <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
+                                <td class="text-right">
+                                    <div style="font-weight:700;">${row.currentReserveQty}</div>
+                                    <div class="odc-caption">${this._esc(row.reserveHint)}</div>
+                                </td>
+                                <td class="text-right">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        class="odc-input odc-input-qty"
+                                        aria-label="Факт: ${this._escAttr(row.itemName)}"
+                                        value="${row.actualQty === null || row.actualQty === undefined ? '' : row.actualQty}"
+                                        placeholder="${row.plannedQty}"
+                                        onblur="OrderDetail.setProjectHardwareActualQty(${row.itemId}, this.value)"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                                    >
+                                    <div class="odc-caption">если пусто — по плану</div>
+                                </td>
+                                <td class="text-right" style="font-weight:700;">${row.availableQty}</td>
+                                <td>
+                                    <label class="odc-check">
+                                        <input type="checkbox" ${row.ready ? 'checked' : ''} onchange="OrderDetail.toggleProjectHardwareReady(${row.itemId}, this.checked)">
+                                        <span>собрано</span>
+                                    </label>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        return true;
     },
 
     async setProjectHardwareActualQty(itemId, rawValue) {
         if (!this.currentOrder) return;
-        await Warehouse.setProjectHardwareActualQty(this.currentOrder.id, itemId, rawValue);
-        const data = await loadOrder(this.currentOrder.id);
-        if (data && data.order) {
-            this.currentOrder = data.order;
-            this.currentItems = data.items || [];
-        }
-        await this.renderHardwareTab();
+        const orderId = this.currentOrder.id;
+        await Warehouse.setProjectHardwareActualQty(orderId, itemId, rawValue);
+        await this._afterHardwareEdit(orderId);
     },
 
     async toggleProjectHardwareReady(itemId, checked) {
         if (!this.currentOrder) return;
-        await Warehouse.toggleProjectHardwareReady(this.currentOrder.id, itemId, checked);
-        const data = await loadOrder(this.currentOrder.id);
+        const orderId = this.currentOrder.id;
+        await Warehouse.toggleProjectHardwareReady(orderId, itemId, checked);
+        await this._afterHardwareEdit(orderId);
+    },
+
+    // Фурнитуру поправили: заказ — заново, таблица — заново, а если панель уже закрыли — склад для
+    // плитки и меток читается сам.
+    async _afterHardwareEdit(orderId) {
+        const token = this._honestToken;
+        const data = await loadOrder(orderId);
+        if (!this._isCurrent(token, orderId)) return;
         if (data && data.order) {
             this.currentOrder = data.order;
             this.currentItems = data.items || [];
         }
-        await this.renderHardwareTab();
+        const drawn = await this.renderHardwareTab();
+        if (!drawn && this._isCurrent(token, orderId)) await this.loadHardwareRows();
     },
 
     _formatProjectHardwareQty(value, unitOrItem) {
@@ -1305,27 +2940,27 @@ const OrderDetail = {
                 : `${round2(allocatedQty * (cord.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`;
             const titleSuffix = isMetric && cord.length_cm > 0 ? ` (${cord.length_cm} см/подвес)` : ((cord.qty_per_pendant || 1) > 1 ? ` × ${cord.qty_per_pendant}` : '');
             const pricePerPendant = attachmentCostPerPendant('cord', cord);
-            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         carabiners.forEach(carabiner => {
             const allocatedQty = getAttachmentAllocatedQty(carabiner);
             const titleSuffix = (carabiner.qty_per_pendant || 1) > 1 ? ` × ${carabiner.qty_per_pendant}` : '';
             const pricePerPendant = attachmentCostPerPendant('carabiner', carabiner);
-            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${round2(allocatedQty * (carabiner.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${round2(allocatedQty * (carabiner.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         // Element groups by color
         Object.entries(groups).forEach(([color, els]) => {
             const chars = els.map(e => e.char).join(', ');
             const groupQty = els.length * qty;
-            rows += `<tr><td style="padding-left:24px;">&#128292; ${this._esc(chars)} (${this._esc(color)})</td><td>${groupQty}</td><td>${formatRub(elemPrice)}</td><td>${formatRub(groupQty * elemPrice)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(chars)} (${this._esc(color)})</td><td>${groupQty}</td><td>${formatRub(elemPrice)}</td><td>${formatRub(groupQty * elemPrice)}</td></tr>`;
         });
         // Print items
         elements.filter(el => el.has_print).forEach(el => {
-            rows += `<tr><td style="padding-left:24px;">&#128424; Печать на ${this._esc(el.char)}</td><td>${qty}</td><td>${formatRub(el.print_price)}</td><td>${formatRub(qty * (el.print_price || 0))}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">Печать на ${this._esc(el.char)}</td><td>${qty}</td><td>${formatRub(el.print_price)}</td><td>${formatRub(qty * (el.print_price || 0))}</td></tr>`;
         });
         // Packaging
         if (pnd.packaging?.name) {
-            rows += `<tr><td style="padding-left:24px;">&#128230; ${this._esc(pnd.packaging.name)}</td><td>${qty}</td><td>${formatRub(pnd.packaging.price_per_unit)}</td><td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(pnd.packaging.name)}</td><td>${qty}</td><td>${formatRub(pnd.packaging.price_per_unit)}</td><td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td></tr>`;
         }
 
         const sellPrice = dbItem.sell_price_item || 0;
@@ -1334,11 +2969,11 @@ const OrderDetail = {
         return `
             <div class="card" style="border-left:3px solid var(--accent);margin-bottom:12px;">
                 <div class="card-header">
-                    <h3 style="margin:0;">&#128292; Подвес "${this._esc(pnd.name)}" × ${qty} шт</h3>
+                    <h3 style="margin:0;">Подвес "${this._esc(pnd.name)}" × ${qty} шт</h3>
                     <span style="font-size:14px;font-weight:700;">${formatRub(totalRevenue)}</span>
                 </div>
-                <table style="width:100%;font-size:13px;border-collapse:collapse;padding:8px 16px;">
-                    <tr style="color:var(--text-muted);font-size:11px;"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
+                <table style="width:100%;font-size:14px;border-collapse:collapse;padding:8px 16px;">
+                    <tr style="color:var(--text-muted);font-size:14px;"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
                     ${rows}
                 </table>
             </div>
@@ -1373,7 +3008,7 @@ const OrderDetail = {
                 <b>${this._esc(name)}</b>
                 <span class="text-muted">${qty} шт</span>
             </div>
-            <div class="form-row" style="margin:0;gap:24px;font-size:13px;">
+            <div class="form-row" style="margin:0;gap:24px;font-size:14px;">
                 <div><span class="text-muted">Себестоимость:</span> ${formatRub(costPerUnit)}/шт</div>
                 <div><span class="text-muted">Продажа:</span> ${formatRub(sellPrice)}/шт</div>
                 <div><span class="text-muted">Выручка:</span> ${formatRub(revenue)}</div>
@@ -1417,7 +3052,7 @@ const OrderDetail = {
         if (sections.length === 0) return '';
 
         return `
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:12px;">
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:14px;">
                 ${sections.join('')}
             </div>
         `;
@@ -1462,9 +3097,25 @@ const OrderDetail = {
     // ==========================================
 
     async renderTasksTab() {
+        const order = this.currentOrder;
+        if (!order) return;
+        const token = this._honestToken;
+        const orderId = order.id;
+        const stale = () => !this._isCurrent(token, orderId);
+        let bundle;
+        try {
+            bundle = await loadWorkBundle();
+        } catch (error) {
+            console.warn('OrderDetail.renderTasksTab failed:', error);
+            if (stale()) return;
+            this._setHtml('od-tab-tasks', '<p class="odc-muted">Задачи не загрузились. Обновите страницу.</p>');
+            return;
+        }
+        // Пока задачи читались, открыли другую карточку.
+        if (stale()) return;
         const container = document.getElementById('od-tab-tasks');
-        const orderId = this.currentOrder.id;
-        const bundle = await loadWorkBundle();
+        if (!container) return;
+        bundle = bundle || {};
         const projects = (bundle.projects || []).filter(project => String(project.linked_order_id || '') === String(orderId));
         const projectIds = new Set(projects.map(project => String(project.id)));
         const tasks = (bundle.tasks || []).filter(task =>
@@ -1473,14 +3124,14 @@ const OrderDetail = {
         );
 
         const projectCards = projects.length === 0
-            ? '<div class="text-muted" style="font-size:13px;">Связанных проектов пока нет</div>'
+            ? '<div class="text-muted" style="font-size:14px;">Связанных проектов пока нет</div>'
             : projects.map(project => {
                 const projectTasks = tasks.filter(task => String(task.project_id || '') === String(project.id));
                 return `
                     <button class="od-project-card" onclick="App.navigate('projects', true, ${project.id})">
                         <div style="font-weight:700">${this._esc(project.title)}</div>
-                        <div class="text-muted" style="font-size:12px">${this._esc(project.type || 'Другое')} · ${this._esc(WorkManagementCore.getProjectStatusLabel(project.status))}</div>
-                        <div class="text-muted" style="font-size:12px">Задач: ${projectTasks.length} · Владелец: ${this._esc(project.owner_name || '—')}</div>
+                        <div class="text-muted" style="font-size:14px">${this._esc(project.type || 'Другое')} · ${this._esc(WorkManagementCore.getProjectStatusLabel(project.status))}</div>
+                        <div class="text-muted" style="font-size:14px">Задач: ${projectTasks.length} · Владелец: ${this._esc(project.owner_name || '—')}</div>
                     </button>
                 `;
             }).join('');
@@ -1491,11 +3142,11 @@ const OrderDetail = {
                 <tr onclick="App.navigate('tasks', true, ${task.id})" style="cursor:pointer">
                     <td>
                         <div style="font-weight:600">${this._esc(task.title)}</div>
-                        <div class="text-muted" style="font-size:12px">${this._esc(project ? `Проект: ${project.title}` : 'Прямая задача заказа')}</div>
+                        <div class="text-muted" style="font-size:14px">${this._esc(project ? `Проект: ${project.title}` : 'Прямая задача заказа')}</div>
                     </td>
                     <td><span class="badge">${this._esc(WorkManagementCore.getTaskStatusLabel(task.status))}</span></td>
-                    <td style="font-size:12px">${this._esc(task.assignee_name || '—')}</td>
-                    <td style="font-size:12px" class="${WorkManagementCore.isTaskOverdue(task) ? 'text-red' : ''}">${this._esc(task.due_date ? App.formatDate(task.due_date) + (task.due_time ? ' ' + task.due_time : '') : '—')}</td>
+                    <td style="font-size:14px">${this._esc(task.assignee_name || '—')}</td>
+                    <td style="font-size:14px" class="${WorkManagementCore.isTaskOverdue(task) ? 'text-red' : ''}">${this._esc(task.due_date ? App.formatDate(task.due_date) + (task.due_time ? ' ' + task.due_time : '') : '—')}</td>
                 </tr>
             `;
         }).join('');
@@ -1503,10 +3154,12 @@ const OrderDetail = {
         const inProgress = tasks.filter(task => task.status === 'in_progress').length;
         const done = tasks.filter(task => task.status === 'done').length;
         const total = tasks.length;
+        this.moreCounts = { ...this.moreCounts, tasks: total };
+        this._setMoreSummary('tasks');
 
         container.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
-                <div style="font-size:13px;color:var(--text-muted)">
+                <div style="font-size:14px;color:var(--text-muted)">
                     Всего задач: <b>${total}</b> &nbsp;|&nbsp; В работе: <b>${inProgress}</b> &nbsp;|&nbsp; Готово: <b>${done}</b> &nbsp;|&nbsp; Проектов: <b>${projects.length}</b>
                 </div>
                 <div class="flex gap-8">
@@ -1522,7 +3175,6 @@ const OrderDetail = {
 
             ${tasks.length === 0
                 ? `<div class="card"><div class="empty-state">
-                        <div class="empty-icon">&#9745;</div>
                         <p>В этом заказе пока нет задач</p>
                         <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ order_id: ${orderId}, primary_context_kind: 'order' })">Создать первую задачу</button>
                    </div></div>`
@@ -1543,11 +3195,18 @@ const OrderDetail = {
     // ==========================================
 
     async renderChinaTab() {
-        const container = document.getElementById('od-tab-china');
-        const orderId = this.currentOrder.id;
-        const orderName = this._esc(this.currentOrder.order_name || '');
+        const order = this.currentOrder;
+        if (!order) return;
+        const token = this._honestToken;
+        const orderId = order.id;
+        const stale = () => !this._isCurrent(token, orderId);
         try {
             const purchases = await loadChinaPurchases({ order_id: orderId });
+            if (stale()) return;
+            const container = document.getElementById('od-tab-china');
+            if (!container) return;
+            this.moreCounts = { ...this.moreCounts, china: Array.isArray(purchases) ? purchases.length : 0 };
+            this._setMoreSummary('china');
 
             const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
                 <button class="btn btn-sm btn-success" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openNewForm(${orderId}); }}, 200);">+ Создать закупку для этого заказа</button>
@@ -1558,7 +3217,6 @@ const OrderDetail = {
                     ${addBtn}
                     <div class="card">
                         <div class="empty-state">
-                            <div class="empty-icon">&#127464;&#127475;</div>
                             <p>Нет привязанных закупок из Китая</p>
                         </div>
                     </div>`;
@@ -1584,7 +3242,7 @@ const OrderDetail = {
                                     return `<tr style="cursor:pointer" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openDetail(${p.id}); } }, 250);">
                                         <td><b>${this._esc(p.purchase_name || '')}</b></td>
                                         <td>${this._esc(p.supplier_name || '')}</td>
-                                        <td>${st ? '<span class="badge badge-' + st.color + '">' + st.label + '</span>' : (p.status || '')}</td>
+                                        <td>${st ? '<span class="badge badge-' + st.color + '">' + this._esc(st.label) + '</span>' : this._esc(p.status || '')}</td>
                                         <td class="text-right">${(p.total_cny || 0).toFixed(2)}</td>
                                         <td>${this._esc(p.tracking_number || '')}</td>
                                     </tr>`;
@@ -1594,7 +3252,9 @@ const OrderDetail = {
                     </div>
                 </div>`;
         } catch (e) {
-            container.innerHTML = '<div class="card"><p class="text-muted" style="padding:16px">Ошибка загрузки закупок</p></div>';
+            console.warn('OrderDetail.renderChinaTab failed:', e);
+            if (stale()) return;
+            this._setHtml('od-tab-china', '<p class="odc-muted">Ошибка загрузки закупок</p>');
         }
     },
 
@@ -1602,46 +3262,88 @@ const OrderDetail = {
     // ACTIONS
     // ==========================================
 
-    async changeStatus() {
-        const o = this.currentOrder;
-        const opts = STATUS_OPTIONS.filter(s => s.value !== 'deleted' && s.value !== o.status);
-        const labels = opts.map((s, i) => `${i + 1}. ${s.label}`).join('\n');
-        const choice = prompt(`Текущий статус: ${App.statusLabel(o.status)}\n\nВыберите новый:\n${labels}\n\nВведите номер:`);
-        if (!choice) return;
-
-        const idx = parseInt(choice) - 1;
-        if (isNaN(idx) || idx < 0 || idx >= opts.length) {
-            App.toast('Неверный выбор');
+    // Смена этапа без системных окон. Без аргумента — раскрывает список этапов в меню «⋯». С этапом —
+    // те же проверки, что у списка заказов (Orders._ensureStatusTransitionAllowed), запись,
+    // завершение перехода (склад, готовая продукция, история) от имени того, кто вошёл.
+    async changeStatus(targetStatus) {
+        const order = this.currentOrder;
+        if (!order) return;
+        if (!targetStatus) {
+            this.showMenu('stages');
             return;
         }
-
-        const newStatus = opts[idx].value;
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
-            const guard = await Orders._ensureStatusTransitionAllowed(this.currentOrder.id, newStatus);
-            if (!guard.ok) return;
-        }
-        const managerName = prompt('Имя менеджера (для истории):') || 'Неизвестный';
-
-        const oldStatus = o.status;
-        try {
-            await updateOrderStatus(this.currentOrder.id, newStatus);
-        } catch (error) {
-            console.error('OrderDetail.changeStatus updateOrderStatus failed:', error);
-            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+        const newStatus = String(targetStatus);
+        if (newStatus === 'deleted' || this.statusBusy) return;
+        if (newStatus === order.status) {
+            this.closeMenu();
             return;
         }
-
-        // Confirm the successful primary write before any slower warehouse work.
-        this.currentOrder.status = newStatus;
+        const oldStatus = order.status;
+        const token = this._honestToken;
+        const orderId = order.id;
+        const current = () => this._isCurrent(token, orderId);
+        this.statusBusy = true;
+        this.menuOpen = false;
+        this.menuView = 'main';
         this.renderHeader();
-        App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
+        this.renderStages();
+        try {
+            if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
+                const guard = await Orders._ensureStatusTransitionAllowed(order.id, newStatus, { oldStatus });
+                // Нельзя — Orders уже сказал почему.
+                if (!guard || !guard.ok) return;
+            }
+            try {
+                await updateOrderStatus(order.id, newStatus);
+            } catch (error) {
+                console.error('OrderDetail.changeStatus updateOrderStatus failed:', error);
+                App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+                return;
+            }
 
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
-            await Orders._finishStatusTransition(this.currentOrder.id, this.currentOrder, oldStatus, newStatus, managerName);
+            // Запись удалась — карточка показывает новый этап сразу, до медленной работы со складом. Снимок
+            // заказа updateOrderStatus тоже переписал (статус и время перехода) — то же и здесь, в памяти:
+            // по нему карточка знает, когда заказ сдали.
+            const snapshot = { ...this._orderSnapshot(order.calculator_data), status: newStatus, updated_at: new Date().toISOString() };
+            const written = { status: newStatus, calculator_data: JSON.stringify(snapshot) };
+            Object.assign(order, written);
+            if (current() && this.currentOrder !== order) Object.assign(this.currentOrder, written);
+            this.statusBusy = false;
+            if (current()) this._renderAfterStatusChange();
+            App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
+
+            const managerName = (typeof App.getCurrentEmployeeName === 'function' && App.getCurrentEmployeeName()) || 'Неизвестный';
+            if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
+                await Orders._finishStatusTransition(order.id, order, oldStatus, newStatus, managerName);
+            }
+            // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при
+            // возврате) — блок «Тираж» показывает, что там теперь. Переход меняет резервы и списания
+            // фурнитуры — плитка «Склад», метки состава и открытая таблица читают склад заново.
+            if (current()) {
+                await this.loadTirageStock();
+                if (this.openPanel === 'stock') this.renderPanel();
+                else this._inBackground(this.loadHardwareRows(), 'loadHardwareRows');
+            }
+        } finally {
+            if (this.statusBusy) {
+                this.statusBusy = false;
+                if (current()) {
+                    this.renderHeader();
+                    this.renderStages();
+                }
+            }
         }
-        // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при возврате) —
-        // блок «Тираж» показывает, что там теперь.
-        await this.loadTirageStock();
+    },
+
+    // Этап сменился: шапка, этапы, плитки и «Как идёт».
+    _renderAfterStatusChange() {
+        const model = this._model();
+        this.renderHeader(model);
+        this.renderStages(model);
+        this.renderStats(model);
+        this.renderMoney(model);
+        this.renderWhat(model);
+        this.renderProgress(model);
     },
 
     openInCalculator() {
@@ -1651,6 +3353,7 @@ const OrderDetail = {
     },
 
     cloneOrder() {
+        this.closeMenu();
         if (this.currentOrder) {
             Orders.cloneOrder(this.currentOrder.id);
         }
@@ -1660,125 +3363,141 @@ const OrderDetail = {
     // INLINE EDIT HELPERS
     // ==========================================
 
-    async saveField(field, value) {
-        await updateOrderFields(this.currentOrder.id, { [field]: value });
-        this.currentOrder[field] = value;
-
-        // Re-render current tab
-        const tabRenderers = {
-            info: () => this.renderInfoTab(),
-            production: () => this.renderProductionTab(),
-            files: () => this.renderFilesTab(),
-            hardware: () => this.renderHardwareTab(),
-        };
-        if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
-        if (['payment_status'].includes(field)) this.renderStats();
-
+    // Запись поля заказа. Не записалось — тост, и введённое не пропадает (это решает тот, кто
+    // позвал: поле остаётся открытым, ТЗ — в поле). true — сохранено.
+    // owner — заказ и открытие, в котором нарисовано поле (data-order / data-token): значение из поля
+    // другой карточки не пишется никуда.
+    async saveField(field, value, owner) {
+        const order = this.currentOrder;
+        if (!order || !order.id || this._fromOtherCard(owner)) return false;
+        const token = this._honestToken;
+        try {
+            await updateOrderFields(order.id, { [field]: value });
+        } catch (error) {
+            console.error('OrderDetail.saveField failed:', field, error);
+            App.toast('Не сохранилось — проверьте связь и повторите');
+            return false;
+        }
+        order[field] = value;
+        if (this._isCurrent(token, order.id)) {
+            if (this.currentOrder !== order) this.currentOrder[field] = value;
+            this._renderAfterFieldSave(field);
+        }
         App.toast('Сохранено');
+        return true;
+    },
+
+    // Перерисовать то, что показывает поле.
+    _renderAfterFieldSave(field) {
+        const headFields = ['order_name', 'client_name', 'manager_name', 'deadline_start', 'deadline_end', 'notes', 'payment_status'];
+        const summaryFields = ['client_name', 'deadline_start', 'deadline_end', 'payment_status'];
+        const model = this._model();
+        if (headFields.includes(field)) this.renderHeader(model);
+        if (summaryFields.includes(field)) {
+            // Клиент «B2C» меняет доли тиража, срок — плитку и полосу сроков, оплата — деньги.
+            this.renderType(model);
+            this.renderStats(model);
+            this.renderMoney(model);
+            this.renderStages(model);
+            this.renderProgress(model);
+            if (this.openPanel === 'payment' || this.openPanel === 'money') this.renderPanel(model);
+        }
+        if (field !== 'notes' && field !== 'payment_status') this.renderInfoTab();
     },
 
     startEdit(field, currentValue, inputType) {
         const cell = document.getElementById('od-val-' + field);
         if (!cell) return;
-        cell.classList.add('od-editing');
+        // Щелчок по уже открытому полю всплывает до строки — поле не пересоздаётся (и не теряет текст).
+        if (typeof cell.querySelector === 'function' && cell.querySelector('.od-inline-input')) return;
+        this._editing = { field, inputType: inputType || 'text', kind: 'text' };
+        if (cell.classList) cell.classList.add('od-editing');
 
-        if (inputType === 'textarea') {
-            cell.innerHTML = `<textarea class="od-inline-input" onblur="OrderDetail.finishEdit('${field}', this.value)" style="width:100%;min-height:60px;font-size:13px;padding:6px 8px;border:1px solid var(--accent);border-radius:6px;resize:vertical;">${this._esc(currentValue || '')}</textarea>`;
-        } else {
-            cell.innerHTML = `<input class="od-inline-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;font-size:13px;padding:6px 8px;border:1px solid var(--accent);border-radius:6px;">`;
-        }
-        cell.querySelector('.od-inline-input').focus();
+        cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" ${this._fieldOwner()} onblur="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
+        const input = typeof cell.querySelector === 'function' ? cell.querySelector('.od-inline-input') : null;
+        if (input && typeof input.focus === 'function') input.focus();
     },
 
-    finishEdit(field, value) {
-        const trimmed = value.trim();
-        if (trimmed !== (this.currentOrder[field] || '').toString().trim()) {
-            this.saveField(field, trimmed);
-        } else {
-            // Revert — re-render tab
-            const tabRenderers = {
-                info: () => this.renderInfoTab(),
-                production: () => this.renderProductionTab(),
-                files: () => this.renderFilesTab(),
-                hardware: () => this.renderHardwareTab(),
-            };
-            if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
+    async finishEdit(field, value, owner) {
+        if (!this.currentOrder || this._fromOtherCard(owner)) return false;
+        const trimmed = String(value ?? '').trim();
+        const editing = this._editing && this._editing.field === field ? this._editing : null;
+        if (trimmed === String(this.currentOrder[field] ?? '').trim()) {
+            this._editing = null;
+            this.renderInfoTab();
+            return true;
         }
+        this._savingFields = this._savingFields || {};
+        if (this._savingFields[field]) return false;
+        this._savingFields[field] = true;
+        let saved = false;
+        try {
+            saved = await this.saveField(field, trimmed, owner);
+        } finally {
+            this._savingFields[field] = false;
+        }
+        if (saved) {
+            this._editing = null;
+        } else if (editing && editing.kind === 'date') {
+            // Не записалось — поле снова открыто с тем, что ввели.
+            this.startEditDate(field, trimmed);
+        } else {
+            this.startEdit(field, trimmed, editing ? editing.inputType : 'text');
+        }
+        return saved;
     },
 
     startEditDate(field, currentValue) {
         const cell = document.getElementById('od-val-' + field);
         if (!cell) return;
-        cell.innerHTML = `<input type="date" value="${currentValue || ''}" onblur="OrderDetail.finishEdit('${field}', this.value)" onchange="OrderDetail.finishEdit('${field}', this.value)" style="font-size:13px;padding:4px 8px;border:1px solid var(--accent);border-radius:6px;">`;
-        cell.querySelector('input').focus();
-    },
-
-    onSelectChange(field, value) {
-        this.saveField(field, value);
-    },
-
-    onCheckboxChange(field, checked) {
-        this.saveField(field, checked);
+        if (typeof cell.querySelector === 'function' && cell.querySelector('input')) return;
+        this._editing = { field, inputType: 'date', kind: 'date' };
+        cell.innerHTML = `<input type="date" class="odc-input" value="${this._escAttr(currentValue || '')}" ${this._fieldOwner()} onblur="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })" onchange="OrderDetail.finishEdit('${field}', this.value, { orderId: this.dataset.order, token: this.dataset.token })">`;
+        const input = typeof cell.querySelector === 'function' ? cell.querySelector('input') : null;
+        if (input && typeof input.focus === 'function') input.focus();
     },
 
     // ==========================================
     // FIELD RENDERERS
     // ==========================================
 
+    // Строка поля, которое правится щелчком. Значение уходит в startEdit через data-value: в
+    // атрибут onclick пользовательский текст не попадает (кавычки в нём его не обрывают).
     _fieldRow(field, label, value, inputType) {
         let displayValue = '';
         if (inputType === 'url' && value) {
             const shortUrl = value.length > 50 ? value.substring(0, 50) + '...' : value;
-            displayValue = `<a href="${this._escAttr(value)}" target="_blank" class="od-url-link">${this._esc(shortUrl)}</a>`;
+            displayValue = `<a href="${this._escAttr(value)}" target="_blank" rel="noopener" class="od-url-link" onclick="event.stopPropagation()">${this._esc(shortUrl)}</a>`;
         } else {
             displayValue = this._esc(value || '') || '<span class="text-muted">—</span>';
         }
 
         return `
-        <div class="od-field-row" onclick="OrderDetail.startEdit('${field}', ${JSON.stringify(value || '').replace(/'/g, "\\'")}, '${inputType}')" style="cursor:pointer" title="Нажмите для редактирования">
-            <div class="od-field-label">${label}</div>
+        <div class="od-field-row" role="button" tabindex="0" data-value="${this._escAttr(value || '')}"
+            onclick="OrderDetail.startEdit('${field}', this.dataset.value, '${inputType}')"
+            onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();OrderDetail.startEdit('${field}', this.dataset.value, '${inputType}');}"
+            title="Нажмите для редактирования">
+            <div class="od-field-label">${this._esc(label)}</div>
             <div class="od-field-value" id="od-val-${field}">${displayValue}</div>
         </div>`;
     },
 
     _fieldRowDateRange(fieldStart, fieldEnd, label, valueStart, valueEnd) {
-        const fmtStart = valueStart ? App.formatDate(valueStart) : '—';
-        const fmtEnd = valueEnd ? App.formatDate(valueEnd) : '';
-        const display = fmtEnd ? `${fmtStart} → ${fmtEnd}` : fmtStart;
+        const fmtStart = valueStart ? this._esc(App.formatDate(valueStart)) : '—';
+        const fmtEnd = valueEnd ? this._esc(App.formatDate(valueEnd)) : '';
+        const dateButton = (field, value, shown) => `
+                <span class="odc-date-btn" role="button" tabindex="0" id="od-val-${field}" data-value="${this._escAttr(value || '')}"
+                    onclick="OrderDetail.startEditDate('${field}', this.dataset.value)"
+                    onkeydown="if(event.target===this&&event.key==='Enter'){event.preventDefault();OrderDetail.startEditDate('${field}', this.dataset.value);}"
+                    title="Нажмите для изменения">${shown}</span>`;
 
         return `
         <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;">
-                <span id="od-val-${fieldStart}" onclick="OrderDetail.startEditDate('${fieldStart}', '${valueStart || ''}')" style="cursor:pointer" title="Нажмите для изменения">${fmtStart}</span>
-                <span>→</span>
-                <span id="od-val-${fieldEnd}" onclick="OrderDetail.startEditDate('${fieldEnd}', '${valueEnd || ''}')" style="cursor:pointer" title="Нажмите для изменения">${fmtEnd || '<span class=text-muted>—</span>'}</span>
-            </div>
-        </div>`;
-    },
-
-    _fieldRowSelect(field, label, value, options) {
-        const opts = options.map(o =>
-            `<option value="${o.key}" ${o.key === value ? 'selected' : ''}>${o.label}</option>`
-        ).join('');
-
-        return `
-        <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value">
-                <select class="od-status-select" onchange="OrderDetail.onSelectChange('${field}', this.value)">
-                    ${opts}
-                </select>
-            </div>
-        </div>`;
-    },
-
-    _fieldRowCheckbox(field, label, checked) {
-        return `
-        <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value">
-                <input type="checkbox" ${checked ? 'checked' : ''} onchange="OrderDetail.onCheckboxChange('${field}', this.checked)" style="width:18px;height:18px;cursor:pointer;">
+            <div class="od-field-label">${this._esc(label)}</div>
+            <div class="od-field-value od-field-dates">
+                ${dateButton(fieldStart, valueStart, fmtStart)}
+                <span aria-hidden="true">→</span>
+                ${dateButton(fieldEnd, valueEnd, fmtEnd || '<span class="text-muted">—</span>')}
             </div>
         </div>`;
     },
@@ -1787,13 +3506,8 @@ const OrderDetail = {
     // UTILS
     // ==========================================
 
-    _statusColor(status) {
-        const map = { draft: 'gray', calculated: 'blue', in_production: 'orange', production_printing: 'orange', completed: 'green', cancelled: 'red', deleted: 'red' };
-        return map[status] || 'gray';
-    },
-
     _esc(str) {
-        if (!str) return '';
+        if (!str && str !== 0) return '';
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -1803,7 +3517,7 @@ const OrderDetail = {
     },
 
     _escAttr(str) {
-        if (!str) return '';
+        if (!str && str !== 0) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     },
 };

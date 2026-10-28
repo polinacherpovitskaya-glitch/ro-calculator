@@ -353,6 +353,18 @@ const Factual = {
         const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
         const stageHours = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
         const stageSalary = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
+        // who worked each stage and when — the order card shows it next to the hours
+        const stagePeople = { casting: new Map(), trim: new Map(), assembly: new Map(), packaging: new Map() };
+        const stageDates = { casting: [null, null], trim: [null, null], assembly: [null, null], packaging: [null, null] };
+        const noteStageEntry = (stage, entry, stageEntryHours) => {
+            const name = String(entry?.worker_name || entry?.employee_name || '').trim();
+            if (name) stagePeople[stage].set(name, (stagePeople[stage].get(name) || 0) + stageEntryHours);
+            const date = String(entry?.date || '').slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+            const range = stageDates[stage];
+            if (range[0] === null || date < range[0]) range[0] = date;
+            if (range[1] === null || date > range[1]) range[1] = date;
+        };
         const planStageHours = {
             casting: this._num(planHours.hoursPlastic),
             trim: this._num(planHours.hoursTrim),
@@ -376,6 +388,7 @@ const Factual = {
             if (stageHours[stage] !== undefined) {
                 stageHours[stage] += hours;
                 stageSalary[stage] += hours * rate;
+                noteStageEntry(stage, entry, hours);
                 return;
             }
             if (!legacyWeights || !this._isLegacyImportedEntry(entry)) return;
@@ -385,6 +398,7 @@ const Factual = {
                 if (splitHours <= 0) return;
                 stageHours[stageKey] += splitHours;
                 stageSalary[stageKey] += splitHours * rate;
+                noteStageEntry(stageKey, entry, splitHours);
             });
             usedLegacyDistribution = true;
         });
@@ -394,9 +408,23 @@ const Factual = {
             stageSalary[stage] = round2(stageSalary[stage]);
         });
 
+        const people = {};
+        const firstDate = {};
+        const lastDate = {};
+        stageKeys.forEach(stage => {
+            people[stage] = Array.from(stagePeople[stage], ([name, hours]) => ({ name, hours: round2(hours) }))
+                .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name, 'ru'));
+            firstDate[stage] = stageDates[stage][0];
+            lastDate[stage] = stageDates[stage][1];
+        });
+
         return {
             hours: stageHours,
             salary: stageSalary,
+            planHours: planStageHours,
+            people,
+            firstDate,
+            lastDate,
             usedLegacyDistribution,
             legacyScope: isWorkshopOrder ? 'production_only' : 'all_planned',
         };
@@ -1894,7 +1922,8 @@ async _loadFactSummaries() {
     },
 
     // Real production cost of one order: { rows, planTotal, realTotal, salaryReal } (see
-    // _buildRealCostBreakdown) plus hours — planned, and from the timesheet. `hasTimesheet` is false
+    // _buildRealCostBreakdown) plus hours — planned, and from the timesheet — and `stages` (hours,
+    // people and dates per production stage, _buildStageHours) with `indirectPerHour`. `hasTimesheet` is false
     // when nobody logged hours on the order: then the whole cost is the plan — realTotal = planTotal
     // (spec: «Если табеля нет совсем — вся себестоимость плановая»), while the rows still show what
     // «Факт» has (a FinTablo fact, say). The card header and the ready goods stock use realTotal.
@@ -1916,13 +1945,37 @@ async _loadFactSummaries() {
         const hoursFact = sumHours(factData, row => 'fact_' + row.key);
         const hasTimesheet = hoursFact > 0;
         const breakdown = this._buildRealCostBreakdown(computed.planData, factData);
+        // The same params the order was computed with (see _ensureComputedOrder) — the rate that
+        // multiplies the hours into the «Косвенные» row.
+        const params = App.params || {};
         return {
             ...breakdown,
             realTotal: hasTimesheet ? breakdown.realTotal : breakdown.planTotal,
             hoursPlan: sumHours(planHours, row => row.planField),
             hoursFact,
             hasTimesheet,
+            stages: this._buildStageHours(id, planHours, params, computed.order),
+            indirectPerHour: this._num(params.indirectPerHour),
         };
+    },
+
+    // Hours by production stage — planned and from the timesheet, with the salary they cost, who
+    // worked them and the first / last day. Stage hours and salary are _collectStageActuals' own,
+    // the ones «Факт» puts in its hours and «ЗП» rows (legacy hours already split over the stages).
+    // Always four stages in production order, even for an order nobody logged hours on.
+    _buildStageHours(orderId, planHours = {}, params = {}, orderRef = null) {
+        const stageActuals = this._collectStageActuals(orderId, planHours, params, orderRef);
+        const rowByStage = { casting: 'hours_production', trim: 'hours_trim', assembly: 'hours_assembly', packaging: 'hours_packaging' };
+        return Object.keys(rowByStage).map(stage => ({
+            key: stage,
+            label: (this.HOUR_ROWS.find(row => row.key === rowByStage[stage]) || {}).label || stage,
+            planHours: round2(stageActuals.planHours[stage]),
+            factHours: stageActuals.hours[stage],
+            salary: stageActuals.salary[stage],
+            people: stageActuals.people[stage],
+            firstDate: stageActuals.firstDate[stage],
+            lastDate: stageActuals.lastDate[stage],
+        }));
     },
 
     _applyHoursFromEntries(factData, orderId, planHours = {}, params = {}, orderRef = null) {
