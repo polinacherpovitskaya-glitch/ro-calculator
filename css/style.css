@@ -2853,6 +2853,13 @@ table .text-center { text-align: center; }
     --odc-accent-text: #1d4ed8;
     --odc-accent-border: #bfdbfe;
     --odc-accent-bg: #f8fbff;
+    /* Доли тиража: коммерция, сток, партнёру, маркетинг, переделка, B2C */
+    --odc-part-commercial: #0f766e;
+    --odc-part-stock: #2563eb;
+    --odc-part-partner: #9333ea;
+    --odc-part-marketing: #db2777;
+    --odc-part-rework: #ea580c;
+    --odc-part-b2c: #0e7490;
 }
 
 .odc {
@@ -2976,10 +2983,47 @@ button.odc-menu-item:hover { background: var(--bg); }
 .odc-menu-current { color: var(--odc-text-soft); cursor: default; }
 .odc-menu-danger { color: var(--odc-red-text); }
 .odc-menu-back { color: var(--odc-text-soft); }
+.odc-head-wrap { display: flex; flex-direction: column; gap: 20px; }
 .odc-head { display: flex; flex-wrap: wrap; gap: 18px 22px; align-items: flex-start; }
 .odc-head-main { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .odc-head-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
 .odc-title { margin: 0; font-size: 34px; line-height: 1.15; font-weight: 700; word-break: break-word; }
+
+/* Лицо, вердикт, причины */
+.odc-face { flex: none; }
+.odc-face-green .odc-face-bg { fill: var(--green-light); stroke: var(--green); }
+.odc-face-green .odc-face-ink { fill: var(--odc-green-text); }
+.odc-face-green .odc-face-line { stroke: var(--odc-green-text); }
+.odc-face-yellow .odc-face-bg { fill: var(--yellow-light); stroke: var(--yellow); }
+.odc-face-yellow .odc-face-ink { fill: var(--odc-yellow-text); }
+.odc-face-yellow .odc-face-line { stroke: var(--odc-yellow-text); }
+.odc-face-red .odc-face-bg { fill: var(--red-light); stroke: var(--red); }
+.odc-face-red .odc-face-ink { fill: var(--odc-red-text); }
+.odc-face-red .odc-face-line { stroke: var(--odc-red-text); }
+.odc-face-gray .odc-face-bg { fill: #f0f0f0; stroke: #a3a3a3; }
+.odc-face-gray .odc-face-ink { fill: #737373; }
+.odc-face-gray .odc-face-line { stroke: #737373; }
+.odc-verdict { font-size: 20px; font-weight: 700; }
+.odc-head-meta { font-size: 16px; color: var(--odc-text-soft); }
+.odc-reasons { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; font-size: 16px; }
+
+/* Тип заказа и как продаём */
+.odc-type { display: flex; flex-direction: column; gap: 8px; }
+.odc-type-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--odc-line); }
+.odc-type-seg { display: block; height: 100%; }
+.odc-type-labels { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 15px; }
+.odc-part-commercial { background: var(--odc-part-commercial); }
+.odc-part-stock { background: var(--odc-part-stock); }
+.odc-part-partner { background: var(--odc-part-partner); }
+.odc-part-marketing { background: var(--odc-part-marketing); }
+.odc-part-rework { background: var(--odc-part-rework); }
+.odc-part-b2c { background: var(--odc-part-b2c); }
+.odc-part-text-commercial { color: var(--odc-part-commercial); }
+.odc-part-text-stock { color: var(--odc-accent-text); }
+.odc-part-text-partner { color: #7e22ce; }
+.odc-part-text-marketing { color: #be185d; }
+.odc-part-text-rework { color: #c2410c; }
+.odc-part-text-b2c { color: var(--odc-part-b2c); }
 
 /* Плитки и панель под ними */
 .odc-tiles { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -3005,10 +3049,30 @@ button.odc-menu-item:hover { background: var(--bg); }
 .odc-tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; word-break: break-word; }
 .odc-tile-caption { font-size: 14px; color: var(--odc-text-soft); }
 .odc-tile-more { font-size: 14px; color: var(--odc-accent-text); display: inline-flex; align-items: center; gap: 2px; margin-top: 2px; }
-.odc-tiles-note { flex: 1 1 100%; font-size: 15px; color: var(--odc-text-soft); }
 .odc-chevron { flex: none; transition: transform .15s ease; }
 [aria-expanded="true"] > .odc-chevron, [aria-expanded="true"] .odc-tile-more .odc-chevron { transform: rotate(180deg); }
 .odc-panel { border: 1px solid var(--odc-accent-border); border-radius: 10px; padding: 16px 20px; min-width: 0; }
+
+/* Деньги: строка под плитками */
+.odc-money { display: flex; flex-wrap: wrap; border: 1px solid var(--odc-tile-border); border-radius: 10px; overflow: hidden; }
+.odc-money-cell {
+    flex: 1 1 210px;
+    min-width: 0;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-right: 1px solid var(--odc-line);
+}
+.odc-money-cell:last-child { border-right: 0; }
+.odc-money-label, .odc-money-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-money-value { font-size: 22px; font-weight: 700; line-height: 1.25; }
+.odc-money-panel { display: flex; flex-direction: column; gap: 12px; }
+.odc-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: 16px; }
+.odc-lines li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--odc-line); }
+.odc-lines li:last-child { border-bottom: 0; }
+.odc-lines-value { white-space: nowrap; font-weight: 600; }
+.odc-lines-total { font-weight: 700; }
 .odc-panel[hidden], .odc-money:empty, .odc-type:empty { display: none; }
 .odc-field { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
 .odc-field-label { font-size: 15px; color: var(--odc-text-soft); }
@@ -3072,6 +3136,56 @@ button.odc-menu-item:hover { background: var(--bg); }
 .odc-product { padding: 14px 16px; border: 1px solid var(--odc-tile-border); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; }
 .odc-product-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
 .odc-product-name { font-size: 18px; font-weight: 700; }
+.odc-product-meta { color: var(--odc-text-soft); }
+.odc-product-colors { font-size: 15px; }
+.odc-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.odc-thumb-btn { padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); cursor: zoom-in; overflow: hidden; line-height: 0; }
+.odc-thumb { width: 72px; height: 72px; object-fit: cover; display: block; }
+.odc-thumb-btn.is-big { cursor: zoom-out; flex-basis: 100%; max-width: 480px; }
+.odc-thumb-btn.is-big .odc-thumb { width: 100%; height: auto; }
+.odc-supply { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.odc-supply li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px 12px;
+    min-height: 44px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--odc-line);
+}
+.odc-supply li:last-child { border-bottom: 0; }
+.odc-chip { font-size: 14px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+.odc-chip-green { color: #166534; background: var(--green-light); }
+.odc-chip-blue { color: #1e40af; background: var(--accent-light); }
+.odc-chip-red { color: #991b1b; background: var(--red-light); }
+.odc-chip-gray { color: var(--odc-text-soft); background: none; font-weight: 400; padding: 3px 0; }
+
+/* «Маржа: план → сейчас» */
+.odc-margin-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.odc-margin-big { font-size: 24px; font-weight: 700; }
+.odc-margin-arrow { font-size: 20px; color: var(--odc-text-soft); }
+.odc-margin-delta { font-size: 15px; font-weight: 600; }
+
+/* «Как идёт»: полоса сроков и часы по этапам */
+.odc-timeline { display: flex; flex-direction: column; gap: 6px; }
+.odc-timeline-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--odc-line); }
+.odc-timeline-seg { display: block; height: 100%; }
+.odc-seg-past { background: #93c5fd; }
+.odc-seg-done { background: var(--green); }
+.odc-seg-late { background: var(--red); }
+.odc-timeline-labels { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; color: var(--odc-text-soft); }
+.odc-timeline-labels .odc-tone-red, .odc-timeline-labels .odc-tone-green, .odc-tone-strong { font-weight: 700; }
+.odc-tone-strong { color: var(--text); }
+.odc-hours { display: flex; flex-direction: column; gap: 14px; }
+.odc-hours-row { display: flex; flex-direction: column; gap: 4px; }
+.odc-hours-head { display: flex; justify-content: space-between; gap: 8px; }
+.odc-hours-name { font-weight: 600; }
+.odc-strong { font-weight: 700; }
+.odc-bar { height: 8px; border-radius: 999px; background: var(--odc-line); overflow: hidden; }
+.odc-bar-fill { display: block; height: 100%; background: var(--accent); }
+.odc-bar-red { background: var(--red); }
+.odc-bar-yellow { background: var(--yellow); }
 .odc-tirage { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--odc-line); }
 .odc-tirage-rows { display: grid; gap: 14px; }
 .odc-tirage-name { font-size: 16px; font-weight: 600; }
@@ -3125,7 +3239,10 @@ button.odc-menu-item:hover { background: var(--bg); }
 @media (max-width: 640px) {
     .odc-top, .odc-card { padding: 18px 16px; }
     .odc-title { font-size: 26px; }
+    .odc-face { width: 56px; height: 56px; }
     .odc-tile { flex-basis: 100%; }
+    .odc-money-cell { flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--odc-line); }
+    .odc-money-cell:last-child { border-bottom: 0; }
     .odc-stages > .odc-btn-primary { width: 100%; }
     .odc-delivery-line { grid-template-columns: 1fr 1fr auto; }
     .odc-menu { right: -8px; }
