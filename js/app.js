@@ -6249,6 +6249,16 @@ const Calculator = {
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
+            // «Готово»: the ready goods stock follows the tirage split; below what is sold — no save.
+            if (order.status === 'completed') {
+                const readyGoodsSync = await this._syncCompletedOrderReadyGoods(orderIdForSave, order, items);
+                if (readyGoodsSync.blocked) {
+                    const blockedStatusEl = document.getElementById('calc-autosave-status');
+                    if (blockedStatusEl) blockedStatusEl.textContent = readyGoodsSync.message;
+                    return;
+                }
+            }
+
             const knownItemIds = (this._knownItemIds || []).slice();
             const orderId = await this._enqueueOrderWrite(() => {
                 if (!this._isCurrentAutosave(autosaveGeneration)) return null;
@@ -6272,6 +6282,22 @@ const Calculator = {
             if (statusEl) statusEl.textContent = 'Ошибка автосохранения';
         } finally {
             this._autosaving = false;
+        }
+    },
+
+    // Заказ в «Готово»: его штуки «на продажу» стоят на складе готовой продукции и могли уже
+    // продаваться. Склад подстраивается под разметку до записи заказа; blocked — «на продажу»
+    // стало меньше проданного, такой заказ не сохраняют (в message — почему).
+    async _syncCompletedOrderReadyGoods(orderId, order, items) {
+        if (!order || order.status !== 'completed') return { ok: true, message: '' };
+        if (typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.syncOrderReadyGoodsToTirage !== 'function') {
+            return { ok: true, message: '' };
+        }
+        try {
+            return (await Warehouse.syncOrderReadyGoodsToTirage(orderId, { order, items })) || { ok: true, message: '' };
+        } catch (error) {
+            console.error('[Calculator] ready goods sync failed:', error);
+            return { ok: false, message: 'Склад готовой продукции не обновился. Сохраните заказ ещё раз.' };
         }
     },
 
@@ -6535,6 +6561,19 @@ const Calculator = {
                 || 'draft';
         }
 
+        // «Готово»: the ready goods stock follows the tirage split before the order is written;
+        // «на продажу» below what is already sold is not saved.
+        let readyGoodsSync = { ok: true, message: '' };
+        if (order.status === 'completed') {
+            readyGoodsSync = await this._syncCompletedOrderReadyGoods(orderIdForSave, order, items);
+            if (readyGoodsSync.blocked) {
+                const blockedStatusEl = document.getElementById('calc-autosave-status');
+                if (blockedStatusEl) blockedStatusEl.textContent = readyGoodsSync.message;
+                App.toast(readyGoodsSync.message);
+                return;
+            }
+        }
+
         let orderId = null;
         try {
             const knownItemIds = (this._knownItemIds || []).slice();
@@ -6635,6 +6674,8 @@ const Calculator = {
 
             if (warehouseSyncError) {
                 App.toast('Заказ сохранён, но склад не синхронизировался');
+            } else if (!readyGoodsSync.ok) {
+                App.toast(`Заказ сохранён. ${readyGoodsSync.message}`);
             } else if (!warehouseSyncResult || !warehouseSyncResult.shortage) {
                 App.toast('Заказ сохранен');
             }
