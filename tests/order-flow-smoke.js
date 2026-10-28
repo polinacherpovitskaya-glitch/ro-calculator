@@ -1158,6 +1158,8 @@ async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
     assert.match(state.boardHtml, new RegExp(state.formattedMargin.replace('.', '[,.]')));
     assert.match(state.statsHtml, new RegExp(state.formattedMargin.replace('.', '[,.]')));
     assert.match(state.statsHtml, new RegExp(state.formattedHours.replace('.', '[,.]')));
+    // Маржа, сохранённая при продаже, видна подписью, когда она отличается от сегодняшней на 1 п.п. и больше.
+    assert.match(state.statsHtml, /при продаже: 5%/);
 }
 
 async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
@@ -11048,8 +11050,8 @@ async function smokeOrderCardTirageAndRealMargin(context) {
             updateOrderStatus: typeof updateOrderStatus === 'undefined' ? undefined : updateOrderStatus,
             prompt: typeof prompt === 'undefined' ? undefined : prompt,
             employeeName: App.getCurrentEmployeeName,
-            card: Object.fromEntries(['currentOrder', 'currentItems', 'currentFinancial', 'currentRealCost', 'realCostState',
-                'realCostDetailsOpen', 'tirageStock', 'tirageRecalcBusy'].map(key => [key, OrderDetail[key]])),
+            card: Object.fromEntries(['currentOrder', 'currentItems', 'currentRealCost', 'realCostState',
+                'openPanel', 'tirageStock', 'tirageRecalcBusy'].map(key => [key, OrderDetail[key]])),
         };
         App.params = ${JSON.stringify(LEMON_CARD_PARAMS)};
         App.canAccess = () => false;
@@ -11149,7 +11151,7 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         const opened = panelText();
         assert.ok(opened.includes('Выручка — ожидаем, если продадим 30 шт. 177 000 ₽'), opened);
         assert.ok(opened.includes('Производство по «Факту» −121 000 ₽'), opened);
-        assert.ok(opened.includes('Налоги и комиссии по плану −25 665 ₽'), opened);
+        assert.ok(opened.includes('Налоги, комиссии и прочее по плану −25 665 ₽'), opened);
         assert.ok(opened.includes('Заработали 30 335 ₽'), opened);
         assert.ok(opened.includes('Отдаём бесплатно: 70 шт. на 67 995 ₽ себестоимости'), opened);
         assert.ok(opened.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), opened);
@@ -11223,6 +11225,16 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.ok(noSheetFactRows.includes('Фурнитура 25 000 ₽ 28 865 ₽ по факту'), noSheetFactRows);
         assert.ok(noSheetFactRows.includes('Итого 97 135 ₽ 97 135 ₽'), noSheetFactRows);
         assert.ok(noSheetFactRows.includes(`${NO_TIMESHEET_NOTE} ${FACT_ROWS_ASIDE_NOTE}`), noSheetFactRows);
+        run('OrderDetail.toggleRealCostDetails()');
+
+        // 4б. План «Факта» больше плана калькулятора: остаток выходит в плюс — строка всё равно есть, и
+        // строки денег сходятся: 177 000 − 130 000 + 7 200 = 54 200.
+        context.__realCosts[9601] = lemonRealCost({ planTotal: 130000, realTotal: 130000 });
+        await run('OrderDetail.loadRealCost()');
+        run('OrderDetail.toggleRealCostDetails()');
+        assert.ok(panelText().includes('Производство по «Факту» −130 000 ₽'), panelText());
+        assert.ok(panelText().includes('Налоги, комиссии и прочее по плану +7 200 ₽'), panelText());
+        assert.ok(panelText().includes('Заработали 54 200 ₽'), panelText());
         run('OrderDetail.toggleRealCostDetails()');
 
         // 5. «Факт» не ответил: шапка остаётся плановой, подписана «план», карточки себестоимости нет.
@@ -11507,6 +11519,18 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         run('OrderDetail.renderType()');
         assert.ok(typeText().includes('Коммерция 10 — по счёту клиенту — ООО Груша'), `a leftover assembly is a sale: ${typeText()}`);
         assert.deepEqual(clone(context.__realCostCalls).map(call => call.orderId), [9604, 9605], '«Факт» is read for every order');
+        // «Факт» ответил по сборке из остатков: она считается по плану — маржа в строке «Деньги» та же, что
+        // в плитке (перерасход по табелю её не трогает).
+        context.__realCosts[9605] = { rows: [], planTotal: 1100, realTotal: 9000, hoursPlan: 2, hoursFact: 6, hasTimesheet: true, stages: [], indirectPerHour: 0 };
+        open(leftover);
+        await run('OrderDetail.loadRealCost()');
+        assert.equal(run('OrderDetail.realCostState'), 'ready');
+        const leftoverTile = /Маржа ([\d,]+%)/.exec(statsText());
+        const leftoverStrip = /маржа ([\d,]+%)/.exec(moneyText());
+        assert.ok(leftoverTile && leftoverStrip, `${statsText()} | ${moneyText()}`);
+        assert.equal(leftoverStrip[1], leftoverTile[1], 'one margin on one card');
+        assert.ok(moneyText().includes('по плану'), moneyText());
+        assert.ok(!moneyText().includes('по плану 1'), 'no real cost overrun in the strip');
 
         // 13. Ответ «Факта» по уже закрытой карточке на чужую не ложится.
         context.__realCosts[9601] = lemonRealCost();
@@ -11559,11 +11583,11 @@ async function smokeOrderCardTirageAndRealMargin(context) {
         assert.ok(visibleText(dom('od-tirage-slot').innerHTML).includes('На складе 30 из 30 · заморожено 121 000 ₽ · продано 0'), visibleText(dom('od-tirage-slot').innerHTML));
         assert.ok(moneyText().includes('30 шт. по 5 900 ₽ со склада · продано 0'), moneyText());
         assert.ok(moneyText().includes('Заработали'), 'closed — «Заработали»');
-        // «Перевести на «…»» — это тот же переход на следующий этап.
+        // «Перевести на этап «…»» — это тот же переход на следующий этап.
         const back = addOrder(cardData(9607, { order: { status: 'production_casting' } }));
         open(back);
         run('OrderDetail.renderStages()');
-        assert.ok(visibleText(dom('od-stages').innerHTML).includes('Перевести на «Доставка»'), visibleText(dom('od-stages').innerHTML));
+        assert.ok(visibleText(dom('od-stages').innerHTML).includes('Перевести на этап «Доставка»'), visibleText(dom('od-stages').innerHTML));
         run(`Orders._finishStatusTransition = async () => {}`);
         await run('OrderDetail.moveToNextStage()');
         assert.deepEqual(clone(run('globalThis.__statusWrites')).slice(-1), [[9607, 'delivery']]);
@@ -11664,7 +11688,7 @@ async function smokeOrderCardWithoutTabs(context) {
         assert.ok(dom('od-stats').innerHTML.includes('data-od-panel="payment"'), 'Оплата opens the payment choice');
         assert.ok(dom('od-stats').innerHTML.includes('data-od-panel="stock"'), 'Склад opens the hardware table');
         assert.equal(dom('od-panel').hidden, true, 'nothing is open yet');
-        assert.ok(visibleText(dom('od-stages').innerHTML).includes('Перевести на «Доставка»'), visibleText(dom('od-stages').innerHTML));
+        assert.ok(visibleText(dom('od-stages').innerHTML).includes('Перевести на этап «Доставка»'), visibleText(dom('od-stages').innerHTML));
         assert.ok(dom('od-what').innerHTML.includes('id="od-brief"'), 'the brief is right in «Что делаем»');
         assert.ok(dom('od-what').innerHTML.includes('placeholder="Что и сколько, цвет, нанесение, фурнитура и сборка, упаковка"'));
         assert.ok(dom('od-what').innerHTML.includes('id="od-tirage-slot"'));
@@ -11792,6 +11816,46 @@ async function smokeOrderCardWithoutTabs(context) {
         run(`OrderDetail.togglePanel('stock')`);
         assert.equal(dom('od-panel').hidden, true);
 
+        // 5а. ТЗ в фокусе: перерисовка «Что делаем» не трогает поле, обновляет только состав и тираж.
+        dom('od-what').innerHTML = '<textarea id="od-brief">набираю ТЗ</textarea>';
+        context.document.activeElement = dom('od-brief');
+        dom('od-what-items').innerHTML = '';
+        run('OrderDetail.renderWhat()');
+        assert.equal(dom('od-what').innerHTML, '<textarea id="od-brief">набираю ТЗ</textarea>', 'the brief being typed is left alone');
+        assert.ok(visibleText(dom('od-what-items').innerHTML).includes('Лимон — 100 шт.'), 'the composition still updates');
+        // Открытый «График сдачи», в котором пишут: «Как идёт» не перерисовывает его, только остальное.
+        run('OrderDetail.toggleDelivery()');
+        const scheduleHtml = dom('od-progress').innerHTML;
+        assert.ok(scheduleHtml.includes('id="od-delivery-schedule-card"'));
+        const typingDate = { id: 'date-input' };
+        context.document.activeElement = typingDate;
+        dom('od-delivery-slot').contains = el => el === typingDate;
+        dom('od-progress-flow').innerHTML = '';
+        run('OrderDetail.renderProgress()');
+        assert.equal(dom('od-progress').innerHTML, scheduleHtml, 'the open schedule is not redrawn while typing');
+        assert.ok(visibleText(dom('od-progress-flow').innerHTML).length > 0, 'the rest of «Как идёт» still updates');
+        context.document.activeElement = null;
+        delete dom('od-delivery-slot').contains;
+        run('OrderDetail.toggleDelivery()');
+        assert.ok(!dom('od-progress').innerHTML.includes('id="od-delivery-schedule-card"'));
+
+        // 5б. «Собрано» отметили, пока задачи ещё грузятся: карточка та же (тот же заказ), задачи доходят.
+        let releaseTasks = null;
+        context.loadWorkBundle = () => new Promise(resolve => { releaseTasks = () => resolve({ projects: [], tasks: [{ id: 6, order_id: 9702, title: 'Проверить пакеты', status: 'in_progress' }] }); });
+        await run('OrderDetail.load(9702)');
+        dom('od-more-sum-tasks').textContent = '…';
+        run('globalThis.__readyToggleOriginal = Warehouse.toggleProjectHardwareReady; Warehouse.toggleProjectHardwareReady = async () => {};');
+        try {
+            await run('OrderDetail.toggleProjectHardwareReady(501, true)');
+        } finally {
+            run('Warehouse.toggleProjectHardwareReady = globalThis.__readyToggleOriginal; delete globalThis.__readyToggleOriginal;');
+        }
+        releaseTasks();
+        await new Promise(resolve => setImmediate(resolve));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(dom('od-more-sum-tasks').textContent, '1', 'the reloaded order is still this card');
+        assert.ok(visibleText(dom('od-tab-tasks').innerHTML).includes('Проверить пакеты'));
+
         // 6. Меню «⋯»: копировать, сменить этап, отменить — с подтверждением в самом меню.
         run('OrderDetail.toggleMenu()');
         const menu = visibleText(dom('od-head').innerHTML);
@@ -11883,7 +11947,7 @@ async function smokeOrderCardContent(context) {
         assert.ok(text('od-stats').includes('Срок −2 дня сдать было до 26 окт.'), text('od-stats'));
         assert.ok(text('od-stats').includes('Склад Всё есть 1 на складе'), text('od-stats'));
         // Этапы: печати нет, сборка и упаковка есть; текущий — «Выливание».
-        assert.ok(text('od-stages').includes('Черновик Выливание Сборка Упаковка Доставка Готово Перевести на «Сборка»'), text('od-stages'));
+        assert.ok(text('od-stages').includes('Черновик Выливание Сборка Упаковка Доставка Готово Перевести на этап «Сборка»'), text('od-stages'));
         assert.ok(/odc-step-current" aria-current="step"><span>Выливание<\/span>/.test(dom('od-stages').innerHTML), dom('od-stages').innerHTML);
         assert.ok(/odc-step-done"><svg[^>]*>.*?<\/svg><span>Черновик/.test(dom('od-stages').innerHTML), 'a passed stage is ticked');
         // Состав: метки склада у фурнитуры и упаковки, фото цвета — только картинки.
@@ -11924,11 +11988,14 @@ async function smokeOrderCardContent(context) {
         run(`OrderDetail.currentOrder.order_name = '<img src=x onerror=alert(1)>'; OrderDetail.renderHeader()`);
         assert.ok(!dom('od-head').innerHTML.includes('<img src=x'), 'the name is escaped');
 
-        // 2. Закрытый клиентский заказ: сдали в срок, деньги не пришли. Дата сдачи — по часам браузера:
-        // 00:30 5 октября по местному времени — это 5 октября, а не 4-е по UTC.
+        // 2. Закрытый клиентский заказ: сдали в срок, деньги не пришли. Дата сдачи — из снимка заказа
+        // (calculator_data: status «completed» и updated_at перехода), а не из колонки updated_at, которую
+        // двигает любая правка поля. Дата — по часам браузера: 00:30 5 октября по местному времени — это
+        // 5 октября, а не 4-е по UTC.
         const closedAt = new Date(2026, 9, 5, 0, 30).toISOString();
         const closed = lemonCardOrder(9802, { order: { status: 'completed', payment_status: 'sent_to_payment', client_name: 'Аэрофлот', manager_name: 'Элина',
-            deadline_start: '2026-09-22', deadline_end: '2026-10-05', updated_at: closedAt, notes: '1100 картхолдеров' } });
+            deadline_start: '2026-09-22', deadline_end: '2026-10-05', notes: '1100 картхолдеров',
+            calculator_data: JSON.stringify({ status: 'completed', updated_at: closedAt }), updated_at: '2026-10-20T09:00:00.000Z' } });
         closed.items[0].tirage_allocation = null;
         orders[9802] = closed;
         facts[9802] = { ...lemonRealCost(), stages: LEMON_STAGES, indirectPerHour: 4220 };
@@ -11953,6 +12020,97 @@ async function smokeOrderCardContent(context) {
         assert.ok(text('od-progress').includes('Как шло'), text('od-progress'));
         assert.ok(text('od-progress').includes('5 окт. · сдали в срок'), text('od-progress'));
         assert.ok(text('od-progress').includes('Упаковка 0 из 0,8 ч в табель не внесли'), text('od-progress'));
+        // Оплату отметили 20 октября (колонка updated_at сдвинулась) — сдали всё равно 5-го, в срок.
+        const paidLater = clone(closed);
+        paidLater.order.id = 9804;
+        paidLater.order.payment_status = 'paid_100';
+        paidLater.items = paidLater.items.map(item => ({ ...item, id: 9804001, order_id: 9804 }));
+        orders[9804] = paidLater;
+        facts[9804] = facts[9802];
+        await open(9804);
+        assert.equal(run('OrderDetail._completedAt(OrderDetail.currentOrder)'), '2026-10-05');
+        assert.ok(text('od-stats').includes('Срок Вовремя сдали 5 окт., срок 5 окт.'), text('od-stats'));
+        assert.ok(text('od-head').includes('закрыт 5 октября'), text('od-head'));
+        assert.ok(!text('od-head').includes('позже'), text('od-head'));
+        // Снимок дважды закодирован (так бывает в старых строках) — читается так же.
+        assert.equal(run(`OrderDetail._completedAt({ status: 'completed', calculator_data: ${JSON.stringify(JSON.stringify(JSON.stringify({ status: 'completed', updated_at: closedAt })))} })`), '2026-10-05');
+        // completed_at, если есть, главнее снимка.
+        assert.equal(run(`OrderDetail._completedAt({ status: 'completed', completed_at: '2026-10-03', calculator_data: ${JSON.stringify(JSON.stringify({ status: 'completed', updated_at: closedAt }))} })`), '2026-10-03');
+        // Снимок не «Готово» (или его нет) — даты сдачи нет: ни опоздания, ни «закрыт D», колонку updated_at не берём.
+        assert.equal(run(`OrderDetail._completedAt({ status: 'completed', updated_at: '2026-10-20T09:00:00.000Z', calculator_data: ${JSON.stringify(JSON.stringify({ status: 'delivery', updated_at: closedAt }))} })`), null);
+        assert.equal(run(`OrderDetail._completedAt({ status: 'completed', updated_at: '2026-10-20T09:00:00.000Z' })`), null);
+        const noDate = clone(paidLater);
+        noDate.order.id = 9805;
+        delete noDate.order.calculator_data;
+        noDate.items = noDate.items.map(item => ({ ...item, id: 9805001, order_id: 9805 }));
+        orders[9805] = noDate;
+        facts[9805] = facts[9802];
+        await open(9805);
+        assert.ok(text('od-stats').includes('Срок Сдали срок был 5 окт.'), text('od-stats'));
+        assert.ok(!text('od-head').includes('закрыт'), text('od-head'));
+
+        // 1а. Смена этапа меняет резервы и списания — склад заказа читается заново, плитка и метки не устаревают.
+        await open(9801);
+        assert.ok(text('od-stats').includes('Склад Всё есть'), text('od-stats'));
+        context.loadWarehouseItems = async () => [{ id: 501, name: 'Круглый карабин с ушком', qty: 40, unit: 'шт' }];
+        run(`
+            globalThis.__stageOriginals = { guard: Orders._ensureStatusTransitionAllowed, finish: Orders._finishStatusTransition, write: globalThis.updateOrderStatus };
+            Orders._ensureStatusTransitionAllowed = async () => ({ ok: true });
+            Orders._finishStatusTransition = async () => {};
+            globalThis.updateOrderStatus = async () => {};
+        `);
+        try {
+            await run(`OrderDetail.changeStatus('production_hardware')`);
+            for (let i = 0; i < 5; i += 1) await settle();
+        } finally {
+            run(`
+                Orders._ensureStatusTransitionAllowed = globalThis.__stageOriginals.guard;
+                Orders._finishStatusTransition = globalThis.__stageOriginals.finish;
+                globalThis.updateOrderStatus = globalThis.__stageOriginals.write;
+                delete globalThis.__stageOriginals;
+            `);
+        }
+        assert.ok(text('od-stats').includes('Склад Не хватает 1'), text('od-stats'));
+        assert.ok(text('od-what').includes('Круглый карабин с ушком × 100 не хватает 60'), text('od-what'));
+        // Отметка «собрано» при закрытой панели — склад тоже читается заново.
+        context.loadWarehouseItems = async () => [{ id: 501, name: 'Круглый карабин с ушком', qty: 300, unit: 'шт' }];
+        run('globalThis.__readyToggle = Warehouse.toggleProjectHardwareReady; Warehouse.toggleProjectHardwareReady = async () => {};');
+        try {
+            await run('OrderDetail.toggleProjectHardwareReady(501, false)');
+        } finally {
+            run('Warehouse.toggleProjectHardwareReady = globalThis.__readyToggle; delete globalThis.__readyToggle;');
+        }
+        assert.ok(text('od-stats').includes('Склад Всё есть'), text('od-stats'));
+
+        // Таблицы и кнопки прежних вкладок внутри карточки — не мельче 15 px, кнопки не ниже 44 px.
+        const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'style.css'), 'utf8');
+        assert.match(css, /\.odc table th,\s*\.odc table td\s*\{[^}]*font-size:\s*15px/);
+        assert.match(css, /\.odc table th\s*\{[^}]*text-transform:\s*none[^}]*letter-spacing:\s*0/);
+        assert.match(css, /\.odc \.btn-sm\s*\{[^}]*font-size:\s*15px[^}]*min-height:\s*44px/);
+        assert.match(css, /\.odc \.odc-more-body tbody tr\s*\{[^}]*height:\s*(4[4-9]|[5-9]\d)px/);
+
+        // 2а. Подвесы: штуки заказа — подвесы, бланки внутри них не считаются второй раз («Обвесы Миллениум»:
+        // сердце 65 + подвес 65 = 65 обвесов, а не 130). Фурнитура и упаковка есть, но не со склада — «Не на учёте».
+        const millennium = {
+            order: { id: 9806, order_name: 'Обвесы Миллениум', client_name: 'Миллениум', manager_name: 'Элина', status: 'production_casting',
+                production_purpose: 'commercial', payment_status: 'paid_100', deadline_start: '2026-10-22', deadline_end: '2026-11-10', notes: '65 обвесов' },
+            items: [
+                { id: 9806001, order_id: 9806, item_number: 1, item_type: 'product', product_name: 'Сердце', quantity: 65, cost_total: 300, sell_price_item: 550, printings: '[]',
+                    pieces_per_hour: 30, weight_grams: 0, is_blank_mold: true },
+                { id: 9806002, order_id: 9806, item_number: 2, item_type: 'pendant', product_name: 'CHAMPION', quantity: 65, sell_price_item: 1520,
+                    item_data: JSON.stringify({ name: 'CHAMPION', quantity: 65, elements: [] }) },
+                { id: 9806003, order_id: 9806, item_number: 3, item_type: 'packaging', product_name: 'Пакет', quantity: 65, packaging_source: 'custom' },
+            ],
+        };
+        orders[9806] = millennium;
+        facts[9806] = null;
+        await open(9806);
+        assert.ok(text('od-head').includes('Обвесы Миллениум · 65 шт.'), text('od-head'));
+        assert.ok(text('od-type').includes('Коммерция 65 — по счёту клиенту — Миллениум'), text('od-type'));
+        assert.ok(text('od-stats').includes('Склад Не на учёте фурнитура и упаковка не со склада'), text('od-stats'));
+        // Без фурнитуры и упаковки вовсе — «Не нужен» (Аэрофлот выше: одно изделие).
+        await open(9802);
+        assert.ok(text('od-stats').includes('Склад Не нужен'), text('od-stats'));
 
         // 3. Подарок: не продаём, «Стоит нам», оплата не нужна, маржи нет.
         const gift = lemonCardOrder(9803, { order: { status: 'production_casting', production_purpose: 'marketing', client_name: 'Авиасейлс', manager_name: 'Алина',

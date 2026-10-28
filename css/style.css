@@ -3193,6 +3193,19 @@ button.odc-menu-item:hover { background: var(--bg); }
 .odc-tirage-stock { border-top: 1px solid var(--odc-line); padding-top: 12px; }
 .odc-tirage-action { margin-top: 10px; }
 
+/* «Как идёт»: подблоки, которые перерисовываются, пока пишут в «Графике сдачи» */
+.odc-slot { display: contents; }
+.odc-progress-flow { display: flex; flex-direction: column; gap: 14px; }
+
+/* Разделы, оставшиеся от вкладок (состав подробно, задачи, Китай, фурнитура): таблицы и кнопки
+   внутри карточки — не мельче 15 px, кнопки и строки задач — не ниже 44 px */
+.odc table th, .odc table td { font-size: 15px; }
+.odc table th { text-transform: none; letter-spacing: 0; }
+.odc .btn-sm { font-size: 15px; min-height: 44px; padding: 0 14px; }
+.odc .badge { font-size: 14px; padding: 2px 8px; border-radius: 12px; }
+.odc .odc-more-body tbody tr { height: 48px; }
+.odc .od-project-card { min-height: 44px; }
+
 /* Строки, которые раскрываются под собой */
 .odc-row-btn {
     width: 100%;

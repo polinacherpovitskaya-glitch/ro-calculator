@@ -11,15 +11,6 @@ const PAYMENT_STATUSES = [
     { key: 'special',       label: 'Особые условия',      color: 'red' },
 ];
 
-const HARDWARE_STATUSES = [
-    { key: 'discussion',      label: 'Обсуждение',       color: 'gray' },
-    { key: 'from_stock',      label: 'Из наличия',       color: 'blue' },
-    { key: 'ordered_waiting', label: 'Заказана, ждём',   color: 'orange' },
-    { key: 'arrived',         label: 'Приехала',         color: 'green' },
-    { key: 'not_needed',      label: 'Не нужна',         color: 'gray' },
-    { key: 'to_make',         label: 'Сделать',          color: 'yellow' },
-];
-
 // Plastic is always PP, print type is set at printing level — removed from UI
 
 // =============================================
@@ -478,14 +469,12 @@ const ORDER_CARD_ICONS = {
 const OrderDetail = {
     currentOrder: null,
     currentItems: [],
-    currentFinancial: null,
     deliveryScheduleDraft: [],
     // Честная шапка: реальная себестоимость заказа из «Факта» и склад его штук «на продажу».
     // Приходят после показа карточки (см. _beginHonestNumbers). realCostState: 'none' — не нужна
     // или не пришла, 'loading' — ждём «Факт», 'ready' — ответ в currentRealCost.
     currentRealCost: null,
     realCostState: 'none',
-    realCostDetailsOpen: false,
     tirageStock: null,
     tirageRecalcBusy: false,
     // Фурнитура и упаковка заказа со склада (строки _buildHardwareRows): hardwareState 'loading' —
@@ -572,16 +561,39 @@ const OrderDetail = {
         return el;
     },
 
+    // Сейчас пишут в этом поле (или внутри этого блока) — его не перерисовываем.
+    _typingIn(id) {
+        if (typeof document === 'undefined') return false;
+        const box = document.getElementById(id);
+        const active = document.activeElement;
+        if (!box || !active || active === document.body) return false;
+        return box === active || (typeof box.contains === 'function' && box.contains(active));
+    },
+
+    // Тип строки заказа: product (и пустой), pendant, hardware, packaging, extra_cost.
+    _itemType(item) {
+        return String(item?.item_type || 'product').trim().toLowerCase();
+    },
+
+    _paymentStatus(key) {
+        return PAYMENT_STATUSES.find(item => item.key === key) || PAYMENT_STATUSES[0];
+    },
+
+    // Ответ, который пришёл позже, — про эту же открытую карточку? Номер открытия и id заказа (объект
+    // заказа обработчики фурнитуры подменяют свежим, поэтому сравнивать объекты нельзя).
+    _isCurrent(token, orderId) {
+        return token === this._honestToken && !!this.currentOrder && Number(this.currentOrder.id) === Number(orderId);
+    },
+
     // ==========================================
-    // HEADER: «← Все заказы», «Калькулятор», меню «⋯»
+    // MODEL: всё, что нужно блокам, одним расчётом
     // ==========================================
 
-    // Всё, что нужно блокам карточки, одним расчётом: деньги, доли тиража, «Факт», склад и вердикт.
+    // Деньги, доли тиража, «Факт», склад и вердикт.
     _model() {
         const o = this.currentOrder || {};
         const items = Array.isArray(this.currentItems) ? this.currentItems : [];
         const financial = this.buildLiveFinancialMeta();
-        this.currentFinancial = financial;
         const purpose = normalizeProductionPurpose(financial.purpose || o.production_purpose);
         const nonCommercial = isNonCommercialProductionPurpose(purpose);
         const leftover = purpose === 'leftover_assembly';
@@ -590,8 +602,10 @@ const OrderDetail = {
         const real = this.realCostState === 'ready' && this.currentRealCost ? this.currentRealCost : null;
         const realView = !nonCommercial && !leftover ? this._buildRealCostView(financial) : null;
         const stageRows = real ? OrderCardLogic.stageHoursRows(real.stages) : [];
-        const type = item => String(item?.item_type || 'product').trim().toLowerCase();
-        const productLines = items.filter(item => type(item) === 'product' || type(item) === 'pendant');
+        // Штуки заказа: подвесы, если они есть (бланки внутри подвеса — его части, а не ещё штуки),
+        // иначе изделия; у сборки из остатков без изделий — её количество.
+        const pendantLines = items.filter(item => this._itemType(item) === 'pendant');
+        const productLines = pendantLines.length ? pendantLines : items.filter(item => this._itemType(item) === 'product');
         const leftoverData = leftover && typeof normalizeLeftoverAssembly === 'function'
             ? normalizeLeftoverAssembly(o.leftover_assembly) : (o.leftover_assembly || {});
         const products = productLines.length
@@ -639,11 +653,18 @@ const OrderDetail = {
         };
     },
 
-    // Когда заказ сдали: completed_at, а без него — последнее изменение готового заказа. Дата —
-    // по часам браузера (YYYY-MM-DD), а не по UTC: сдача после полуночи по Москве — уже этот день.
+    // Когда заказ сдали: completed_at, а без него — время перехода в «Готово» из снимка заказа
+    // (calculator_data: status и updated_at пишет updateOrderStatus; правки полей их не трогают). Колонку
+    // updated_at не берём: её двигает любая правка, например отметка оплаты. Нет ни того, ни другого —
+    // null: ни опоздания, ни «закрыт D». Дата — по часам браузера (YYYY-MM-DD), а не по UTC: сдача после
+    // полуночи по Москве — уже этот день.
     _completedAt(order) {
         const o = order || {};
-        const raw = o.completed_at || (OrderCardLogic._normalizeStatus(o.status) === 'completed' ? o.updated_at : null);
+        let raw = o.completed_at || null;
+        if (!raw && OrderCardLogic._normalizeStatus(o.status) === 'completed') {
+            const snapshot = this._orderSnapshot(o.calculator_data);
+            if (snapshot.status === 'completed' && snapshot.updated_at) raw = snapshot.updated_at;
+        }
         if (!raw) return null;
         const text = String(raw).trim();
         if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
@@ -651,6 +672,23 @@ const OrderDetail = {
         if (Number.isNaN(date.getTime())) return null;
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     },
+
+    // Снимок калькулятора заказа: JSON-строка (в старых строках — дважды закодированная) или объект.
+    _orderSnapshot(value) {
+        let parsed = value;
+        for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) {
+            try {
+                parsed = JSON.parse(parsed);
+            } catch (e) {
+                return {};
+            }
+        }
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    },
+
+    // ==========================================
+    // HEADER: «← Все заказы», «Калькулятор», меню «⋯», лицо и вердикт
+    // ==========================================
 
     renderHeader(model) {
         const m = model || this._model();
@@ -906,7 +944,7 @@ const OrderDetail = {
         this._setHtml('od-stats', `
             ${this._deadlineTile(m)}
             ${this._speedTile(m)}
-            ${this._stockTile()}
+            ${this._stockTile(m)}
             ${this._marginTile(m)}
             ${this._paymentTile(m)}
         `);
@@ -978,10 +1016,17 @@ const OrderDetail = {
         else if (this.realCostState === 'loading' && !hasRealMargin) caption = 'план · считаем по факту';
         else if (hasRealMargin && !real.hasTimesheet) caption = 'по плану';
         else if (hasRealMargin) caption = `план ${formatPercent(m.marginPlan)} · ${this._formatPp(round2(shown - m.marginPlan))}`;
+        // Маржа, сохранённая при продаже (по ценам и ставкам того дня), — когда расходится с сегодняшним
+        // планом на 1 п.п. и больше: объясняет, почему в списке заказов другая цифра.
+        const stored = Number(m.order.margin_percent_plan ?? m.order.margin_percent ?? 0);
+        const note = stored && Math.abs(stored - m.marginPlan) >= 1
+            ? { text: `при продаже: ${formatPercent(stored)}`, title: 'Зафиксировано при сохранении заказа — по ценам и ставкам того дня.' }
+            : null;
         return this._tile({
             label: 'Маржа',
             value: formatPercent(shown),
             caption,
+            note,
             tone: shown < 30 ? 'red' : 'green',
             panel: 'money',
             more: 'деньги',
@@ -999,7 +1044,7 @@ const OrderDetail = {
             return this._tile({ label: 'Оплата', value: 'Не нужна', caption: 'клиенту не продаём', tone: 'muted', panel: 'payment', more: 'изменить' });
         }
         const key = o.payment_status || 'not_sent';
-        const status = PAYMENT_STATUSES.find(item => item.key === key) || PAYMENT_STATUSES[0];
+        const status = this._paymentStatus(key);
         const paid = OrderCardLogic.PAID_STATUSES.includes(key);
         const tone = paid ? 'green' : (m.completed || key === 'not_sent' ? 'yellow' : '');
         return this._tile({ label: 'Оплата', value: status.label, tone, panel: 'payment', more: 'изменить' });
@@ -1007,11 +1052,12 @@ const OrderDetail = {
 
     // Плитка: подпись, крупное значение и подпись под ним — текстом (экранируется). С panel — это
     // кнопка, которая раскрывает панель под плитками (#od-panel).
-    _tile({ label, value, caption = '', tone = '', panel = '', more = '' }) {
+    _tile({ label, value, caption = '', note = null, tone = '', panel = '', more = '' }) {
         const body = `
                 <span class="odc-tile-label">${this._esc(label)}</span>
                 <span class="odc-tile-value${tone ? ` odc-tone-${tone}` : ''}">${this._esc(value)}</span>
-                ${caption ? `<span class="odc-tile-caption">${this._esc(caption)}</span>` : ''}`;
+                ${caption ? `<span class="odc-tile-caption">${this._esc(caption)}</span>` : ''}
+                ${note ? `<span class="odc-tile-caption" title="${this._escAttr(note.title || '')}">${this._esc(note.text)}</span>` : ''}`;
         if (!panel) return `<div class="odc-tile">${body}</div>`;
         const open = this.openPanel === panel;
         return `
@@ -1023,7 +1069,7 @@ const OrderDetail = {
     },
 
     // «Склад»: фурнитура и упаковка заказа со склада (строки _buildHardwareRows).
-    _stockTile() {
+    _stockTile(m) {
         const state = this.hardwareState;
         const rows = Array.isArray(this.hardwareRows) ? this.hardwareRows : [];
         let value = '…';
@@ -1035,7 +1081,12 @@ const OrderDetail = {
         } else if (state === 'ready') {
             const labels = rows.map(row => OrderCardLogic.stockLabel(row));
             const shortage = labels.filter(label => label.tone === 'red').length;
-            if (!rows.length) {
+            const lines = (m ? m.items : (this.currentItems || []))
+                .filter(item => ['hardware', 'packaging'].includes(this._itemType(item)));
+            if (!rows.length && lines.length) {
+                value = 'Не на учёте';
+                caption = 'фурнитура и упаковка не со склада';
+            } else if (!rows.length) {
                 value = 'Не нужен';
                 caption = 'без фурнитуры и упаковки со склада';
             } else if (labels.every(label => label.tone === 'green')) {
@@ -1076,10 +1127,12 @@ const OrderDetail = {
     // Деньги заказа одним расчётом — для строки «Деньги» и панели. Себестоимость здесь — всё, что
     // заказ стоит: производство («Факт», без него — план) и налоги с комиссиями по плану, так что
     // «Заработаем» = выручка − себестоимость, а маржа — та же, что в плитке.
+    // Сборка из остатков считается по плану, как её плитка «Маржа»: «Факт» её деньги не трогает.
     _moneyNumbers(m) {
         const f = m.financial || {};
-        const real = m.real;
+        const real = m.leftover ? null : m.real;
         const timesheet = !!(real && real.hasTimesheet);
+        const loading = !m.leftover && this.realCostState === 'loading';
         const revenue = m.nonCommercial ? 0 : Math.max(0, Number(f.revenue || 0));
         const stockRevenue = Math.max(0, Number(f.stockRevenue || 0));
         const productionPlan = real ? Number(real.planTotal) || 0 : Math.max(0, Number(f.planCost || 0));
@@ -1090,7 +1143,7 @@ const OrderDetail = {
             const cost = planCost + overrun;
             let costCaption = 'по плану';
             if (timesheet) costCaption = Math.round(cost) === Math.round(planCost) ? 'как в плане' : `по плану ${this._formatWhole(planCost)}`;
-            else if (this.realCostState === 'loading') costCaption = 'по плану · считаем по табелю…';
+            else if (loading) costCaption = 'по плану · считаем по табелю…';
             return { revenue: 0, cost, planCost, costCaption, productionPlan, productionNow, timesheet };
         }
         const earnedPlan = f.totalEarned !== null && f.totalEarned !== undefined && Number.isFinite(Number(f.totalEarned))
@@ -1101,7 +1154,7 @@ const OrderDetail = {
         const cost = costPlan + overrun;
         let costCaption = 'с налогами · по плану';
         if (timesheet) costCaption = Math.round(cost) === Math.round(costPlan) ? 'с налогами · как в плане' : `с налогами · по плану ${this._formatWhole(costPlan)}`;
-        else if (this.realCostState === 'loading') costCaption = 'с налогами · считаем по табелю…';
+        else if (loading) costCaption = 'с налогами · считаем по табелю…';
         const margin = revenue > 0 ? Math.round((earned * 100 / revenue) * 100) / 100 : 0;
         return {
             revenue, stockRevenue, clientRevenue: m.clientQty > 0 ? Math.max(0, revenue - stockRevenue) : 0,
@@ -1144,7 +1197,7 @@ const OrderDetail = {
         }).filter(Boolean);
 
         const key = m.order.payment_status || 'not_sent';
-        const status = PAYMENT_STATUSES.find(item => item.key === key) || PAYMENT_STATUSES[0];
+        const status = this._paymentStatus(key);
         const fromClient = key === 'paid_100' ? money.clientRevenue : (key === 'paid_50' ? money.clientRevenue / 2 : 0);
         const received = fromClient + soldRevenue;
         let receivedCaption;
@@ -1208,7 +1261,6 @@ const OrderDetail = {
     togglePanel(name) {
         const panels = ['money', 'payment', 'stock'];
         this.openPanel = panels.includes(name) && this.openPanel !== name ? name : null;
-        this.realCostDetailsOpen = this.openPanel === 'money';
         const model = this._model();
         this.renderStats(model);
         this.renderPanel(model);
@@ -1244,7 +1296,7 @@ const OrderDetail = {
     _renderMoneyPanel(m) {
         const money = this._moneyNumbers(m);
         const f = m.financial || {};
-        const line = (label, value, extra = '') => `<li class="${extra}"><span>${label}</span><span class="odc-lines-value">${this._esc(value)}</span></li>`;
+        const line = (label, value, extra = '') => `<li class="${extra}"><span>${this._esc(label)}</span><span class="odc-lines-value">${this._esc(value)}</span></li>`;
         const lines = [];
         const production = money.timesheet ? 'Производство по «Факту»' : 'Производство по плану';
         if (m.nonCommercial) {
@@ -1253,8 +1305,11 @@ const OrderDetail = {
         } else {
             const stockQty = Number(f.stockQty || 0);
             lines.push(line(`Выручка${stockQty > 0 ? ` — ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.` : ''}`, this._formatWhole(money.revenue)));
-            if (money.productionNow > 0) lines.push(line(this._esc(production), `−${this._formatWhole(money.productionNow)}`));
-            if (money.productionNow > 0 && money.taxes > 0.5) lines.push(line('Налоги и комиссии по плану', `−${this._formatWhole(money.taxes)}`));
+            if (money.productionNow > 0) lines.push(line(production, `−${this._formatWhole(money.productionNow)}`));
+            // Остаток до «Заработаем» — всегда отдельной строкой, и в минус, и в плюс: строки сходятся.
+            if (Math.abs(money.taxes) > 0.5) {
+                lines.push(line(money.productionNow > 0 ? 'Налоги, комиссии и прочее по плану' : 'Расходы по плану', this._formatSignedRub(-money.taxes)));
+            }
             lines.push(line(m.completed ? 'Заработали' : 'Заработаем', this._formatWhole(money.earned), `odc-lines-total odc-tone-${money.earned >= 0 ? 'green' : 'red'}`));
         }
         const notes = [];
@@ -1293,9 +1348,10 @@ const OrderDetail = {
         const order = this.currentOrder;
         if (!order || !PAYMENT_STATUSES.some(status => status.key === value)) return false;
         if (value === (order.payment_status || 'not_sent')) return true;
+        const token = this._honestToken;
         const saved = await this.saveField('payment_status', value);
         // Не сохранилось — выбор показывает то, что записано.
-        if (!saved && this.currentOrder === order && this.openPanel === 'payment') this.renderPanel();
+        if (!saved && this._isCurrent(token, order.id) && this.openPanel === 'payment') this.renderPanel();
         return saved;
     },
 
@@ -1314,7 +1370,6 @@ const OrderDetail = {
         this._honestToken = (this._honestToken || 0) + 1;
         this.currentRealCost = null;
         this.tirageStock = null;
-        this.realCostDetailsOpen = false;
         this.tirageRecalcBusy = false;
         this.realCostState = this._canLoadRealCost() ? 'loading' : 'none';
         this.hardwareRows = null;
@@ -1448,8 +1503,9 @@ const OrderDetail = {
     // Блок «Тираж»: как поделён тираж каждой строки изделия и что из «на продажу» лежит на складе
     // готовой продукции. Только просмотр: разметку меняют в калькуляторе. Пустая строка, если у
     // заказа нет разметки (а у B2C, «Переделки», «Стока / образца» и «Сборки из остатков» её нет).
-    renderTirageInfo() {
-        const lines = this._getTirageLines();
+    // lines — строки с разметкой, если они уже посчитаны (model.tirageLines); без них — посчитать.
+    renderTirageInfo(tirageLines) {
+        const lines = Array.isArray(tirageLines) ? tirageLines : this._getTirageLines();
         if (!lines.length) return '';
         const count = value => this._formatQuantity(value);
         const note = value => {
@@ -1506,9 +1562,16 @@ const OrderDetail = {
     },
 
     // Блок перерисовывается на месте: «Что делаем» целиком трогать нельзя — в нём пишут ТЗ.
-    _renderTirageSlot() {
+    _renderTirageSlot(tirageLines) {
         const slot = document.getElementById('od-tirage-slot');
-        if (slot) slot.innerHTML = this.renderTirageInfo();
+        if (slot) slot.innerHTML = this.renderTirageInfo(tirageLines);
+    },
+
+    // Склад готовой продукции пришёл (или ушёл): блок «Тираж» и строка «Деньги» — одним расчётом.
+    _renderTirageDependents() {
+        const model = this._model();
+        this._renderTirageSlot(model.tirageLines);
+        this.renderMoney(model);
     },
 
     // Склад штук «на продажу» этого заказа: читается, только если у заказа есть что продавать.
@@ -1519,8 +1582,7 @@ const OrderDetail = {
         if (!forSale || typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.getOrderTirageStockSummary !== 'function') {
             if (this.tirageStock) {
                 this.tirageStock = null;
-                this._renderTirageSlot();
-                this.renderMoney();
+                this._renderTirageDependents();
             }
             return null;
         }
@@ -1533,10 +1595,9 @@ const OrderDetail = {
             console.warn('OrderDetail.loadTirageStock failed:', error);
             return this.tirageStock;
         }
-        if (token !== this._honestToken || !this.currentOrder || this.currentOrder.id !== orderId) return null;
+        if (!this._isCurrent(token, orderId)) return null;
         this.tirageStock = summary && Number(summary.total) > 0 ? summary : null;
-        this._renderTirageSlot();
-        this.renderMoney();
+        this._renderTirageDependents();
         return this.tirageStock;
     },
 
@@ -1577,7 +1638,7 @@ const OrderDetail = {
     // Что есть в заказе — от этого зависят этапы: печать, сборка, упаковка.
     _stageFlags() {
         const items = Array.isArray(this.currentItems) ? this.currentItems : [];
-        const type = item => String(item?.item_type || 'product').trim().toLowerCase();
+        const type = item => this._itemType(item);
         const printingsOf = item => {
             const list = typeof parseOrderCalcJson === 'function'
                 ? parseOrderCalcJson(item.printings, [])
@@ -1610,7 +1671,7 @@ const OrderDetail = {
         if (model.next) {
             action = `
                 <button type="button" class="odc-btn odc-btn-primary" onclick="OrderDetail.moveToNextStage()"${this.statusBusy ? ' disabled' : ''}>
-                    ${this.statusBusy ? 'Переводим…' : `Перевести на «${this._esc(model.next.label)}» ${ORDER_CARD_ICONS.arrow}`}
+                    ${this.statusBusy ? 'Переводим…' : `Перевести на этап «${this._esc(model.next.label)}» ${ORDER_CARD_ICONS.arrow}`}
                 </button>`;
         } else if (o.status === 'completed') {
             // Сдали, а клиентская доля не оплачена — главное действие теперь оплата.
@@ -1638,11 +1699,10 @@ const OrderDetail = {
     renderWhat(model) {
         const o = this.currentOrder || {};
         const m = model || this._model();
-        const brief = document.getElementById('od-brief');
-        if (brief && typeof document !== 'undefined' && document.activeElement === brief) {
+        if (this._typingIn('od-brief')) {
             // ТЗ сейчас пишут — его не трогаем: обновляется только состав и тираж.
             this._setHtml('od-what-items', this._renderComposition(m));
-            this._renderTirageSlot();
+            this._renderTirageSlot(m.tirageLines);
             return;
         }
         const text = this.briefDraft !== null && this.briefDraft !== undefined ? this.briefDraft : (o.notes || '');
@@ -1655,7 +1715,7 @@ const OrderDetail = {
                 onblur="OrderDetail.saveBrief(this.value)"
                 onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.blur();}">${this._esc(text)}</textarea>
             <div id="od-what-items" class="odc-what-items">${this._renderComposition(m)}</div>
-            <div id="od-tirage-slot">${this.renderTirageInfo()}</div>`);
+            <div id="od-tirage-slot">${this.renderTirageInfo(m.tirageLines)}</div>`);
     },
 
     // ТЗ сохраняется само, когда уходят из поля, — если изменилось. Не сохранилось — текст остаётся.
@@ -1668,8 +1728,9 @@ const OrderDetail = {
             return true;
         }
         this.briefDraft = typed;
+        const token = this._honestToken;
         const saved = await this.saveField('notes', typed.trim());
-        if (saved && this.currentOrder === order && this.briefDraft === typed) this.briefDraft = null;
+        if (saved && this._isCurrent(token, order.id) && this.briefDraft === typed) this.briefDraft = null;
         return saved;
     },
 
@@ -1678,7 +1739,7 @@ const OrderDetail = {
     _renderComposition(model) {
         const m = model || this._model();
         const items = m.items;
-        const type = item => String(item?.item_type || 'product').trim().toLowerCase();
+        const type = item => this._itemType(item);
         const lines = items.filter(item => type(item) === 'product' || type(item) === 'pendant');
         const products = lines.map(item => this._renderCompositionLine(item, type(item), m)).join('');
         const anyPhoto = lines.some(item => type(item) === 'product' && this._colorPhotos(item).length > 0);
@@ -1783,7 +1844,7 @@ const OrderDetail = {
     // Фурнитура и упаковка с меткой склада. Склад прочитан — строки склада (_buildHardwareRows) и то,
     // что не на учёте склада; пока нет — строки заказа.
     _supplyLines(m) {
-        const type = item => String(item?.item_type || '').trim().toLowerCase();
+        const type = item => this._itemType(item);
         const lines = m.items.filter(item => type(item) === 'hardware' || type(item) === 'packaging');
         const onStock = item => {
             const hardware = type(item) === 'hardware';
@@ -1829,12 +1890,19 @@ const OrderDetail = {
     renderProgress(model) {
         const m = model || this._model();
         const done = m.completed;
+        const margin = this._renderMarginCard(m);
+        const flow = `${this._renderTimeline(m)}${this._renderStageHours(m)}`;
+        if (this._typingIn('od-delivery-slot')) {
+            // В «Графике сдачи» сейчас пишут — его не трогаем: обновляется маржа, сроки и часы.
+            this._setHtml('od-progress-margin', margin);
+            this._setHtml('od-progress-flow', flow);
+            return;
+        }
         this._setHtml('od-progress', `
-            ${this._renderMarginCard(m)}
+            <div id="od-progress-margin" class="odc-slot">${margin}</div>
             <section class="odc-card" aria-label="${done ? 'Как шло' : 'Как идёт'}">
                 <h2 class="odc-h2">${done ? 'Как шло' : 'Как идёт'}</h2>
-                ${this._renderTimeline(m)}
-                ${this._renderStageHours(m)}
+                <div id="od-progress-flow" class="odc-progress-flow">${flow}</div>
                 ${this._renderDeliveryRow()}
             </section>`);
     },
@@ -2076,6 +2144,7 @@ const OrderDetail = {
     async saveDeliverySchedule() {
         const order = this.currentOrder;
         if (!order) return;
+        const token = this._honestToken;
         const totalQuantity = getOrderProductionQuantity(this.currentItems);
         const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
         if (!validation.valid) {
@@ -2094,10 +2163,11 @@ const OrderDetail = {
                 { delivery_schedule: validation.schedule },
                 siblingUpdates
             );
-            order.calculator_data = JSON.stringify(snapshot);
-            order.delivery_schedule = validation.schedule;
-            if (siblingUpdates.deadline_end) order.deadline_end = siblingUpdates.deadline_end;
-            if (this.currentOrder === order) {
+            const saved = { calculator_data: JSON.stringify(snapshot), delivery_schedule: validation.schedule, ...siblingUpdates };
+            Object.assign(order, saved);
+            if (this._isCurrent(token, order.id)) {
+                // Обработчики фурнитуры могли подменить объект заказа свежим — запись видна и в нём.
+                Object.assign(this.currentOrder, saved);
                 this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
                 // Срок мог сдвинуться на последнюю партию: шапка, плитки и «Как идёт» — заново.
                 const model = this._model();
@@ -2173,7 +2243,7 @@ const OrderDetail = {
         const o = this.currentOrder || {};
         if (key === 'items') {
             const count = (Array.isArray(this.currentItems) ? this.currentItems : [])
-                .filter(item => ['product', 'pendant', 'hardware', 'packaging'].includes(String(item?.item_type || 'product'))).length;
+                .filter(item => ['product', 'pendant', 'hardware', 'packaging'].includes(this._itemType(item))).length;
             return count ? `${count} ${this._plural(count, 'позиция', 'позиции', 'позиций')}` : 'нет';
         }
         if (key === 'info') {
@@ -2459,17 +2529,18 @@ const OrderDetail = {
         const order = this.currentOrder;
         if (!order || !this._canLoadHardwareRows()) return null;
         const token = this._honestToken;
+        const orderId = order.id;
         let rows;
         try {
             rows = await this._buildHardwareRows();
         } catch (error) {
             console.warn('OrderDetail.loadHardwareRows failed:', error);
-            if (token !== this._honestToken || this.currentOrder !== order) return null;
+            if (!this._isCurrent(token, orderId)) return null;
             this.hardwareState = 'error';
             this._renderHardwareDependents();
             return null;
         }
-        if (token !== this._honestToken || this.currentOrder !== order) return null;
+        if (!this._isCurrent(token, orderId)) return null;
         this._setHardwareRows(rows);
         return rows;
     },
@@ -2488,17 +2559,17 @@ const OrderDetail = {
         this.renderWhat(model);
     },
 
+    // Таблица фурнитуры в панели «Склад». true — нарисована (панель открыта), false — рисовать некуда.
     async renderHardwareTab() {
         const container = document.getElementById('od-tab-hardware');
-        if (!container || !this.currentOrder) return;
+        if (!container || !this.currentOrder) return false;
 
         const orderId = Number(this.currentOrder.id || 0);
         if (!orderId) {
             container.innerHTML = '<div class="empty-state"><p>Заказ не найден</p></div>';
-            return;
+            return true;
         }
 
-        const order = this.currentOrder;
         const token = this._honestToken;
         container.innerHTML = '<p class="odc-muted">Загружаем фурнитуру заказа…</p>';
 
@@ -2508,10 +2579,10 @@ const OrderDetail = {
         } catch (error) {
             console.error('renderHardwareTab error', error);
             container.innerHTML = '<p class="odc-muted">Не удалось загрузить фурнитуру заказа.</p>';
-            return;
+            return true;
         }
         // Таблица свежее, чем то, что видят плитка и состав, — они перерисовываются по ней.
-        if (token === this._honestToken && this.currentOrder === order) {
+        if (this._isCurrent(token, orderId)) {
             this.hardwareRows = rows;
             this.hardwareState = 'ready';
             this._renderHardwareDependents();
@@ -2612,24 +2683,30 @@ const OrderDetail = {
 
     async setProjectHardwareActualQty(itemId, rawValue) {
         if (!this.currentOrder) return;
-        await Warehouse.setProjectHardwareActualQty(this.currentOrder.id, itemId, rawValue);
-        const data = await loadOrder(this.currentOrder.id);
-        if (data && data.order) {
-            this.currentOrder = data.order;
-            this.currentItems = data.items || [];
-        }
-        await this.renderHardwareTab();
+        const orderId = this.currentOrder.id;
+        await Warehouse.setProjectHardwareActualQty(orderId, itemId, rawValue);
+        await this._afterHardwareEdit(orderId);
     },
 
     async toggleProjectHardwareReady(itemId, checked) {
         if (!this.currentOrder) return;
-        await Warehouse.toggleProjectHardwareReady(this.currentOrder.id, itemId, checked);
-        const data = await loadOrder(this.currentOrder.id);
+        const orderId = this.currentOrder.id;
+        await Warehouse.toggleProjectHardwareReady(orderId, itemId, checked);
+        await this._afterHardwareEdit(orderId);
+    },
+
+    // Фурнитуру поправили: заказ — заново, таблица — заново, а если панель уже закрыли — склад для
+    // плитки и меток читается сам.
+    async _afterHardwareEdit(orderId) {
+        const token = this._honestToken;
+        const data = await loadOrder(orderId);
+        if (!this._isCurrent(token, orderId)) return;
         if (data && data.order) {
             this.currentOrder = data.order;
             this.currentItems = data.items || [];
         }
-        await this.renderHardwareTab();
+        const drawn = await this.renderHardwareTab();
+        if (!drawn && this._isCurrent(token, orderId)) await this.loadHardwareRows();
     },
 
     _formatProjectHardwareQty(value, unitOrItem) {
@@ -2978,17 +3055,18 @@ const OrderDetail = {
         if (!order) return;
         const token = this._honestToken;
         const orderId = order.id;
+        const stale = () => !this._isCurrent(token, orderId);
         let bundle;
         try {
             bundle = await loadWorkBundle();
         } catch (error) {
             console.warn('OrderDetail.renderTasksTab failed:', error);
-            if (token !== this._honestToken || this.currentOrder !== order) return;
+            if (stale()) return;
             this._setHtml('od-tab-tasks', '<p class="odc-muted">Задачи не загрузились. Обновите страницу.</p>');
             return;
         }
         // Пока задачи читались, открыли другую карточку.
-        if (token !== this._honestToken || this.currentOrder !== order) return;
+        if (stale()) return;
         const container = document.getElementById('od-tab-tasks');
         if (!container) return;
         bundle = bundle || {};
@@ -3075,7 +3153,7 @@ const OrderDetail = {
         if (!order) return;
         const token = this._honestToken;
         const orderId = order.id;
-        const stale = () => token !== this._honestToken || this.currentOrder !== order;
+        const stale = () => !this._isCurrent(token, orderId);
         try {
             const purchases = await loadChinaPurchases({ order_id: orderId });
             if (stale()) return;
@@ -3155,6 +3233,9 @@ const OrderDetail = {
             return;
         }
         const oldStatus = order.status;
+        const token = this._honestToken;
+        const orderId = order.id;
+        const current = () => this._isCurrent(token, orderId);
         this.statusBusy = true;
         this.menuOpen = false;
         this.menuView = 'main';
@@ -3174,10 +3255,15 @@ const OrderDetail = {
                 return;
             }
 
-            // Запись удалась — карточка показывает новый этап сразу, до медленной работы со складом.
-            order.status = newStatus;
+            // Запись удалась — карточка показывает новый этап сразу, до медленной работы со складом. Снимок
+            // заказа updateOrderStatus тоже переписал (статус и время перехода) — то же и здесь, в памяти:
+            // по нему карточка знает, когда заказ сдали.
+            const snapshot = { ...this._orderSnapshot(order.calculator_data), status: newStatus, updated_at: new Date().toISOString() };
+            const written = { status: newStatus, calculator_data: JSON.stringify(snapshot) };
+            Object.assign(order, written);
+            if (current() && this.currentOrder !== order) Object.assign(this.currentOrder, written);
             this.statusBusy = false;
-            if (this.currentOrder === order) this._renderAfterStatusChange();
+            if (current()) this._renderAfterStatusChange();
             App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
 
             const managerName = (typeof App.getCurrentEmployeeName === 'function' && App.getCurrentEmployeeName()) || 'Неизвестный';
@@ -3185,12 +3271,17 @@ const OrderDetail = {
                 await Orders._finishStatusTransition(order.id, order, oldStatus, newStatus, managerName);
             }
             // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при
-            // возврате) — блок «Тираж» показывает, что там теперь.
-            if (this.currentOrder === order) await this.loadTirageStock();
+            // возврате) — блок «Тираж» показывает, что там теперь. Переход меняет резервы и списания
+            // фурнитуры — плитка «Склад», метки состава и открытая таблица читают склад заново.
+            if (current()) {
+                await this.loadTirageStock();
+                if (this.openPanel === 'stock') this.renderPanel();
+                else this._inBackground(this.loadHardwareRows(), 'loadHardwareRows');
+            }
         } finally {
             if (this.statusBusy) {
                 this.statusBusy = false;
-                if (this.currentOrder === order) {
+                if (current()) {
                     this.renderHeader();
                     this.renderStages();
                 }
@@ -3231,6 +3322,7 @@ const OrderDetail = {
     async saveField(field, value) {
         const order = this.currentOrder;
         if (!order || !order.id) return false;
+        const token = this._honestToken;
         try {
             await updateOrderFields(order.id, { [field]: value });
         } catch (error) {
@@ -3239,7 +3331,10 @@ const OrderDetail = {
             return false;
         }
         order[field] = value;
-        if (this.currentOrder === order) this._renderAfterFieldSave(field);
+        if (this._isCurrent(token, order.id)) {
+            if (this.currentOrder !== order) this.currentOrder[field] = value;
+            this._renderAfterFieldSave(field);
+        }
         App.toast('Сохранено');
         return true;
     },
@@ -3270,11 +3365,7 @@ const OrderDetail = {
         this._editing = { field, inputType: inputType || 'text', kind: 'text' };
         if (cell.classList) cell.classList.add('od-editing');
 
-        if (inputType === 'textarea') {
-            cell.innerHTML = `<textarea class="od-inline-input odc-input" onblur="OrderDetail.finishEdit('${field}', this.value)" style="width:100%;min-height:88px;resize:vertical;">${this._esc(currentValue || '')}</textarea>`;
-        } else {
-            cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
-        }
+        cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
         const input = typeof cell.querySelector === 'function' ? cell.querySelector('.od-inline-input') : null;
         if (input && typeof input.focus === 'function') input.focus();
     },
@@ -3318,10 +3409,6 @@ const OrderDetail = {
         if (input && typeof input.focus === 'function') input.focus();
     },
 
-    onCheckboxChange(field, checked) {
-        this.saveField(field, checked);
-    },
-
     // ==========================================
     // FIELD RENDERERS
     // ==========================================
@@ -3363,16 +3450,6 @@ const OrderDetail = {
                 ${dateButton(fieldStart, valueStart, fmtStart)}
                 <span aria-hidden="true">→</span>
                 ${dateButton(fieldEnd, valueEnd, fmtEnd || '<span class="text-muted">—</span>')}
-            </div>
-        </div>`;
-    },
-
-    _fieldRowCheckbox(field, label, checked) {
-        return `
-        <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value">
-                <input type="checkbox" ${checked ? 'checked' : ''} onchange="OrderDetail.onCheckboxChange('${field}', this.checked)" style="width:18px;height:18px;cursor:pointer;">
             </div>
         </div>`;
     },
