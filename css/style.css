@@ -2841,16 +2841,295 @@ table .text-center { text-align: center; }
    ORDER DETAIL PAGE
    ============================================= */
 
-/* Tab bar */
-.od-tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:16px; overflow-x:auto; }
-.od-tab-btn {
-    padding:10px 20px; font-size:13px; font-weight:600; cursor:pointer;
-    color:var(--text-muted); border:none; background:none;
-    border-bottom:2px solid transparent; margin-bottom:-2px; white-space:nowrap;
-    transition: color .15s, border-color .15s;
+/* Карточка заказа без вкладок (js/order-detail.js, классы odc-*). Текст 16 px, подписи 14 px,
+   кнопки и строки от 44 px; на телефоне всё в столбик. */
+:root {
+    --odc-text-soft: #555555;
+    --odc-line: #eeeeee;
+    --odc-tile-border: #e5e5e5;
+    --odc-green-text: #15803d;
+    --odc-red-text: #b91c1c;
+    --odc-yellow-text: #854d0e;
+    --odc-accent-text: #1d4ed8;
+    --odc-accent-border: #bfdbfe;
+    --odc-accent-bg: #f8fbff;
 }
-.od-tab-btn:hover { color:var(--text); }
-.od-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+.odc {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text);
+}
+.odc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+.odc-top { padding: 22px 28px 26px; gap: 20px; }
+.odc-h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.3; }
+.odc-h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.35; }
+.odc-muted, .odc-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-panel-note { font-size: 15px; color: var(--odc-text-soft); }
+.odc-tone-green { color: var(--odc-green-text); }
+.odc-tone-red { color: var(--odc-red-text); }
+.odc-tone-yellow { color: var(--odc-yellow-text); }
+.odc-tone-gray, .odc-tone-muted { color: var(--odc-text-soft); }
+
+/* Кнопки */
+.odc-btn {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid #cccccc;
+    background: var(--bg-card);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+}
+.odc-btn:hover { border-color: var(--accent); }
+.odc-btn:disabled { opacity: .6; cursor: default; }
+.odc-btn:focus-visible, .odc-row-btn:focus-visible, .odc-tile-button:focus-visible, .odc-back:focus-visible,
+.odc-menu-item:focus-visible, .od-field-row:focus-visible, .odc-date-btn:focus-visible {
+    outline: 3px solid var(--accent-light);
+    outline-offset: 2px;
+}
+.odc-btn-icon { min-width: 44px; padding: 0; }
+.odc-btn-primary {
+    min-height: 48px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+}
+.odc-btn-primary:hover { background: #1d4ed8; }
+
+/* Шапка: «Все заказы», «Калькулятор», «⋯» */
+.odc-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.odc-toolbar-actions { display: flex; gap: 10px; }
+.odc-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: #444444;
+    cursor: pointer;
+}
+.odc-back:hover { color: var(--accent); }
+.odc-menu-wrap { position: relative; }
+.odc-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 60;
+    width: max-content;
+    min-width: 260px;
+    max-width: min(360px, calc(100vw - 32px));
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+}
+.odc-menu-title { padding: 10px 12px 6px; font-size: 14px; font-weight: 600; color: var(--odc-text-soft); }
+.odc-menu-item {
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+button.odc-menu-item:hover { background: var(--bg); }
+.odc-menu-current { color: var(--odc-text-soft); cursor: default; }
+.odc-menu-danger { color: var(--odc-red-text); }
+.odc-menu-back { color: var(--odc-text-soft); }
+.odc-head { display: flex; flex-wrap: wrap; gap: 18px 22px; align-items: flex-start; }
+.odc-head-main { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.odc-head-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.odc-title { margin: 0; font-size: 34px; line-height: 1.15; font-weight: 700; word-break: break-word; }
+
+/* Плитки и панель под ними */
+.odc-tiles { display: flex; flex-wrap: wrap; gap: 12px; }
+.odc-tile {
+    flex: 1 1 170px;
+    min-width: 0;
+    border: 1px solid var(--odc-tile-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+}
+.odc-tile-button { cursor: pointer; border-color: var(--odc-accent-border); background: var(--odc-accent-bg); min-height: 44px; }
+.odc-tile-button:hover { border-color: var(--accent); }
+.odc-tile-button[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.odc-tile-label { font-size: 14px; color: var(--odc-text-soft); }
+.odc-tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; word-break: break-word; }
+.odc-tile-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-tile-more { font-size: 14px; color: var(--odc-accent-text); display: inline-flex; align-items: center; gap: 2px; margin-top: 2px; }
+.odc-tiles-note { flex: 1 1 100%; font-size: 15px; color: var(--odc-text-soft); }
+.odc-chevron { flex: none; transition: transform .15s ease; }
+[aria-expanded="true"] > .odc-chevron, [aria-expanded="true"] .odc-tile-more .odc-chevron { transform: rotate(180deg); }
+.odc-panel { border: 1px solid var(--odc-accent-border); border-radius: 10px; padding: 16px 20px; min-width: 0; }
+.odc-panel[hidden], .odc-money:empty, .odc-type:empty { display: none; }
+.odc-field { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.odc-field-label { font-size: 15px; color: var(--odc-text-soft); }
+.odc-select, .odc-input {
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid #cccccc;
+    border-radius: 8px;
+    background: var(--bg-card);
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+}
+.odc-select:focus, .odc-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* Этапы */
+.odc-stages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--odc-line);
+}
+.odc-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 15px; }
+.odc-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid #d4d4d4;
+    color: var(--odc-text-soft);
+}
+.odc-step-done { background: var(--green-light); border-color: var(--green-light); color: #166534; font-weight: 600; }
+.odc-step-current { background: var(--accent); border-color: var(--accent); color: #ffffff; font-weight: 700; }
+.odc-step-current.odc-step-final { background: var(--odc-green-text); border-color: var(--odc-green-text); }
+.odc-stages-note { font-size: 15px; color: var(--odc-text-soft); }
+
+/* Две колонки: «Что делаем» и «Как идёт» */
+.odc-columns { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.odc-what { flex: 999 1 520px; }
+.odc-side { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.odc-brief {
+    width: 100%;
+    min-height: 120px;
+    padding: 14px 16px;
+    border: 1px solid var(--odc-tile-border);
+    border-radius: 10px;
+    background: #fafafa;
+    font-family: inherit;
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--text);
+    resize: vertical;
+}
+.odc-brief:placeholder-shown { border: 2px dashed #d4d4d4; }
+.odc-brief:focus { outline: none; border-color: var(--accent); background: var(--bg-card); box-shadow: 0 0 0 3px var(--accent-light); }
+.odc-what-items { display: flex; flex-direction: column; gap: 12px; }
+.odc-product { padding: 14px 16px; border: 1px solid var(--odc-tile-border); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; }
+.odc-product-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.odc-product-name { font-size: 18px; font-weight: 700; }
+.odc-tirage { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--odc-line); }
+.odc-tirage-rows { display: grid; gap: 14px; }
+.odc-tirage-name { font-size: 16px; font-weight: 600; }
+.odc-tirage-split { font-size: 15px; margin-top: 2px; }
+.odc-tirage-stock { border-top: 1px solid var(--odc-line); padding-top: 12px; }
+.odc-tirage-action { margin-top: 10px; }
+
+/* Строки, которые раскрываются под собой */
+.odc-row-btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.odc-row-title { font-weight: 600; }
+.odc-row-sum { margin-left: auto; font-size: 15px; color: var(--odc-text-soft); text-align: right; }
+.odc-more { padding-top: 8px; padding-bottom: 8px; gap: 0; }
+.odc-more-row + .odc-more-row { border-top: 1px solid var(--odc-line); }
+.odc-more-btn { min-height: 56px; font-size: 17px; }
+.odc-more-body { padding: 4px 0 18px; }
+.odc-more-body[hidden], #od-delivery-slot[hidden] { display: none; }
+.odc-fields { border: 1px solid var(--odc-tile-border); border-radius: 10px; padding: 14px 0 4px; min-width: 0; }
+.odc-fields .odc-h3 { padding: 0 16px 6px; }
+
+/* «График сдачи» */
+.odc-delivery { border-top: 1px solid var(--odc-line); }
+.odc-delivery-card { display: flex; flex-direction: column; gap: 12px; padding-bottom: 6px; }
+.odc-delivery-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.odc-delivery-lines { display: grid; gap: 8px; }
+.odc-delivery-line { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(110px, .7fr) auto; gap: 8px; align-items: center; }
+.odc-delivery-actions { display: flex; justify-content: flex-end; }
+
+/* Фурнитура в панели «Склад» */
+.odc-hw-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.odc-hw-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.odc-hw-totals { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 15px; margin-bottom: 12px; }
+.odc-hw-table td, .odc-hw-table th { font-size: 15px; }
+.odc-input-qty { width: 110px; text-align: right; }
+.odc-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 15px; }
+.odc-check input { width: 20px; height: 20px; }
+
+@media (max-width: 640px) {
+    .odc-top, .odc-card { padding: 18px 16px; }
+    .odc-title { font-size: 26px; }
+    .odc-tile { flex-basis: 100%; }
+    .odc-stages > .odc-btn-primary { width: 100%; }
+    .odc-delivery-line { grid-template-columns: 1fr 1fr auto; }
+    .odc-menu { right: -8px; }
+}
 
 /* Two-column detail grid */
 .od-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -2858,21 +3137,24 @@ table .text-center { text-align: center; }
 
 /* Field row */
 .od-field-row {
-    display:flex; justify-content:space-between; align-items:center;
-    padding:10px 16px; border-bottom:1px solid var(--border);
-    transition: background .1s;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    min-height:48px; padding:10px 16px; border-bottom:1px solid var(--border);
+    transition: background .1s; cursor:pointer;
 }
 .od-field-row:hover { background:var(--bg); }
 .od-field-row:last-child { border-bottom:none; }
-.od-field-label { font-size:12px; font-weight:600; color:var(--text-muted); min-width:130px; flex-shrink:0; }
-.od-field-value { font-size:14px; flex:1; text-align:right; word-break:break-word; }
+.od-field-label { font-size:14px; font-weight:600; color:var(--odc-text-soft); min-width:130px; flex-shrink:0; }
+.od-field-value { font-size:16px; flex:1; text-align:right; word-break:break-word; }
 .od-field-value a { color:var(--accent); text-decoration:none; }
 .od-field-value a:hover { text-decoration:underline; }
+.od-field-dates { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+.odc-date-btn { display:inline-flex; align-items:center; min-height:44px; padding:0 6px; border-radius:6px; cursor:pointer; }
+.odc-date-btn:hover { background:var(--bg); }
 
 /* URL link */
 .od-url-link {
     display:inline-flex; align-items:center; gap:4px;
-    color:var(--accent); text-decoration:none; font-size:13px;
+    color:var(--accent); text-decoration:none; font-size:15px;
     max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .od-url-link:hover { text-decoration:underline; }
@@ -2880,7 +3162,7 @@ table .text-center { text-align: center; }
 /* Status select */
 .od-status-select {
     padding:4px 10px; border:1px solid var(--border); border-radius:6px;
-    font-size:13px; background:var(--card-bg); cursor:pointer;
+    font-size:15px; background:var(--card-bg); cursor:pointer;
 }
 
 /* Item card */
@@ -2895,9 +3177,9 @@ table .text-center { text-align: center; }
 }
 
 .od-hardware-truth-summary {
-    font-size: 11px;
+    font-size: 14px;
     line-height: 1.35;
-    color: var(--text-muted);
+    color: var(--odc-text-soft);
 }
 
 .od-hardware-truth-details {
@@ -2906,10 +3188,13 @@ table .text-center { text-align: center; }
 
 .od-hardware-truth-details summary {
     cursor: pointer;
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--accent);
     list-style: none;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .od-hardware-truth-details summary::-webkit-details-marker {
@@ -2934,7 +3219,7 @@ table .text-center { text-align: center; }
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg);
-    font-size: 11px;
+    font-size: 14px;
     line-height: 1.45;
     color: var(--text);
     display: flex;

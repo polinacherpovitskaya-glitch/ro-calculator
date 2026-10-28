@@ -465,11 +465,20 @@ const OrderCardLogic = {
     },
 };
 
+// Иконки карточки — inline SVG (без эмодзи), цвет — currentColor.
+const ORDER_CARD_ICONS = {
+    back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>',
+    dots: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>',
+    chevron: '<svg class="odc-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>',
+    check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>',
+    arrow: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg>',
+    close: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>',
+};
+
 const OrderDetail = {
     currentOrder: null,
     currentItems: [],
     currentFinancial: null,
-    currentTab: 'info',
     deliveryScheduleDraft: [],
     // Честная шапка: реальная себестоимость заказа из «Факта» и склад его штук «на продажу».
     // Приходят после показа карточки (см. _beginHonestNumbers). realCostState: 'none' — не нужна
@@ -479,6 +488,21 @@ const OrderDetail = {
     realCostDetailsOpen: false,
     tirageStock: null,
     tirageRecalcBusy: false,
+    // Фурнитура и упаковка заказа со склада (строки _buildHardwareRows): hardwareState 'loading' —
+    // читаем склад, 'ready' — строки в hardwareRows, 'error' — склад не прочитался, 'none' — склада нет.
+    hardwareRows: null,
+    hardwareState: 'none',
+    // Что раскрыто: панель под плитками ('money' | 'payment' | 'stock' | null), меню «⋯» и его вид
+    // ('main' | 'stages' | 'cancel'), строки внизу (moreOpen[key]) и «График сдачи».
+    openPanel: null,
+    menuOpen: false,
+    menuView: 'main',
+    moreOpen: {},
+    moreCounts: {},
+    deliveryOpen: false,
+    statusBusy: false,
+    // ТЗ, которое ещё не сохранилось (или не сохранилось из-за связи): перерисовка его не теряет.
+    briefDraft: null,
 
     // ==========================================
     // LOAD
@@ -498,58 +522,149 @@ const OrderDetail = {
         this.currentItems = data.items || [];
         this.deliveryScheduleDraft = normalizeDeliverySchedule(data.order?.delivery_schedule, 0).schedule;
         this._beginHonestNumbers();
-        this.currentFinancial = this.buildLiveFinancialMeta();
-        this.currentTab = 'info';
 
-        this.renderHeader();
-        this.renderStats();
-        this.renderInfoTab();
-        // Реальная себестоимость и склад приходят позже и дорисовываются сами: карточка их не ждёт.
-        void this.loadRealCost();
-        void this.loadTirageStock();
-        this.renderProductionTab();
-        this.renderFilesTab();
-        this.renderItemsTab();
-        await this.renderHardwareTab();
-        await this.renderTasksTab();
-        this.renderChinaTab();
+        // Всё, что есть в самом заказе, — сразу. «Факт», склад готовой продукции, фурнитура, задачи
+        // и Китай дорисовываются, когда ответят: карточка их не ждёт.
+        this.renderAll();
+        this._inBackground(this.loadRealCost(), 'loadRealCost');
+        this._inBackground(this.loadTirageStock(), 'loadTirageStock');
+        this._inBackground(this.loadHardwareRows(), 'loadHardwareRows');
+        this._inBackground(this.renderTasksTab(), 'renderTasksTab');
+        this._inBackground(this.renderChinaTab(), 'renderChinaTab');
 
-        // Show first tab
-        this.switchTab('info');
         if (data.repaired_duplicates) {
             App.toast('Дубли позиций в заказе были автоматически исправлены');
         }
     },
 
-    // ==========================================
-    // TABS
-    // ==========================================
-
-    switchTab(tab) {
-        this.currentTab = tab;
-        document.querySelectorAll('.od-tab-btn').forEach(b => {
-            b.classList.toggle('active', b.dataset.tab === tab);
-        });
-        document.querySelectorAll('.od-tab-content').forEach(c => {
-            c.style.display = c.id === 'od-tab-' + tab ? '' : 'none';
-        });
-        if (tab === 'hardware') {
-            void this.renderHardwareTab();
+    // То, что дорисовывается само: ошибка не роняет карточку, а остаётся в консоли.
+    _inBackground(promise, label) {
+        if (promise && typeof promise.catch === 'function') {
+            promise.catch(error => console.warn(`OrderDetail.${label} failed:`, error));
         }
     },
 
+    // Вся карточка из того, что уже известно.
+    renderAll() {
+        this.renderHeader();
+        this.renderStats();
+        this.renderPanel();
+        this.renderStages();
+        this.renderWhat();
+        this.renderProgress();
+        this.renderMore();
+        this.renderItemsTab();
+        this.renderInfoTab();
+    },
+
+    // Сегодня по часам браузера: YYYY-MM-DD.
+    _today() {
+        if (typeof App !== 'undefined' && App && typeof App.todayLocalYMD === 'function') return App.todayLocalYMD();
+        return OrderCardLogic._today();
+    },
+
+    _setHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+        return el;
+    },
+
     // ==========================================
-    // HEADER
+    // HEADER: «← Все заказы», «Калькулятор», меню «⋯»
     // ==========================================
 
     renderHeader() {
-        const o = this.currentOrder;
-        document.getElementById('od-title').textContent = o.order_name || 'Без названия';
+        const o = this.currentOrder || {};
+        this._setHtml('od-head', `
+            ${this._renderToolbar()}
+            <div class="odc-head">
+                <div class="odc-head-main">
+                    <div class="odc-head-title">
+                        <h1 id="od-title" class="odc-title">${this._esc(o.order_name || 'Без названия')}</h1>
+                    </div>
+                </div>
+            </div>`);
+    },
 
-        const st = STATUS_OPTIONS.find(s => s.value === o.status);
-        const badge = document.getElementById('od-status-badge');
-        badge.textContent = st ? st.label : o.status;
-        badge.className = 'badge badge-' + this._statusColor(o.status);
+    _renderToolbar() {
+        const open = !!this.menuOpen;
+        return `
+            <div class="odc-toolbar">
+                <button type="button" class="odc-back" onclick="App.navigate('orders')">${ORDER_CARD_ICONS.back}Все заказы</button>
+                <div class="odc-toolbar-actions">
+                    <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Калькулятор</button>
+                    <div class="odc-menu-wrap">
+                        <button type="button" id="od-menu-btn" class="odc-btn odc-btn-icon"
+                            aria-label="Ещё: копировать, сменить этап, отменить" aria-haspopup="true"
+                            aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-menu"
+                            onclick="OrderDetail.toggleMenu()">${ORDER_CARD_ICONS.dots}</button>
+                        ${open ? `<div id="od-menu" class="odc-menu" role="menu">${this._renderMenu()}</div>` : ''}
+                    </div>
+                </div>
+            </div>`;
+    },
+
+    // Меню «⋯»: копировать, сменить этап (список этапов), отменить (с подтверждением в самом меню).
+    _renderMenu() {
+        const o = this.currentOrder || {};
+        const item = (onclick, text, extra = '') => `<button type="button" role="menuitem" class="odc-menu-item ${extra}" onclick="${onclick}">${text}</button>`;
+        if (this.menuView === 'stages') {
+            const options = (typeof STATUS_OPTIONS !== 'undefined' && Array.isArray(STATUS_OPTIONS) ? STATUS_OPTIONS : [])
+                .filter(option => option.value !== 'deleted');
+            return `
+                <div class="odc-menu-title">Перевести на этап</div>
+                ${options.map(option => (option.value === o.status
+                    ? `<div class="odc-menu-item odc-menu-current" aria-current="step">${this._esc(option.label)} · сейчас</div>`
+                    : item(`OrderDetail.changeStatus('${this._escAttr(option.value)}')`, this._esc(option.label), this.statusBusy ? 'is-busy' : '')
+                )).join('')}
+                ${item("OrderDetail.showMenu('main')", 'Назад', 'odc-menu-back')}`;
+        }
+        if (this.menuView === 'cancel') {
+            return `
+                <div class="odc-menu-title">Отменить заказ «${this._esc(o.order_name || 'Без названия')}»?</div>
+                ${item("OrderDetail.changeStatus('cancelled')", 'Да, отменить', 'odc-menu-danger')}
+                ${item("OrderDetail.showMenu('main')", 'Нет, оставить')}`;
+        }
+        return `
+            ${item('OrderDetail.cloneOrder()', 'Копировать заказ')}
+            ${item("OrderDetail.showMenu('stages')", 'Сменить этап…')}
+            ${o.status === 'cancelled' ? '' : item("OrderDetail.showMenu('cancel')", 'Отменить заказ', 'odc-menu-danger')}`;
+    },
+
+    toggleMenu() {
+        this.menuOpen = !this.menuOpen;
+        this.menuView = 'main';
+        if (this.menuOpen) this._bindMenuDismiss();
+        this.renderHeader();
+    },
+
+    showMenu(view) {
+        this.menuOpen = true;
+        this.menuView = ['main', 'stages', 'cancel'].includes(view) ? view : 'main';
+        this._bindMenuDismiss();
+        this.renderHeader();
+    },
+
+    closeMenu() {
+        if (!this.menuOpen) return;
+        this.menuOpen = false;
+        this.menuView = 'main';
+        this.renderHeader();
+    },
+
+    // Меню закрывается щелчком мимо него и клавишей Escape.
+    _bindMenuDismiss() {
+        if (this._menuDismissBound || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+        this._menuDismissBound = true;
+        document.addEventListener('click', event => {
+            if (!this.menuOpen) return;
+            const target = event && event.target;
+            const inside = target && typeof target.closest === 'function' && target.closest('.odc-menu-wrap');
+            if (!inside) this.closeMenu();
+        });
+        document.addEventListener('keydown', event => {
+            if (this.menuOpen && event && event.key === 'Escape') this.closeMenu();
+        });
     },
 
     // ==========================================
@@ -644,7 +759,7 @@ const OrderDetail = {
     },
 
     renderStats() {
-        const o = this.currentOrder;
+        const o = this.currentOrder || {};
         const ps = PAYMENT_STATUSES.find(s => s.key === o.payment_status) || PAYMENT_STATUSES[0];
         this.currentFinancial = this.buildLiveFinancialMeta();
         const calculatedRevenue = Number(this.currentFinancial?.revenue || o.total_revenue_plan || 0);
@@ -657,14 +772,6 @@ const OrderDetail = {
         const revenue = isNonCommercial ? 0 : calculatedRevenue;
         const loss = Math.max(0, Number(this.currentFinancial?.loss || o.total_cost_plan || 0));
 
-        // Крупная цифра в карточке и списке — живой пересчёт по текущим
-        // параметрам. Историческую маржу при продаже сохраняем подписью, когда
-        // она отличается, чтобы финансовый контекст заказа не терялся.
-        const storedMarginPct = Number(o.margin_percent_plan ?? o.margin_percent ?? 0);
-        const marginNote = !isNonCommercial && (storedMarginPct && Math.abs(storedMarginPct - marginPercent) >= 1)
-            ? `<div class="text-muted" style="font-size:11px;margin-top:2px;" title="Зафиксировано при сохранении заказа — по ценам и ставкам того дня. Крупная цифра — пересчёт по сегодняшним параметрам.">при продаже: ${formatPercent(storedMarginPct)}</div>`
-            : '';
-
         // Честная шапка — у клиентского заказа: выручка с учётом разметки тиража, реальная маржа и
         // себестоимость по «Факту» рядом с плановыми, часы по плану и по табелю. «Переделка»,
         // «Сток / образец» и «Сборка из остатков» показывают то же, что и раньше.
@@ -676,83 +783,188 @@ const OrderDetail = {
         const stockQty = honest ? Number(financial.stockQty || 0) : 0;
         const freeQty = honest ? Number(financial.freeQty || 0) : 0;
 
-        const revenueCaption = stockQty > 0
-            ? this._caption(`ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.`)
-            : '';
         // Подпись говорит, чья это цифра: пока «Факт» не ответил (или табеля нет) маржа плановая.
         let marginCaption = '';
         if (honest) {
-            if (!hasRealMargin) marginCaption = this._caption('план');
-            else if (!real.hasTimesheet) marginCaption = this._caption('по плану');
-            else marginCaption = this._caption(`план ${formatPercent(marginPercent)}`);
+            if (!hasRealMargin) marginCaption = 'план';
+            else if (!real.hasTimesheet) marginCaption = 'по плану';
+            else marginCaption = `план ${formatPercent(marginPercent)}`;
         }
-        let costCard = '';
+        let costTile = '';
         if (honest && this.realCostState === 'loading') {
-            costCard = `
-            <div class="stat-card">
-                <div class="stat-label">Себестоимость</div>
-                <div class="stat-value text-muted">…</div>
-                ${this._caption('считаем по факту')}
-            </div>`;
+            costTile = this._tile({ label: 'Себестоимость', value: '…', caption: 'считаем по факту', tone: 'muted' });
         } else if (real && (real.realTotal > 0 || real.planTotal > 0)) {
-            costCard = `
-            <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
-                 title="Показать, из чего сложилась себестоимость"
-                 onclick="OrderDetail.toggleRealCostDetails()"
-                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();OrderDetail.toggleRealCostDetails();}">
-                <div class="stat-label">Себестоимость</div>
-                <div class="stat-value">${this._formatWhole(real.realTotal)}</div>
-                ${this._caption(real.hasTimesheet ? `план ${this._formatWhole(real.planTotal)}` : 'по плану')}
-                ${this._caption(`Разбивка ${this.realCostDetailsOpen ? '▴' : '▾'}`, 'color:var(--accent);')}
-            </div>`;
+            costTile = this._tile({
+                label: 'Себестоимость',
+                value: this._formatWhole(real.realTotal),
+                caption: real.hasTimesheet ? `план ${this._formatWhole(real.planTotal)}` : 'по плану',
+            });
         }
         let hoursCaption = '';
         if (real) {
-            hoursCaption = this._caption(real.hasTimesheet
+            hoursCaption = real.hasTimesheet
                 ? `план ${this._formatHours(hours)} · табель ${this._formatHours(real.hoursFact)}`
-                : `план ${this._formatHours(hours)} · табеля нет`);
+                : `план ${this._formatHours(hours)} · табеля нет`;
         }
         const freeLine = freeQty > 0
-            ? `<div style="grid-column:1 / -1;font-size:14px;color:var(--text-secondary);">Отдаём бесплатно: ${this._formatQuantity(freeQty)} шт. на ${this._formatWhole(financial.freeCost)} себестоимости</div>`
-            : '';
-        const details = real && this.realCostDetailsOpen
-            ? `<div style="grid-column:1 / -1;">${this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown())}</div>`
+            ? `<div class="odc-tiles-note">Отдаём бесплатно: ${this._formatQuantity(freeQty)} шт. на ${this._formatWhole(financial.freeCost)} себестоимости</div>`
             : '';
 
-        document.getElementById('od-stats').innerHTML = `
-            <div class="stat-card">
-                <div class="stat-label">Выручка</div>
-                <div class="stat-value">${formatRub(revenue)}</div>
-                ${revenueCaption}
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? (purpose === 'marketing' ? 'Расход на маркетинг' : 'Некоммерческие расходы') : 'Маржа'}</div>
-                <div class="stat-value ${isNonCommercial || shownMargin < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(shownMargin)}</div>
-                ${marginCaption}
-                ${marginNote}
-            </div>
-            ${costCard}
-            <div class="stat-card">
-                <div class="stat-label">Часы</div>
-                <div class="stat-value">${hours.toFixed(1)} ч</div>
-                ${hoursCaption}
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">${isNonCommercial || isLeftoverAssembly ? 'Тип работ' : 'Оплата'}</div>
-                <div class="stat-value">${isNonCommercial
-                    ? `${purposeMeta.icon} ${purposeMeta.shortLabel}`
-                    : isLeftoverAssembly
-                        ? '↙ Сборка из остатков'
-                        : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
-            </div>
+        const marginTile = this._tile({
+            label: isNonCommercial ? (purpose === 'marketing' ? 'Расход на маркетинг' : 'Некоммерческие расходы') : 'Маржа',
+            value: isNonCommercial ? '−' + formatRub(loss) : formatPercent(shownMargin),
+            tone: isNonCommercial || shownMargin < 30 ? 'red' : 'green',
+            caption: marginCaption,
+            panel: 'money',
+            more: 'деньги',
+        });
+        const paymentTile = isNonCommercial || isLeftoverAssembly
+            ? this._tile({ label: 'Тип работ', value: isNonCommercial ? `${purposeMeta.icon} ${purposeMeta.shortLabel}` : '↙ Сборка из остатков' })
+            : this._tile({ label: 'Оплата', value: ps.label, panel: 'payment', more: 'изменить' });
+
+        this._setHtml('od-stats', `
+            ${this._tile({ label: 'Выручка', value: formatRub(revenue), caption: stockQty > 0 ? `ожидаем, если продадим ${this._formatQuantity(stockQty)} шт.` : '' })}
+            ${marginTile}
+            ${costTile}
+            ${this._tile({ label: 'Часы', value: `${hours.toFixed(1)} ч`, caption: hoursCaption })}
+            ${this._stockTile()}
+            ${paymentTile}
             ${freeLine}
-            ${details}
-        `;
+        `);
     },
 
-    // Подпись под крупной цифрой карточки: читаемого размера (14 px), приглушённая.
-    _caption(text, extraStyle = '') {
-        return `<div style="font-size:14px;color:var(--text-muted);margin-top:4px;line-height:1.35;${extraStyle}">${this._esc(text)}</div>`;
+    // Плитка под строкой денег: подпись, крупное значение и подпись под ним — текстом (экранируется).
+    // С panel — это кнопка, которая раскрывает панель под плитками (#od-panel).
+    _tile({ label, value, caption = '', tone = '', panel = '', more = '' }) {
+        const body = `
+                <span class="odc-tile-label">${this._esc(label)}</span>
+                <span class="odc-tile-value${tone ? ` odc-tone-${tone}` : ''}">${this._esc(value)}</span>
+                ${caption ? `<span class="odc-tile-caption">${this._esc(caption)}</span>` : ''}`;
+        if (!panel) return `<div class="odc-tile">${body}</div>`;
+        const open = this.openPanel === panel;
+        return `
+            <button type="button" class="odc-tile odc-tile-button" data-od-panel="${panel}"
+                aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-panel"
+                onclick="OrderDetail.togglePanel('${panel}')">${body}
+                <span class="odc-tile-more">${this._esc(more || 'подробнее')} ${ORDER_CARD_ICONS.chevron}</span>
+            </button>`;
+    },
+
+    // «Склад»: фурнитура и упаковка заказа со склада (строки _buildHardwareRows).
+    _stockTile() {
+        const state = this.hardwareState;
+        const rows = Array.isArray(this.hardwareRows) ? this.hardwareRows : [];
+        let value = '…';
+        let caption = 'проверяем склад';
+        let tone = 'muted';
+        if (state === 'error') {
+            value = '—';
+            caption = 'склад не прочитался';
+        } else if (state === 'ready') {
+            const labels = rows.map(row => OrderCardLogic.stockLabel(row));
+            const shortage = labels.filter(label => label.tone === 'red').length;
+            if (!rows.length) {
+                value = 'Не нужен';
+                caption = 'без фурнитуры и упаковки со склада';
+            } else if (labels.every(label => label.tone === 'green')) {
+                value = 'Всё собрано';
+                caption = 'собрано и списано';
+                tone = 'green';
+            } else if (shortage > 0) {
+                value = `Не хватает ${shortage}`;
+                caption = `из ${rows.length} поз.`;
+                tone = 'red';
+            } else {
+                value = 'Всё есть';
+                caption = this._stockSummary(labels);
+                tone = 'green';
+            }
+        } else if (state === 'none') {
+            value = '—';
+            caption = 'склад недоступен';
+        }
+        return this._tile({ label: 'Склад', value, caption, tone, panel: 'stock', more: 'фурнитура' });
+    },
+
+    // «2 в резерве, 1 собрано, 1 на складе».
+    _stockSummary(labels) {
+        const count = tone => labels.filter(label => label.tone === tone).length;
+        const parts = [];
+        if (count('blue')) parts.push(`${count('blue')} в резерве`);
+        if (count('green')) parts.push(`${count('green')} собрано`);
+        const free = labels.filter(label => label.tone === 'gray' && label.text !== 'не нужно').length;
+        if (free) parts.push(`${free} на складе`);
+        return parts.join(', ');
+    },
+
+    // ==========================================
+    // PANEL под плитками: деньги, оплата, склад
+    // ==========================================
+
+    togglePanel(name) {
+        const panels = ['money', 'payment', 'stock'];
+        this.openPanel = panels.includes(name) && this.openPanel !== name ? name : null;
+        this.realCostDetailsOpen = this.openPanel === 'money';
+        this.renderStats();
+        this.renderPanel();
+        const panel = document.getElementById('od-panel');
+        if (this.openPanel && panel && typeof panel.scrollIntoView === 'function') {
+            panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    },
+
+    renderPanel() {
+        const panel = document.getElementById('od-panel');
+        if (!panel) return;
+        const name = this.openPanel;
+        panel.hidden = !name;
+        panel.dataset.panel = name || '';
+        if (!name) {
+            panel.innerHTML = '';
+            return;
+        }
+        if (name === 'money') {
+            panel.innerHTML = this._renderMoneyPanel();
+        } else if (name === 'payment') {
+            panel.innerHTML = this._renderPaymentPanel();
+        } else if (name === 'stock') {
+            panel.innerHTML = '<div id="od-tab-hardware"></div>';
+            void this.renderHardwareTab();
+        }
+    },
+
+    // Деньги: выручка, что отдаём бесплатно и из чего сложилась себестоимость (таблица «Факта»).
+    _renderMoneyPanel() {
+        const real = this._buildRealCostView(this.currentFinancial || this.buildLiveFinancialMeta());
+        if (real && this.currentRealCost) {
+            return this.renderRealCostDetails(this.currentRealCost, this._canSeeSalaryBreakdown());
+        }
+        const text = this.realCostState === 'loading'
+            ? 'Считаем себестоимость по табелю…'
+            : 'Себестоимость по табелю сейчас не посчитать — цифры по плану.';
+        return `<div class="odc-panel-note">${this._esc(text)}</div>`;
+    },
+
+    _renderPaymentPanel() {
+        const current = (this.currentOrder && this.currentOrder.payment_status) || 'not_sent';
+        const options = PAYMENT_STATUSES.map(status =>
+            `<option value="${this._escAttr(status.key)}"${status.key === current ? ' selected' : ''}>${this._esc(status.label)}</option>`
+        ).join('');
+        return `
+            <div class="odc-field">
+                <label for="od-payment-select" class="odc-field-label">Статус оплаты</label>
+                <select id="od-payment-select" class="odc-select" onchange="OrderDetail.setPaymentStatus(this.value)">${options}</select>
+            </div>`;
+    },
+
+    async setPaymentStatus(value) {
+        const order = this.currentOrder;
+        if (!order || !PAYMENT_STATUSES.some(status => status.key === value)) return false;
+        if (value === (order.payment_status || 'not_sent')) return true;
+        const saved = await this.saveField('payment_status', value);
+        // Не сохранилось — выбор показывает то, что записано.
+        if (!saved && this.currentOrder === order && this.openPanel === 'payment') this.renderPanel();
+        return saved;
     },
 
     // Рубли без копеек: «121 000 ₽».
@@ -778,6 +990,16 @@ const OrderDetail = {
         this.realCostDetailsOpen = false;
         this.tirageRecalcBusy = false;
         this.realCostState = this._canLoadRealCost() ? 'loading' : 'none';
+        this.hardwareRows = null;
+        this.hardwareState = this._canLoadHardwareRows() ? 'loading' : 'none';
+        this.openPanel = null;
+        this.menuOpen = false;
+        this.menuView = 'main';
+        this.moreOpen = {};
+        this.moreCounts = {};
+        this.deliveryOpen = false;
+        this.statusBusy = false;
+        this.briefDraft = null;
     },
 
     // Реальная себестоимость нужна клиентскому заказу; у «Переделки», «Стока / образца» и «Сборки из
@@ -822,13 +1044,19 @@ const OrderDetail = {
             // Нет ответа — шапка остаётся плановой. Прошлый удачный ответ при повторе не теряем.
             this.realCostState = 'none';
         }
-        this.renderStats();
+        this._renderRealCostDependents();
         return this.currentRealCost;
     },
 
-    toggleRealCostDetails() {
-        this.realCostDetailsOpen = !this.realCostDetailsOpen;
+    // «Факт» ответил (или нет): плитки и деньги в раскрытой панели.
+    _renderRealCostDependents() {
         this.renderStats();
+        if (this.openPanel === 'money') this.renderPanel();
+    },
+
+    // Деньги заказа — панель под плитками; второе нажатие её закрывает.
+    toggleRealCostDetails() {
+        this.togglePanel('money');
     },
 
     // Из чего сложилась себестоимость заказа: статьи «Факта», план и то, что взято в расчёт (по
@@ -884,7 +1112,7 @@ const OrderDetail = {
     },
 
     // ==========================================
-    // «ТИРАЖ» ON THE INFO TAB
+    // «ТИРАЖ» — в «Что делаем», под составом
     // ==========================================
 
     // Блок «Тираж»: как поделён тираж каждой строки изделия и что из «на продажу» лежит на складе
@@ -907,14 +1135,14 @@ const OrderDetail = {
             if (split.sample > 0) parts.push(`образцы ${count(split.sample)}`);
             return `
                 <div>
-                    <div style="font-size:15px;font-weight:600;">${this._esc(line.name)} · ${count(line.quantity)} шт.</div>
-                    <div style="font-size:14px;margin-top:2px;">${parts.join(' · ')}</div>
+                    <div class="odc-tirage-name">${this._esc(line.name)} · ${count(line.quantity)} шт.</div>
+                    <div class="odc-tirage-split">${parts.join(' · ')}</div>
                 </div>`;
         }).join('');
         return `
-        <div class="card" id="od-tirage-card" style="margin-top:16px;">
-            <div class="card-header"><h3>Тираж</h3></div>
-            <div style="display:grid;gap:14px;">${rows}${this._renderTirageStock()}
+        <div class="odc-tirage" id="od-tirage-card">
+            <h3 class="odc-h3">Тираж</h3>
+            <div class="odc-tirage-rows">${rows}${this._renderTirageStock()}
             </div>
         </div>`;
     },
@@ -935,20 +1163,19 @@ const OrderDetail = {
             : 'продано 0';
         // Пересчитывать есть что, только пока на складе лежат непроданные штуки.
         const button = Number(stock.inStock) > 0
-            ? `<div style="margin-top:10px;"><button type="button" class="btn btn-outline" style="font-size:14px;"
+            ? `<div class="odc-tirage-action"><button type="button" class="odc-btn"
                     onclick="OrderDetail.recalcTirageCost()" ${this.tirageRecalcBusy ? 'disabled' : ''}
                     title="Когда ФинТабло догнал: себестоимость непроданных штук на складе пересчитается, записи продаж останутся как были">${this.tirageRecalcBusy ? 'Пересчитываем…' : 'Пересчитать себестоимость'}</button></div>`
             : '';
         return `
-                <div style="border-top:1px solid var(--border);padding-top:12px;">
-                    <div style="font-size:15px;font-weight:600;">Склад готовой продукции</div>
-                    <div style="font-size:14px;margin-top:2px;" title="Заморожено — себестоимость непроданных штук на складе">На складе ${count(stock.inStock)} из ${count(stock.total)} · заморожено ${this._formatWhole(stock.frozen)} · ${sold}</div>
+                <div class="odc-tirage-stock">
+                    <div class="odc-tirage-name">Склад готовой продукции</div>
+                    <div class="odc-tirage-split" title="Заморожено — себестоимость непроданных штук на складе">На складе ${count(stock.inStock)} из ${count(stock.total)} · заморожено ${this._formatWhole(stock.frozen)} · ${sold}</div>
                     ${button}
                 </div>`;
     },
 
-    // Блок перерисовывается на месте: вкладку «Информация» целиком трогать нельзя — в ней могут
-    // править поле.
+    // Блок перерисовывается на месте: «Что делаем» целиком трогать нельзя — в нём пишут ТЗ.
     _renderTirageSlot() {
         const slot = document.getElementById('od-tirage-slot');
         if (slot) slot.innerHTML = this.renderTirageInfo();
@@ -1012,85 +1239,197 @@ const OrderDetail = {
     },
 
     // ==========================================
-    // INFO TAB
+    // STAGES: строка этапов и «Перевести на «…»»
     // ==========================================
 
-    renderInfoTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-info');
+    // Что есть в заказе — от этого зависят этапы: печать, сборка, упаковка.
+    _stageFlags() {
+        const items = Array.isArray(this.currentItems) ? this.currentItems : [];
+        const type = item => String(item?.item_type || 'product').trim().toLowerCase();
+        const printingsOf = item => {
+            const list = typeof parseOrderCalcJson === 'function'
+                ? parseOrderCalcJson(item.printings, [])
+                : (Array.isArray(item.printings) ? item.printings : []);
+            if (!Array.isArray(list)) return [];
+            return typeof getActivePrintings === 'function' ? getActivePrintings({ printings: list }) : list;
+        };
+        return {
+            hasPrinting: items.some(item => type(item) === 'product'
+                && (printingsOf(item).length > 0 || Number(item.sell_price_printing) > 0)),
+            hasHardware: items.some(item => type(item) === 'hardware' || type(item) === 'pendant'),
+            hasPackaging: items.some(item => type(item) === 'packaging'),
+        };
+    },
 
-        container.innerHTML = `
-        <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Основное</h3></div>
-                ${this._fieldRow('order_name', 'Название', o.order_name, 'text')}
-                ${this._fieldRow('client_name', 'Клиент', o.client_name, 'text')}
-                ${this._fieldRow('manager_name', 'Менеджер', o.manager_name, 'text')}
-                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Начало → Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
-                ${this._fieldRow('notes', 'Заметки', o.notes, 'textarea')}
-            </div>
-            <div class="card">
-                <div class="card-header"><h3>Контакты и ссылки</h3></div>
-                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'text')}
-                ${this._fieldRow('telegram', 'Telegram', o.telegram, 'text')}
-                ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
-                ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
-            </div>
-        </div>
-        <div id="od-tirage-slot">${this.renderTirageInfo()}</div>
-        ${this._renderDeliveryScheduleCard()}
-        `;
+    _stagesModel() {
+        return OrderCardLogic.stages({ status: this.currentOrder && this.currentOrder.status, ...this._stageFlags() });
+    },
+
+    renderStages() {
+        const o = this.currentOrder || {};
+        const model = this._stagesModel();
+        const steps = model.list.map(step => {
+            const current = step.state === 'current';
+            const finished = step.state === 'done' || (current && step.value === 'completed');
+            const cls = step.state === 'done' ? 'odc-step-done' : (current ? 'odc-step-current' : 'odc-step-todo');
+            return `<li class="odc-step ${cls}${current && step.value === 'completed' ? ' odc-step-final' : ''}"${current ? ' aria-current="step"' : ''}>${finished ? ORDER_CARD_ICONS.check : ''}<span>${this._esc(step.label)}</span></li>`;
+        }).join('');
+        let action = '';
+        if (model.next) {
+            action = `
+                <button type="button" class="odc-btn odc-btn-primary" onclick="OrderDetail.moveToNextStage()"${this.statusBusy ? ' disabled' : ''}>
+                    ${this.statusBusy ? 'Переводим…' : `Перевести на «${this._esc(model.next.label)}» ${ORDER_CARD_ICONS.arrow}`}
+                </button>`;
+        }
+        const note = o.status === 'cancelled' ? '<div class="odc-stages-note">Заказ отменён</div>' : '';
+        this._setHtml('od-stages', `<ol class="odc-steps" aria-label="Этапы заказа">${steps}</ol>${note}${action}`);
+    },
+
+    moveToNextStage() {
+        const next = this._stagesModel().next;
+        if (!next) return Promise.resolve();
+        return this.changeStatus(next.value);
+    },
+
+    // ==========================================
+    // «ЧТО ДЕЛАЕМ»: ТЗ для цеха, состав, тираж
+    // ==========================================
+
+    renderWhat() {
+        const o = this.currentOrder || {};
+        const brief = document.getElementById('od-brief');
+        if (brief && typeof document !== 'undefined' && document.activeElement === brief) {
+            // ТЗ сейчас пишут — его не трогаем: обновляется только состав и тираж.
+            this._setHtml('od-what-items', this._renderComposition());
+            this._renderTirageSlot();
+            return;
+        }
+        const text = this.briefDraft !== null && this.briefDraft !== undefined ? this.briefDraft : (o.notes || '');
+        this._setHtml('od-what', `
+            <h2 class="odc-h2">${o.status === 'completed' ? 'Что делали' : 'Что делаем'}</h2>
+            <label for="od-brief" class="odc-field-label">ТЗ для цеха — сохраняется само</label>
+            <textarea id="od-brief" class="odc-brief" rows="4"
+                placeholder="Что и сколько, цвет, нанесение, фурнитура и сборка, упаковка"
+                oninput="OrderDetail.briefDraft = this.value"
+                onblur="OrderDetail.saveBrief(this.value)"
+                onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.blur();}">${this._esc(text)}</textarea>
+            <div id="od-what-items" class="odc-what-items">${this._renderComposition()}</div>
+            <div id="od-tirage-slot">${this.renderTirageInfo()}</div>`);
+    },
+
+    // ТЗ сохраняется само, когда уходят из поля, — если изменилось. Не сохранилось — текст остаётся.
+    async saveBrief(value) {
+        const order = this.currentOrder;
+        if (!order) return false;
+        const typed = String(value ?? '');
+        if (typed.trim() === String(order.notes || '').trim()) {
+            this.briefDraft = null;
+            return true;
+        }
+        this.briefDraft = typed;
+        const saved = await this.saveField('notes', typed.trim());
+        if (saved && this.currentOrder === order && this.briefDraft === typed) this.briefDraft = null;
+        return saved;
+    },
+
+    // Состав заказа: изделия и подвесы.
+    _renderComposition() {
+        const items = Array.isArray(this.currentItems) ? this.currentItems : [];
+        const lines = items.filter(item => ['product', 'pendant'].includes(String(item?.item_type || 'product')));
+        if (!lines.length) return '<div class="odc-muted">В заказе нет изделий.</div>';
+        return lines.map(item => `
+            <div class="odc-product">
+                <div class="odc-product-head">
+                    <span class="odc-product-name">${this._esc(item.product_name || 'Изделие')} — ${this._formatQuantity(item.quantity)} шт.</span>
+                </div>
+            </div>`).join('');
+    },
+
+    // ==========================================
+    // «КАК ИДЁТ»: сроки, часы, график сдачи
+    // ==========================================
+
+    renderProgress() {
+        const o = this.currentOrder || {};
+        this._setHtml('od-progress', `
+            <section class="odc-card" aria-label="${o.status === 'completed' ? 'Как шло' : 'Как идёт'}">
+                <h2 class="odc-h2">${o.status === 'completed' ? 'Как шло' : 'Как идёт'}</h2>
+                ${this._renderDeliveryRow()}
+            </section>`);
+    },
+
+    // «Сдаём одной партией» / «Сдаём в 3 партии» — раскрывает «График сдачи» под собой.
+    _renderDeliveryRow() {
+        const schedule = normalizeDeliverySchedule(this.currentOrder && this.currentOrder.delivery_schedule, 0).schedule;
+        const count = schedule.length;
+        const label = count > 1 ? `Сдаём в ${count} ${this._plural(count, 'партию', 'партии', 'партий')}` : 'Сдаём одной партией';
+        const dates = schedule.map(entry => OrderCardLogic.formatDayMonth(entry.date)).filter(Boolean).join(', ');
+        const open = !!this.deliveryOpen;
+        return `
+            <div class="odc-delivery">
+                <button type="button" class="odc-row-btn" aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-delivery-slot"
+                    onclick="OrderDetail.toggleDelivery()">
+                    <span class="odc-row-title">${this._esc(label)}</span>
+                    <span class="odc-row-sum">${this._esc(dates)}</span>
+                    ${ORDER_CARD_ICONS.chevron}
+                </button>
+                <div id="od-delivery-slot"${open ? '' : ' hidden'}>${open ? this._renderDeliveryScheduleCard() : ''}</div>
+            </div>`;
+    },
+
+    toggleDelivery() {
+        this.deliveryOpen = !this.deliveryOpen;
+        this.renderProgress();
     },
 
     _renderDeliveryScheduleCard() {
         const totalQuantity = getOrderProductionQuantity(this.currentItems);
         const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
         const hasRows = validation.schedule.length > 0;
-        const statusColor = !hasRows ? 'var(--text-muted)' : (validation.valid ? 'var(--green)' : 'var(--red)');
+        const statusTone = !hasRows ? 'muted' : (validation.valid ? 'green' : 'red');
         const statusText = !hasRows
             ? `Тираж: ${this._formatQuantity(totalQuantity)} шт. · сдаётся одной частью`
             : validation.valid
                 ? `Распределено ${this._formatQuantity(validation.total)} из ${this._formatQuantity(totalQuantity)} шт.`
                 : validation.errors[validation.errors.length - 1];
         const rows = this.deliveryScheduleDraft.map((entry, index) => `
-            <div data-delivery-row="${index}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(120px,.7fr) auto;gap:8px;align-items:center;">
-                <input type="date" class="od-status-select" value="${this._escAttr(entry.date || '')}"
+            <div class="odc-delivery-line" data-delivery-row="${index}">
+                <input type="date" class="odc-input" aria-label="Дата партии ${index + 1}" value="${this._escAttr(entry.date || '')}"
                     onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value)">
-                <input type="number" class="od-status-select" min="1" step="1" value="${this._escAttr(entry.quantity || '')}"
+                <input type="number" class="odc-input" min="1" step="1" aria-label="Количество в партии ${index + 1}" value="${this._escAttr(entry.quantity || '')}"
                     placeholder="Количество"
                     onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value)">
-                <button class="btn btn-sm btn-outline" type="button"
-                    onclick="OrderDetail.removeDeliveryScheduleRow(${index})" title="Удалить партию">✕</button>
+                <button class="odc-btn odc-btn-icon" type="button" aria-label="Удалить партию ${index + 1}"
+                    onclick="OrderDetail.removeDeliveryScheduleRow(${index})">${ORDER_CARD_ICONS.close}</button>
             </div>
         `).join('');
 
         return `
-        <div class="card" id="od-delivery-schedule-card" style="margin-top:16px;">
-            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div class="odc-delivery-card" id="od-delivery-schedule-card">
+            <div class="odc-delivery-head">
                 <div>
-                    <h3>График сдачи</h3>
-                    <div style="font-size:12px;color:${statusColor};margin-top:3px;">${this._esc(statusText)}</div>
+                    <h3 class="odc-h3">График сдачи</h3>
+                    <div class="odc-caption odc-tone-${statusTone}">${this._esc(statusText)}</div>
                 </div>
-                <button class="btn btn-sm btn-outline" type="button" onclick="OrderDetail.addDeliveryScheduleRow()">+ Партия</button>
+                <button class="odc-btn" type="button" onclick="OrderDetail.addDeliveryScheduleRow()">+ Партия</button>
             </div>
-            <div style="padding:12px 16px 16px;">
-                ${hasRows
-                    ? `<div style="display:grid;gap:8px;">${rows}</div>`
-                    : '<div class="text-muted" style="font-size:12px;">Добавьте даты и количество, если тираж нужно сдавать частями.</div>'}
-                ${validation.errors.length
-                    ? `<div style="font-size:12px;color:var(--red);margin-top:10px;">${validation.errors.map(error => this._esc(error)).join('<br>')}</div>`
-                    : ''}
-                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-                    <button class="btn btn-sm btn-success" type="button" onclick="OrderDetail.saveDeliverySchedule()">Сохранить график</button>
-                </div>
+            ${hasRows
+                ? `<div class="odc-delivery-lines">${rows}</div>`
+                : '<div class="odc-caption">Добавьте даты и количество, если тираж нужно сдавать частями.</div>'}
+            ${validation.errors.length
+                ? `<div class="odc-caption odc-tone-red">${validation.errors.map(error => this._esc(error)).join('<br>')}</div>`
+                : ''}
+            <div class="odc-delivery-actions">
+                <button class="odc-btn odc-btn-primary" type="button" onclick="OrderDetail.saveDeliverySchedule()">Сохранить график</button>
             </div>
         </div>`;
     },
 
     _renderDeliveryScheduleOnly() {
         const previous = document.getElementById('od-delivery-schedule-card');
-        if (!previous) {
-            this.renderInfoTab();
+        if (!previous || typeof previous.replaceWith !== 'function') {
+            this.deliveryOpen = true;
+            this.renderProgress();
             return;
         }
         const wrapper = document.createElement('div');
@@ -1118,6 +1457,8 @@ const OrderDetail = {
     },
 
     async saveDeliverySchedule() {
+        const order = this.currentOrder;
+        if (!order) return;
         const totalQuantity = getOrderProductionQuantity(this.currentItems);
         const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
         if (!validation.valid) {
@@ -1132,15 +1473,21 @@ const OrderDetail = {
         }
         try {
             const snapshot = await updateOrderCalculatorData(
-                this.currentOrder.id,
+                order.id,
                 { delivery_schedule: validation.schedule },
                 siblingUpdates
             );
-            this.currentOrder.calculator_data = JSON.stringify(snapshot);
-            this.currentOrder.delivery_schedule = validation.schedule;
-            if (siblingUpdates.deadline_end) this.currentOrder.deadline_end = siblingUpdates.deadline_end;
-            this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
-            this.renderInfoTab();
+            order.calculator_data = JSON.stringify(snapshot);
+            order.delivery_schedule = validation.schedule;
+            if (siblingUpdates.deadline_end) order.deadline_end = siblingUpdates.deadline_end;
+            if (this.currentOrder === order) {
+                this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
+                // Срок мог сдвинуться на последнюю партию: шапка, плитки и «Как идёт» — заново.
+                this.renderHeader();
+                this.renderStats();
+                this.renderProgress();
+                this.renderInfoTab();
+            }
             App.toast(validation.schedule.length ? 'График сдачи сохранён' : 'График сдачи удалён');
         } catch (error) {
             console.error('OrderDetail.saveDeliverySchedule error:', error);
@@ -1152,56 +1499,108 @@ const OrderDetail = {
         return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(value) || 0);
     },
 
-    // ==========================================
-    // PRODUCTION TAB
-    // ==========================================
-
-    renderProductionTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-production');
-
-        container.innerHTML = `
-        <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Статусы</h3></div>
-                ${this._fieldRowSelect('payment_status', 'Статус оплаты', o.payment_status || 'not_sent', PAYMENT_STATUSES)}
-            </div>
-        </div>
-        `;
+    // 1 партию, 2 партии, 5 партий.
+    _plural(value, one, few, many) {
+        const n = Math.abs(Math.round(Number(value) || 0));
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+        return many;
     },
 
     // ==========================================
-    // FILES TAB
+    // ВНИЗУ: строки, которые раскрываются под собой
     // ==========================================
 
-    renderFilesTab() {
-        const o = this.currentOrder;
-        const container = document.getElementById('od-tab-files');
+    MORE_ROWS: [
+        { key: 'items', title: 'Состав подробно' },
+        { key: 'info', title: 'Данные заказа и контакты' },
+        { key: 'tasks', title: 'Задачи' },
+        { key: 'china', title: 'Закупки в Китае' },
+    ],
+
+    // Строки и контейнеры под ними рисуются раз на открытие карточки: содержимое контейнеров
+    // (#od-tab-items, #od-tab-info, #od-tab-tasks, #od-tab-china) рисуют прежние функции.
+    renderMore() {
+        const rows = this.MORE_ROWS.map(row => {
+            const open = !!this.moreOpen[row.key];
+            return `
+            <div class="odc-more-row">
+                <button type="button" class="odc-row-btn odc-more-btn" id="od-more-btn-${row.key}"
+                    aria-expanded="${open ? 'true' : 'false'}" aria-controls="od-tab-${row.key}"
+                    onclick="OrderDetail.toggleMore('${row.key}')">
+                    <span class="odc-row-title">${this._esc(row.title)}</span>
+                    <span class="odc-row-sum" id="od-more-sum-${row.key}">${this._esc(this._moreSummary(row.key))}</span>
+                    ${ORDER_CARD_ICONS.chevron}
+                </button>
+                <div id="od-tab-${row.key}" class="odc-more-body"${open ? '' : ' hidden'}></div>
+            </div>`;
+        }).join('');
+        this._setHtml('od-more', rows);
+    },
+
+    toggleMore(key) {
+        if (!this.MORE_ROWS.some(row => row.key === key)) return;
+        const open = !this.moreOpen[key];
+        this.moreOpen = { ...this.moreOpen, [key]: open };
+        const button = document.getElementById(`od-more-btn-${key}`);
+        if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const body = document.getElementById(`od-tab-${key}`);
+        if (body) body.hidden = !open;
+    },
+
+    // Сводка справа от строки: «3 позиции», «Telegram, CRM», «нет», «2».
+    _moreSummary(key) {
+        const o = this.currentOrder || {};
+        if (key === 'items') {
+            const count = (Array.isArray(this.currentItems) ? this.currentItems : [])
+                .filter(item => ['product', 'pendant', 'hardware', 'packaging'].includes(String(item?.item_type || 'product'))).length;
+            return count ? `${count} ${this._plural(count, 'позиция', 'позиции', 'позиций')}` : 'нет';
+        }
+        if (key === 'info') {
+            const filled = [
+                ['delivery_address', 'адрес'], ['telegram', 'Telegram'], ['crm_link', 'CRM'], ['fintablo_link', 'Финтабло'],
+            ].filter(([field]) => String(o[field] || '').trim()).map(([, label]) => label);
+            return filled.length ? filled.join(', ') : 'контактов и ссылок нет';
+        }
+        const count = this.moreCounts[key];
+        if (count === undefined || count === null) return '…';
+        return count > 0 ? String(count) : 'нет';
+    },
+
+    _setMoreSummary(key) {
+        const el = document.getElementById(`od-more-sum-${key}`);
+        if (el) el.textContent = this._moreSummary(key);
+    },
+
+    // ==========================================
+    // «ДАННЫЕ ЗАКАЗА И КОНТАКТЫ»
+    // ==========================================
+
+    renderInfoTab() {
+        const o = this.currentOrder || {};
+        const container = document.getElementById('od-tab-info');
+        if (!container) return;
 
         container.innerHTML = `
         <div class="od-detail-grid">
-            <div class="card">
-                <div class="card-header"><h3>Файлы проекта</h3></div>
-                ${this._fieldRow('print_file_url', 'Файл печати', o.print_file_url, 'url')}
-                ${this._fieldRow('cutting_file_url', 'Файл резки/формы', o.cutting_file_url, 'url')}
-                ${this._fieldRow('delivery_documents_url', 'Документы доставки', o.delivery_documents_url, 'url')}
+            <div class="odc-fields">
+                <h3 class="odc-h3">Заказ</h3>
+                ${this._fieldRow('order_name', 'Название', o.order_name, 'text')}
+                ${this._fieldRow('client_name', 'Клиент', o.client_name, 'text')}
+                ${this._fieldRow('manager_name', 'Менеджер', o.manager_name, 'text')}
+                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Начало → Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
             </div>
-            <div class="card">
-                <div class="card-header"><h3>Референсы</h3></div>
-                ${this._fieldRow('reference_urls', 'URL референсов', o.reference_urls, 'textarea')}
-                ${this._renderReferenceLinks(o.reference_urls)}
+            <div class="odc-fields">
+                <h3 class="odc-h3">Контакты и ссылки</h3>
+                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'text')}
+                ${this._fieldRow('telegram', 'Telegram', o.telegram, 'text')}
+                ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
+                ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
-        </div>
-        `;
-    },
-
-    _renderReferenceLinks(urls) {
-        if (!urls) return '<p class="text-muted" style="padding:8px 16px;font-size:12px;">Нет референсов</p>';
-        const links = urls.split(',').map(u => u.trim()).filter(Boolean);
-        if (links.length === 0) return '';
-        return `<div style="padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;">
-            ${links.map((u, i) => `<a href="${this._escAttr(u)}" target="_blank" class="od-url-link" title="${this._escAttr(u)}">Референс ${i + 1}</a>`).join('')}
         </div>`;
+        this._setMoreSummary('info');
     },
 
     // ==========================================
@@ -1210,6 +1609,8 @@ const OrderDetail = {
 
     renderItemsTab() {
         const container = document.getElementById('od-tab-items');
+        if (!container) return;
+        this._setMoreSummary('items');
         const products = this.currentItems.filter(i => i.item_type === 'product' || !i.item_type);
         const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
         const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
@@ -1265,10 +1666,10 @@ const OrderDetail = {
             for (const [setName, group] of setGroups) {
                 const setQty = group.products.reduce((s, p) => s + (parseFloat(p.item.quantity) || 0), 0);
                 html += `<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:10px;padding:12px;">`;
-                html += `<h3 style="margin:0 0 8px;display:flex;align-items:center;gap:6px;">&#128230; ${this._esc(setName)} <span class="text-muted" style="font-size:13px;font-weight:400;">(${setQty} шт)</span></h3>`;
+                html += `<h3 style="margin:0 0 8px;display:flex;align-items:center;gap:6px;">${this._esc(setName)} <span class="text-muted" style="font-size:14px;font-weight:400;">(${setQty} шт)</span></h3>`;
 
                 if (group.products.length > 0) {
-                    html += '<div style="margin-bottom:6px;font-size:12px;font-weight:600;color:#6b7280;">Изделия:</div>';
+                    html += '<div style="margin-bottom:6px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Изделия:</div>';
                     group.products.forEach(({ item, idx }) => {
                         html += this._renderItemCard(item, 'product');
                         const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
@@ -1282,11 +1683,11 @@ const OrderDetail = {
                     });
                 }
                 if (group.hw.length > 0) {
-                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128297; Фурнитура:</div>';
+                    html += '<div style="margin-top:8px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Фурнитура:</div>';
                     group.hw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
                 }
                 if (group.pkg.length > 0) {
-                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128230; Упаковка:</div>';
+                    html += '<div style="margin-top:8px;font-size:14px;font-weight:600;color:var(--odc-text-soft);">Упаковка:</div>';
                     group.pkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
                 }
                 html += '</div>';
@@ -1312,11 +1713,11 @@ const OrderDetail = {
             const noSetHw = orderHardware.filter(i => !i.marketplace_set_name);
             const noSetPkg = orderPackaging.filter(i => !i.marketplace_set_name);
             if (noSetHw.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая фурнитура</h3>';
                 html += noSetHw.map(item => this._renderItemCard(item, 'hardware')).join('');
             }
             if (noSetPkg.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая упаковка</h3>';
                 html += noSetPkg.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
@@ -1340,11 +1741,11 @@ const OrderDetail = {
                 });
             }
             if (orderHardware.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая фурнитура</h3>';
                 html += orderHardware.map(item => this._renderItemCard(item, 'hardware')).join('');
             }
             if (orderPackaging.length > 0) {
-                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += '<h3 style="margin:16px 0 12px">Общая упаковка</h3>';
                 html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
@@ -1353,10 +1754,119 @@ const OrderDetail = {
         }
 
         if (!html) {
-            html = '<div class="empty-state"><div class="empty-icon">&#128230;</div><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
+            html = '<div class="empty-state"><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
         }
 
         container.innerHTML = html;
+    },
+
+    // Склад фурнитуры читается, когда есть Warehouse с нужными функциями.
+    _canLoadHardwareRows() {
+        return !!(this.currentOrder && this.currentOrder.id)
+            && typeof Warehouse !== 'undefined' && !!Warehouse
+            && typeof Warehouse._collectWarehouseDemandFromOrderItems === 'function';
+    },
+
+    // Фурнитура и упаковка заказа со склада: по строке на позицию склада — план, цель, факт, резерв,
+    // свободно и «собрано». Читает склад, резервы и историю; Warehouse.allItems / allReservations
+    // обновляются, как раньше в renderHardwareTab. Ошибка чтения — исключение.
+    async _buildHardwareRows() {
+        const orderId = Number(this.currentOrder && this.currentOrder.id || 0);
+        if (!orderId) return [];
+        const items = this.currentItems || [];
+        await Warehouse._ensureProjectHardwareStateLoaded();
+        const [warehouseItems, reservations, history] = await Promise.all([
+            loadWarehouseItems(),
+            loadWarehouseReservations(),
+            loadWarehouseHistory(),
+        ]);
+
+        Warehouse.allItems = Array.isArray(warehouseItems) ? warehouseItems : [];
+        Warehouse.allReservations = Array.isArray(reservations) ? reservations : [];
+
+        const byItemId = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
+        const historyDeltaMap = Warehouse._buildProjectHardwareHistoryDeltaMap(history || []);
+        const demandRows = Warehouse._collectWarehouseDemandFromOrderItems(items);
+        const activeReservations = reservations || [];
+
+        return demandRows
+            .map(row => {
+                const itemId = Number(row.warehouse_item_id || 0);
+                const whItem = byItemId.get(itemId) || {};
+                const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
+                const targetQty = Warehouse._buildProjectHardwareTargetQty(orderId, itemId, plannedQty, historyDeltaMap);
+                const actualQty = Warehouse._getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history || []);
+                const ready = Warehouse._computeProjectHardwareReadyState(orderId, itemId, plannedQty, history || [], historyDeltaMap);
+                const currentReserveQty = Warehouse._getProjectHardwareReservedQtyForOrderItem(activeReservations, orderId, itemId);
+                const totalReservedQty = round2(Warehouse._getActiveReservationsForItem(itemId)
+                    .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
+                const stockQty = round2(parseFloat(whItem.qty || 0) || 0);
+                const availableQty = Math.max(0, round2(stockQty - totalReservedQty));
+                const reserveHint = ready
+                    ? 'Уже собрано'
+                    : (Math.abs(currentReserveQty - targetQty) <= 0.000001
+                        ? 'Резерв совпадает'
+                        : (currentReserveQty < targetQty ? 'Резерв неполный' : 'Резерв скорректирован'));
+                return {
+                    itemId,
+                    itemName: whItem.name || (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
+                    itemSku: whItem.sku || '',
+                    itemKind: Warehouse._projectSupplyKindLabel(row.material_type || whItem.category || 'hardware'),
+                    plannedQty,
+                    targetQty,
+                    actualQty,
+                    ready,
+                    unit: String(whItem.unit || 'шт').trim() || 'шт',
+                    stockTruth: this._buildProjectHardwareStockTruth({
+                        orderId,
+                        itemId,
+                        item: whItem,
+                        currentReserveQty,
+                        totalReservedQty,
+                        stockQty,
+                        availableQty,
+                        reservations: activeReservations,
+                        history: history || [],
+                    }),
+                    currentReserveQty,
+                    availableQty,
+                    reserveHint,
+                };
+            })
+            .sort((a, b) => String(a.itemName).localeCompare(String(b.itemName), 'ru'));
+    },
+
+    // Склад для плитки «Склад», меток в составе и причин вердикта — в фоне, после показа карточки.
+    async loadHardwareRows() {
+        const order = this.currentOrder;
+        if (!order || !this._canLoadHardwareRows()) return null;
+        const token = this._honestToken;
+        let rows;
+        try {
+            rows = await this._buildHardwareRows();
+        } catch (error) {
+            console.warn('OrderDetail.loadHardwareRows failed:', error);
+            if (token !== this._honestToken || this.currentOrder !== order) return null;
+            this.hardwareState = 'error';
+            this._renderHardwareDependents();
+            return null;
+        }
+        if (token !== this._honestToken || this.currentOrder !== order) return null;
+        this._setHardwareRows(rows);
+        return rows;
+    },
+
+    _setHardwareRows(rows) {
+        this.hardwareRows = Array.isArray(rows) ? rows : [];
+        this.hardwareState = 'ready';
+        this._renderHardwareDependents();
+    },
+
+    // Склад пришёл: шапка (чего не хватает), плитка «Склад», метки в составе.
+    _renderHardwareDependents() {
+        this.renderHeader();
+        this.renderStats();
+        this.renderWhat();
     },
 
     async renderHardwareTab() {
@@ -1369,176 +1879,118 @@ const OrderDetail = {
             return;
         }
 
-        container.innerHTML = `<div class="card"><p class="text-muted" style="padding:16px">Загружаем фурнитуру заказа…</p></div>`;
+        const order = this.currentOrder;
+        const token = this._honestToken;
+        container.innerHTML = '<p class="odc-muted">Загружаем фурнитуру заказа…</p>';
 
+        let rows;
         try {
-            await Warehouse._ensureProjectHardwareStateLoaded();
-            const [warehouseItems, reservations, history] = await Promise.all([
-                loadWarehouseItems(),
-                loadWarehouseReservations(),
-                loadWarehouseHistory(),
-            ]);
-
-            Warehouse.allItems = Array.isArray(warehouseItems) ? warehouseItems : [];
-            Warehouse.allReservations = Array.isArray(reservations) ? reservations : [];
-
-            const byItemId = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
-            const historyDeltaMap = Warehouse._buildProjectHardwareHistoryDeltaMap(history || []);
-            const demandRows = Warehouse._collectWarehouseDemandFromOrderItems(this.currentItems || []);
-            const activeReservations = reservations || [];
-
-            if (!demandRows.length) {
-                container.innerHTML = `
-                    <div class="card">
-                        <div class="empty-state">
-                            <div class="empty-icon">&#128295;</div>
-                            <p>В заказе пока нет складской фурнитуры или упаковки.</p>
-                            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-                                <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
-                                <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть фурнитуру для проектов</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                return;
-            }
-
-            const rows = demandRows
-                .map(row => {
-                    const itemId = Number(row.warehouse_item_id || 0);
-                    const whItem = byItemId.get(itemId) || {};
-                    const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
-                    const targetQty = Warehouse._buildProjectHardwareTargetQty(orderId, itemId, plannedQty, historyDeltaMap);
-                    const actualQty = Warehouse._getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history || []);
-                    const ready = Warehouse._computeProjectHardwareReadyState(orderId, itemId, plannedQty, history || [], historyDeltaMap);
-                    const currentReserveQty = Warehouse._getProjectHardwareReservedQtyForOrderItem(activeReservations, orderId, itemId);
-                    const totalReservedQty = round2(Warehouse._getActiveReservationsForItem(itemId)
-                        .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
-                    const stockQty = round2(parseFloat(whItem.qty || 0) || 0);
-                    const availableQty = Math.max(0, round2(stockQty - totalReservedQty));
-                    const reserveHint = ready
-                        ? 'Уже собрано'
-                        : (Math.abs(currentReserveQty - targetQty) <= 0.000001
-                            ? 'Резерв совпадает'
-                            : (currentReserveQty < targetQty ? 'Резерв неполный' : 'Резерв скорректирован'));
-                    return {
-                        itemId,
-                        itemName: whItem.name || (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
-                        itemSku: whItem.sku || '',
-                        itemKind: Warehouse._projectSupplyKindLabel(row.material_type || whItem.category || 'hardware'),
-                        plannedQty,
-                        targetQty,
-                        actualQty,
-                        ready,
-                        unit: String(whItem.unit || 'шт').trim() || 'шт',
-                        stockTruth: this._buildProjectHardwareStockTruth({
-                            orderId,
-                            itemId,
-                            item: whItem,
-                            currentReserveQty,
-                            totalReservedQty,
-                            stockQty,
-                            availableQty,
-                            reservations: activeReservations,
-                            history: history || [],
-                        }),
-                        currentReserveQty,
-                        availableQty,
-                        reserveHint,
-                    };
-                })
-                .sort((a, b) => String(a.itemName).localeCompare(String(b.itemName), 'ru'));
-
-            const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
-            const totalTarget = round2(rows.reduce((sum, row) => sum + row.targetQty, 0));
-            const totalReserved = round2(rows.reduce((sum, row) => sum + row.currentReserveQty, 0));
-            const totalReady = rows.filter(row => row.ready).length;
-
-            container.innerHTML = `
-                <div class="card" style="margin-bottom:12px;">
-                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-                        <div>
-                            <h3 style="margin:0 0 6px;">Фурнитура и упаковка заказа</h3>
-                            <div class="text-muted" style="font-size:13px;">
-                                Меняйте здесь фактическое количество и сборку по заказу. Резерв на складе пересчитается автоматически.
-                            </div>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
-                            <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть на складе</button>
-                        </div>
-                    </div>
-                    <div class="stats-grid" style="margin-top:12px;">
-                        <div class="stat-card"><div class="stat-label">Позиций</div><div class="stat-value">${rows.length}</div></div>
-                        <div class="stat-card"><div class="stat-label">План</div><div class="stat-value">${totalPlanned} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">Факт / цель</div><div class="stat-value">${totalTarget} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">В резерве</div><div class="stat-value">${totalReserved} шт</div></div>
-                        <div class="stat-card"><div class="stat-label">Собрано</div><div class="stat-value">${totalReady} / ${rows.length}</div></div>
-                    </div>
-                </div>
-
-                <div class="card" style="padding:0;">
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Комплектующая</th>
-                                    <th class="text-right">План</th>
-                                    <th class="text-right">Резерв</th>
-                                    <th class="text-right">Факт</th>
-                                    <th class="text-right">Доступно сейчас</th>
-                                    <th>Собрано</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${rows.map(row => `
-                                    <tr>
-                                        <td>
-                                            <div style="font-weight:600;">${this._esc(row.itemName)}</div>
-                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemKind)}</div>
-                                            ${row.itemSku ? `<div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemSku)}</div>` : ''}
-                                            ${this._renderProjectHardwareStockTruth(row.stockTruth, row)}
-                                        </td>
-                                        <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
-                                        <td class="text-right">
-                                            <div style="font-weight:700;">${row.currentReserveQty}</div>
-                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.reserveHint)}</div>
-                                        </td>
-                                        <td class="text-right">
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                value="${row.actualQty === null || row.actualQty === undefined ? '' : row.actualQty}"
-                                                placeholder="${row.plannedQty}"
-                                                style="width:96px;text-align:right;"
-                                                onblur="OrderDetail.setProjectHardwareActualQty(${row.itemId}, this.value)"
-                                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-                                            >
-                                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">если пусто — по плану</div>
-                                        </td>
-                                        <td class="text-right" style="font-weight:700;">${row.availableQty}</td>
-                                        <td>
-                                            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                                                <input type="checkbox" ${row.ready ? 'checked' : ''} onchange="OrderDetail.toggleProjectHardwareReady(${row.itemId}, this.checked)">
-                                                <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
-                                            </label>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
+            rows = await this._buildHardwareRows();
         } catch (error) {
             console.error('renderHardwareTab error', error);
+            container.innerHTML = '<p class="odc-muted">Не удалось загрузить фурнитуру заказа.</p>';
+            return;
+        }
+        // Таблица свежее, чем то, что видят плитка и состав, — они перерисовываются по ней.
+        if (token === this._honestToken && this.currentOrder === order) {
+            this.hardwareRows = rows;
+            this.hardwareState = 'ready';
+            this.renderHeader();
+            this.renderStats();
+            this.renderWhat();
+        }
+
+        if (!rows.length) {
             container.innerHTML = `
-                <div class="card">
-                    <p class="text-muted" style="padding:16px;">Не удалось загрузить фурнитуру заказа.</p>
+                <div class="empty-state">
+                    <p>В заказе пока нет складской фурнитуры или упаковки.</p>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                        <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                        <button type="button" class="odc-btn" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть фурнитуру для проектов</button>
+                    </div>
                 </div>
             `;
+            return;
         }
+
+        const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
+        const totalTarget = round2(rows.reduce((sum, row) => sum + row.targetQty, 0));
+        const totalReserved = round2(rows.reduce((sum, row) => sum + row.currentReserveQty, 0));
+        const totalReady = rows.filter(row => row.ready).length;
+
+        container.innerHTML = `
+            <div class="odc-hw-head">
+                <div>
+                    <h3 class="odc-h3">Фурнитура и упаковка заказа</h3>
+                    <div class="odc-caption">
+                        Меняйте здесь фактическое количество и сборку по заказу. Резерв на складе пересчитается автоматически.
+                    </div>
+                </div>
+                <div class="odc-hw-actions">
+                    <button type="button" class="odc-btn" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                    <button type="button" class="odc-btn" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть на складе</button>
+                </div>
+            </div>
+            <div class="odc-hw-totals">
+                <span>Позиций: <b>${rows.length}</b></span>
+                <span>План: <b>${totalPlanned} шт</b></span>
+                <span>Факт / цель: <b>${totalTarget} шт</b></span>
+                <span>В резерве: <b>${totalReserved} шт</b></span>
+                <span>Собрано: <b>${totalReady} / ${rows.length}</b></span>
+            </div>
+            <div class="table-wrap">
+                <table class="odc-hw-table">
+                    <thead>
+                        <tr>
+                            <th>Комплектующая</th>
+                            <th class="text-right">План</th>
+                            <th class="text-right">Резерв</th>
+                            <th class="text-right">Факт</th>
+                            <th class="text-right">Доступно сейчас</th>
+                            <th>Собрано</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>
+                                    <div style="font-weight:600;">${this._esc(row.itemName)}</div>
+                                    <div class="odc-caption">${this._esc(row.itemKind)}</div>
+                                    ${row.itemSku ? `<div class="odc-caption">${this._esc(row.itemSku)}</div>` : ''}
+                                    ${this._renderProjectHardwareStockTruth(row.stockTruth, row)}
+                                </td>
+                                <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
+                                <td class="text-right">
+                                    <div style="font-weight:700;">${row.currentReserveQty}</div>
+                                    <div class="odc-caption">${this._esc(row.reserveHint)}</div>
+                                </td>
+                                <td class="text-right">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        class="odc-input odc-input-qty"
+                                        aria-label="Факт: ${this._escAttr(row.itemName)}"
+                                        value="${row.actualQty === null || row.actualQty === undefined ? '' : row.actualQty}"
+                                        placeholder="${row.plannedQty}"
+                                        onblur="OrderDetail.setProjectHardwareActualQty(${row.itemId}, this.value)"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                                    >
+                                    <div class="odc-caption">если пусто — по плану</div>
+                                </td>
+                                <td class="text-right" style="font-weight:700;">${row.availableQty}</td>
+                                <td>
+                                    <label class="odc-check">
+                                        <input type="checkbox" ${row.ready ? 'checked' : ''} onchange="OrderDetail.toggleProjectHardwareReady(${row.itemId}, this.checked)">
+                                        <span>собрано</span>
+                                    </label>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
     },
 
     async setProjectHardwareActualQty(itemId, rawValue) {
@@ -1748,27 +2200,27 @@ const OrderDetail = {
                 : `${round2(allocatedQty * (cord.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`;
             const titleSuffix = isMetric && cord.length_cm > 0 ? ` (${cord.length_cm} см/подвес)` : ((cord.qty_per_pendant || 1) > 1 ? ` × ${cord.qty_per_pendant}` : '');
             const pricePerPendant = attachmentCostPerPendant('cord', cord);
-            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         carabiners.forEach(carabiner => {
             const allocatedQty = getAttachmentAllocatedQty(carabiner);
             const titleSuffix = (carabiner.qty_per_pendant || 1) > 1 ? ` × ${carabiner.qty_per_pendant}` : '';
             const pricePerPendant = attachmentCostPerPendant('carabiner', carabiner);
-            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${round2(allocatedQty * (carabiner.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${round2(allocatedQty * (carabiner.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         // Element groups by color
         Object.entries(groups).forEach(([color, els]) => {
             const chars = els.map(e => e.char).join(', ');
             const groupQty = els.length * qty;
-            rows += `<tr><td style="padding-left:24px;">&#128292; ${this._esc(chars)} (${this._esc(color)})</td><td>${groupQty}</td><td>${formatRub(elemPrice)}</td><td>${formatRub(groupQty * elemPrice)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(chars)} (${this._esc(color)})</td><td>${groupQty}</td><td>${formatRub(elemPrice)}</td><td>${formatRub(groupQty * elemPrice)}</td></tr>`;
         });
         // Print items
         elements.filter(el => el.has_print).forEach(el => {
-            rows += `<tr><td style="padding-left:24px;">&#128424; Печать на ${this._esc(el.char)}</td><td>${qty}</td><td>${formatRub(el.print_price)}</td><td>${formatRub(qty * (el.print_price || 0))}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">Печать на ${this._esc(el.char)}</td><td>${qty}</td><td>${formatRub(el.print_price)}</td><td>${formatRub(qty * (el.print_price || 0))}</td></tr>`;
         });
         // Packaging
         if (pnd.packaging?.name) {
-            rows += `<tr><td style="padding-left:24px;">&#128230; ${this._esc(pnd.packaging.name)}</td><td>${qty}</td><td>${formatRub(pnd.packaging.price_per_unit)}</td><td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">${this._esc(pnd.packaging.name)}</td><td>${qty}</td><td>${formatRub(pnd.packaging.price_per_unit)}</td><td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td></tr>`;
         }
 
         const sellPrice = dbItem.sell_price_item || 0;
@@ -1777,11 +2229,11 @@ const OrderDetail = {
         return `
             <div class="card" style="border-left:3px solid var(--accent);margin-bottom:12px;">
                 <div class="card-header">
-                    <h3 style="margin:0;">&#128292; Подвес "${this._esc(pnd.name)}" × ${qty} шт</h3>
+                    <h3 style="margin:0;">Подвес "${this._esc(pnd.name)}" × ${qty} шт</h3>
                     <span style="font-size:14px;font-weight:700;">${formatRub(totalRevenue)}</span>
                 </div>
-                <table style="width:100%;font-size:13px;border-collapse:collapse;padding:8px 16px;">
-                    <tr style="color:var(--text-muted);font-size:11px;"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
+                <table style="width:100%;font-size:14px;border-collapse:collapse;padding:8px 16px;">
+                    <tr style="color:var(--text-muted);font-size:14px;"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
                     ${rows}
                 </table>
             </div>
@@ -1816,7 +2268,7 @@ const OrderDetail = {
                 <b>${this._esc(name)}</b>
                 <span class="text-muted">${qty} шт</span>
             </div>
-            <div class="form-row" style="margin:0;gap:24px;font-size:13px;">
+            <div class="form-row" style="margin:0;gap:24px;font-size:14px;">
                 <div><span class="text-muted">Себестоимость:</span> ${formatRub(costPerUnit)}/шт</div>
                 <div><span class="text-muted">Продажа:</span> ${formatRub(sellPrice)}/шт</div>
                 <div><span class="text-muted">Выручка:</span> ${formatRub(revenue)}</div>
@@ -1860,7 +2312,7 @@ const OrderDetail = {
         if (sections.length === 0) return '';
 
         return `
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:12px;">
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:14px;">
                 ${sections.join('')}
             </div>
         `;
@@ -1905,9 +2357,24 @@ const OrderDetail = {
     // ==========================================
 
     async renderTasksTab() {
+        const order = this.currentOrder;
+        if (!order) return;
+        const token = this._honestToken;
+        const orderId = order.id;
+        let bundle;
+        try {
+            bundle = await loadWorkBundle();
+        } catch (error) {
+            console.warn('OrderDetail.renderTasksTab failed:', error);
+            if (token !== this._honestToken || this.currentOrder !== order) return;
+            this._setHtml('od-tab-tasks', '<p class="odc-muted">Задачи не загрузились. Обновите страницу.</p>');
+            return;
+        }
+        // Пока задачи читались, открыли другую карточку.
+        if (token !== this._honestToken || this.currentOrder !== order) return;
         const container = document.getElementById('od-tab-tasks');
-        const orderId = this.currentOrder.id;
-        const bundle = await loadWorkBundle();
+        if (!container) return;
+        bundle = bundle || {};
         const projects = (bundle.projects || []).filter(project => String(project.linked_order_id || '') === String(orderId));
         const projectIds = new Set(projects.map(project => String(project.id)));
         const tasks = (bundle.tasks || []).filter(task =>
@@ -1916,14 +2383,14 @@ const OrderDetail = {
         );
 
         const projectCards = projects.length === 0
-            ? '<div class="text-muted" style="font-size:13px;">Связанных проектов пока нет</div>'
+            ? '<div class="text-muted" style="font-size:14px;">Связанных проектов пока нет</div>'
             : projects.map(project => {
                 const projectTasks = tasks.filter(task => String(task.project_id || '') === String(project.id));
                 return `
                     <button class="od-project-card" onclick="App.navigate('projects', true, ${project.id})">
                         <div style="font-weight:700">${this._esc(project.title)}</div>
-                        <div class="text-muted" style="font-size:12px">${this._esc(project.type || 'Другое')} · ${this._esc(WorkManagementCore.getProjectStatusLabel(project.status))}</div>
-                        <div class="text-muted" style="font-size:12px">Задач: ${projectTasks.length} · Владелец: ${this._esc(project.owner_name || '—')}</div>
+                        <div class="text-muted" style="font-size:14px">${this._esc(project.type || 'Другое')} · ${this._esc(WorkManagementCore.getProjectStatusLabel(project.status))}</div>
+                        <div class="text-muted" style="font-size:14px">Задач: ${projectTasks.length} · Владелец: ${this._esc(project.owner_name || '—')}</div>
                     </button>
                 `;
             }).join('');
@@ -1934,11 +2401,11 @@ const OrderDetail = {
                 <tr onclick="App.navigate('tasks', true, ${task.id})" style="cursor:pointer">
                     <td>
                         <div style="font-weight:600">${this._esc(task.title)}</div>
-                        <div class="text-muted" style="font-size:12px">${this._esc(project ? `Проект: ${project.title}` : 'Прямая задача заказа')}</div>
+                        <div class="text-muted" style="font-size:14px">${this._esc(project ? `Проект: ${project.title}` : 'Прямая задача заказа')}</div>
                     </td>
                     <td><span class="badge">${this._esc(WorkManagementCore.getTaskStatusLabel(task.status))}</span></td>
-                    <td style="font-size:12px">${this._esc(task.assignee_name || '—')}</td>
-                    <td style="font-size:12px" class="${WorkManagementCore.isTaskOverdue(task) ? 'text-red' : ''}">${this._esc(task.due_date ? App.formatDate(task.due_date) + (task.due_time ? ' ' + task.due_time : '') : '—')}</td>
+                    <td style="font-size:14px">${this._esc(task.assignee_name || '—')}</td>
+                    <td style="font-size:14px" class="${WorkManagementCore.isTaskOverdue(task) ? 'text-red' : ''}">${this._esc(task.due_date ? App.formatDate(task.due_date) + (task.due_time ? ' ' + task.due_time : '') : '—')}</td>
                 </tr>
             `;
         }).join('');
@@ -1946,10 +2413,12 @@ const OrderDetail = {
         const inProgress = tasks.filter(task => task.status === 'in_progress').length;
         const done = tasks.filter(task => task.status === 'done').length;
         const total = tasks.length;
+        this.moreCounts = { ...this.moreCounts, tasks: total };
+        this._setMoreSummary('tasks');
 
         container.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
-                <div style="font-size:13px;color:var(--text-muted)">
+                <div style="font-size:14px;color:var(--text-muted)">
                     Всего задач: <b>${total}</b> &nbsp;|&nbsp; В работе: <b>${inProgress}</b> &nbsp;|&nbsp; Готово: <b>${done}</b> &nbsp;|&nbsp; Проектов: <b>${projects.length}</b>
                 </div>
                 <div class="flex gap-8">
@@ -1965,7 +2434,6 @@ const OrderDetail = {
 
             ${tasks.length === 0
                 ? `<div class="card"><div class="empty-state">
-                        <div class="empty-icon">&#9745;</div>
                         <p>В этом заказе пока нет задач</p>
                         <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ order_id: ${orderId}, primary_context_kind: 'order' })">Создать первую задачу</button>
                    </div></div>`
@@ -1986,11 +2454,18 @@ const OrderDetail = {
     // ==========================================
 
     async renderChinaTab() {
-        const container = document.getElementById('od-tab-china');
-        const orderId = this.currentOrder.id;
-        const orderName = this._esc(this.currentOrder.order_name || '');
+        const order = this.currentOrder;
+        if (!order) return;
+        const token = this._honestToken;
+        const orderId = order.id;
+        const stale = () => token !== this._honestToken || this.currentOrder !== order;
         try {
             const purchases = await loadChinaPurchases({ order_id: orderId });
+            if (stale()) return;
+            const container = document.getElementById('od-tab-china');
+            if (!container) return;
+            this.moreCounts = { ...this.moreCounts, china: Array.isArray(purchases) ? purchases.length : 0 };
+            this._setMoreSummary('china');
 
             const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
                 <button class="btn btn-sm btn-success" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openNewForm(${orderId}); }}, 200);">+ Создать закупку для этого заказа</button>
@@ -2001,7 +2476,6 @@ const OrderDetail = {
                     ${addBtn}
                     <div class="card">
                         <div class="empty-state">
-                            <div class="empty-icon">&#127464;&#127475;</div>
                             <p>Нет привязанных закупок из Китая</p>
                         </div>
                     </div>`;
@@ -2027,7 +2501,7 @@ const OrderDetail = {
                                     return `<tr style="cursor:pointer" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openDetail(${p.id}); } }, 250);">
                                         <td><b>${this._esc(p.purchase_name || '')}</b></td>
                                         <td>${this._esc(p.supplier_name || '')}</td>
-                                        <td>${st ? '<span class="badge badge-' + st.color + '">' + st.label + '</span>' : (p.status || '')}</td>
+                                        <td>${st ? '<span class="badge badge-' + st.color + '">' + this._esc(st.label) + '</span>' : this._esc(p.status || '')}</td>
                                         <td class="text-right">${(p.total_cny || 0).toFixed(2)}</td>
                                         <td>${this._esc(p.tracking_number || '')}</td>
                                     </tr>`;
@@ -2037,7 +2511,9 @@ const OrderDetail = {
                     </div>
                 </div>`;
         } catch (e) {
-            container.innerHTML = '<div class="card"><p class="text-muted" style="padding:16px">Ошибка загрузки закупок</p></div>';
+            console.warn('OrderDetail.renderChinaTab failed:', e);
+            if (stale()) return;
+            this._setHtml('od-tab-china', '<p class="odc-muted">Ошибка загрузки закупок</p>');
         }
     },
 
@@ -2045,46 +2521,73 @@ const OrderDetail = {
     // ACTIONS
     // ==========================================
 
-    async changeStatus() {
-        const o = this.currentOrder;
-        const opts = STATUS_OPTIONS.filter(s => s.value !== 'deleted' && s.value !== o.status);
-        const labels = opts.map((s, i) => `${i + 1}. ${s.label}`).join('\n');
-        const choice = prompt(`Текущий статус: ${App.statusLabel(o.status)}\n\nВыберите новый:\n${labels}\n\nВведите номер:`);
-        if (!choice) return;
-
-        const idx = parseInt(choice) - 1;
-        if (isNaN(idx) || idx < 0 || idx >= opts.length) {
-            App.toast('Неверный выбор');
+    // Смена этапа без системных окон. Без аргумента — раскрывает список этапов в меню «⋯». С этапом —
+    // те же проверки, что у списка заказов (Orders._ensureStatusTransitionAllowed), запись,
+    // завершение перехода (склад, готовая продукция, история) от имени того, кто вошёл.
+    async changeStatus(targetStatus) {
+        const order = this.currentOrder;
+        if (!order) return;
+        if (!targetStatus) {
+            this.showMenu('stages');
             return;
         }
-
-        const newStatus = opts[idx].value;
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
-            const guard = await Orders._ensureStatusTransitionAllowed(this.currentOrder.id, newStatus);
-            if (!guard.ok) return;
-        }
-        const managerName = prompt('Имя менеджера (для истории):') || 'Неизвестный';
-
-        const oldStatus = o.status;
-        try {
-            await updateOrderStatus(this.currentOrder.id, newStatus);
-        } catch (error) {
-            console.error('OrderDetail.changeStatus updateOrderStatus failed:', error);
-            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+        const newStatus = String(targetStatus);
+        if (newStatus === 'deleted' || this.statusBusy) return;
+        if (newStatus === order.status) {
+            this.closeMenu();
             return;
         }
-
-        // Confirm the successful primary write before any slower warehouse work.
-        this.currentOrder.status = newStatus;
+        const oldStatus = order.status;
+        this.statusBusy = true;
+        this.menuOpen = false;
+        this.menuView = 'main';
         this.renderHeader();
-        App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
+        this.renderStages();
+        try {
+            if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
+                const guard = await Orders._ensureStatusTransitionAllowed(order.id, newStatus, { oldStatus });
+                // Нельзя — Orders уже сказал почему.
+                if (!guard || !guard.ok) return;
+            }
+            try {
+                await updateOrderStatus(order.id, newStatus);
+            } catch (error) {
+                console.error('OrderDetail.changeStatus updateOrderStatus failed:', error);
+                App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+                return;
+            }
 
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
-            await Orders._finishStatusTransition(this.currentOrder.id, this.currentOrder, oldStatus, newStatus, managerName);
+            // Запись удалась — карточка показывает новый этап сразу, до медленной работы со складом.
+            order.status = newStatus;
+            this.statusBusy = false;
+            if (this.currentOrder === order) this._renderAfterStatusChange();
+            App.toast(`Статус сохранён: ${App.statusLabel(newStatus)}`);
+
+            const managerName = (typeof App.getCurrentEmployeeName === 'function' && App.getCurrentEmployeeName()) || 'Неизвестный';
+            if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
+                await Orders._finishStatusTransition(order.id, order, oldStatus, newStatus, managerName);
+            }
+            // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при
+            // возврате) — блок «Тираж» показывает, что там теперь.
+            if (this.currentOrder === order) await this.loadTirageStock();
+        } finally {
+            if (this.statusBusy) {
+                this.statusBusy = false;
+                if (this.currentOrder === order) {
+                    this.renderHeader();
+                    this.renderStages();
+                }
+            }
         }
-        // «Готово» ставит штуки «на продажу» на склад готовой продукции (или снимает их при возврате) —
-        // блок «Тираж» показывает, что там теперь.
-        await this.loadTirageStock();
+    },
+
+    // Этап сменился: шапка, этапы, плитки и «Как идёт».
+    _renderAfterStatusChange() {
+        this.renderHeader();
+        this.renderStages();
+        this.renderStats();
+        this.renderWhat();
+        this.renderProgress();
     },
 
     openInCalculator() {
@@ -2094,6 +2597,7 @@ const OrderDetail = {
     },
 
     cloneOrder() {
+        this.closeMenu();
         if (this.currentOrder) {
             Orders.cloneOrder(this.currentOrder.id);
         }
@@ -2103,61 +2607,92 @@ const OrderDetail = {
     // INLINE EDIT HELPERS
     // ==========================================
 
+    // Запись поля заказа. Не записалось — тост, и введённое не пропадает (это решает тот, кто
+    // позвал: поле остаётся открытым, ТЗ — в поле). true — сохранено.
     async saveField(field, value) {
-        await updateOrderFields(this.currentOrder.id, { [field]: value });
-        this.currentOrder[field] = value;
-
-        // Re-render current tab
-        const tabRenderers = {
-            info: () => this.renderInfoTab(),
-            production: () => this.renderProductionTab(),
-            files: () => this.renderFilesTab(),
-            hardware: () => this.renderHardwareTab(),
-        };
-        if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
-        if (['payment_status'].includes(field)) this.renderStats();
-
+        const order = this.currentOrder;
+        if (!order || !order.id) return false;
+        try {
+            await updateOrderFields(order.id, { [field]: value });
+        } catch (error) {
+            console.error('OrderDetail.saveField failed:', field, error);
+            App.toast('Не сохранилось — проверьте связь и повторите');
+            return false;
+        }
+        order[field] = value;
+        if (this.currentOrder === order) this._renderAfterFieldSave(field);
         App.toast('Сохранено');
+        return true;
+    },
+
+    // Перерисовать то, что показывает поле.
+    _renderAfterFieldSave(field) {
+        const headFields = ['order_name', 'client_name', 'manager_name', 'deadline_start', 'deadline_end', 'notes', 'payment_status'];
+        const summaryFields = ['client_name', 'deadline_start', 'deadline_end', 'payment_status'];
+        if (headFields.includes(field)) this.renderHeader();
+        if (summaryFields.includes(field)) {
+            this.renderStats();
+            this.renderStages();
+            this.renderProgress();
+            if (this.openPanel === 'payment' || this.openPanel === 'money') this.renderPanel();
+        }
+        if (field !== 'notes' && field !== 'payment_status') this.renderInfoTab();
     },
 
     startEdit(field, currentValue, inputType) {
         const cell = document.getElementById('od-val-' + field);
         if (!cell) return;
-        cell.classList.add('od-editing');
+        // Щелчок по уже открытому полю всплывает до строки — поле не пересоздаётся (и не теряет текст).
+        if (typeof cell.querySelector === 'function' && cell.querySelector('.od-inline-input')) return;
+        this._editing = { field, inputType: inputType || 'text', kind: 'text' };
+        if (cell.classList) cell.classList.add('od-editing');
 
         if (inputType === 'textarea') {
-            cell.innerHTML = `<textarea class="od-inline-input" onblur="OrderDetail.finishEdit('${field}', this.value)" style="width:100%;min-height:60px;font-size:13px;padding:6px 8px;border:1px solid var(--accent);border-radius:6px;resize:vertical;">${this._esc(currentValue || '')}</textarea>`;
+            cell.innerHTML = `<textarea class="od-inline-input odc-input" onblur="OrderDetail.finishEdit('${field}', this.value)" style="width:100%;min-height:88px;resize:vertical;">${this._esc(currentValue || '')}</textarea>`;
         } else {
-            cell.innerHTML = `<input class="od-inline-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;font-size:13px;padding:6px 8px;border:1px solid var(--accent);border-radius:6px;">`;
+            cell.innerHTML = `<input class="od-inline-input odc-input" type="${inputType === 'url' ? 'url' : 'text'}" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%;">`;
         }
-        cell.querySelector('.od-inline-input').focus();
+        const input = typeof cell.querySelector === 'function' ? cell.querySelector('.od-inline-input') : null;
+        if (input && typeof input.focus === 'function') input.focus();
     },
 
-    finishEdit(field, value) {
-        const trimmed = value.trim();
-        if (trimmed !== (this.currentOrder[field] || '').toString().trim()) {
-            this.saveField(field, trimmed);
-        } else {
-            // Revert — re-render tab
-            const tabRenderers = {
-                info: () => this.renderInfoTab(),
-                production: () => this.renderProductionTab(),
-                files: () => this.renderFilesTab(),
-                hardware: () => this.renderHardwareTab(),
-            };
-            if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
+    async finishEdit(field, value) {
+        if (!this.currentOrder) return false;
+        const trimmed = String(value ?? '').trim();
+        const editing = this._editing && this._editing.field === field ? this._editing : null;
+        if (trimmed === String(this.currentOrder[field] ?? '').trim()) {
+            this._editing = null;
+            this.renderInfoTab();
+            return true;
         }
+        this._savingFields = this._savingFields || {};
+        if (this._savingFields[field]) return false;
+        this._savingFields[field] = true;
+        let saved = false;
+        try {
+            saved = await this.saveField(field, trimmed);
+        } finally {
+            this._savingFields[field] = false;
+        }
+        if (saved) {
+            this._editing = null;
+        } else if (editing && editing.kind === 'date') {
+            // Не записалось — поле снова открыто с тем, что ввели.
+            this.startEditDate(field, trimmed);
+        } else {
+            this.startEdit(field, trimmed, editing ? editing.inputType : 'text');
+        }
+        return saved;
     },
 
     startEditDate(field, currentValue) {
         const cell = document.getElementById('od-val-' + field);
         if (!cell) return;
-        cell.innerHTML = `<input type="date" value="${currentValue || ''}" onblur="OrderDetail.finishEdit('${field}', this.value)" onchange="OrderDetail.finishEdit('${field}', this.value)" style="font-size:13px;padding:4px 8px;border:1px solid var(--accent);border-radius:6px;">`;
-        cell.querySelector('input').focus();
-    },
-
-    onSelectChange(field, value) {
-        this.saveField(field, value);
+        if (typeof cell.querySelector === 'function' && cell.querySelector('input')) return;
+        this._editing = { field, inputType: 'date', kind: 'date' };
+        cell.innerHTML = `<input type="date" class="odc-input" value="${this._escAttr(currentValue || '')}" onblur="OrderDetail.finishEdit('${field}', this.value)" onchange="OrderDetail.finishEdit('${field}', this.value)">`;
+        const input = typeof cell.querySelector === 'function' ? cell.querySelector('input') : null;
+        if (input && typeof input.focus === 'function') input.focus();
     },
 
     onCheckboxChange(field, checked) {
@@ -2168,50 +2703,43 @@ const OrderDetail = {
     // FIELD RENDERERS
     // ==========================================
 
+    // Строка поля, которое правится щелчком. Значение уходит в startEdit через data-value: в
+    // атрибут onclick пользовательский текст не попадает (кавычки в нём его не обрывают).
     _fieldRow(field, label, value, inputType) {
         let displayValue = '';
         if (inputType === 'url' && value) {
             const shortUrl = value.length > 50 ? value.substring(0, 50) + '...' : value;
-            displayValue = `<a href="${this._escAttr(value)}" target="_blank" class="od-url-link">${this._esc(shortUrl)}</a>`;
+            displayValue = `<a href="${this._escAttr(value)}" target="_blank" rel="noopener" class="od-url-link" onclick="event.stopPropagation()">${this._esc(shortUrl)}</a>`;
         } else {
             displayValue = this._esc(value || '') || '<span class="text-muted">—</span>';
         }
 
         return `
-        <div class="od-field-row" onclick="OrderDetail.startEdit('${field}', ${JSON.stringify(value || '').replace(/'/g, "\\'")}, '${inputType}')" style="cursor:pointer" title="Нажмите для редактирования">
-            <div class="od-field-label">${label}</div>
+        <div class="od-field-row" role="button" tabindex="0" data-value="${this._escAttr(value || '')}"
+            onclick="OrderDetail.startEdit('${field}', this.dataset.value, '${inputType}')"
+            onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();OrderDetail.startEdit('${field}', this.dataset.value, '${inputType}');}"
+            title="Нажмите для редактирования">
+            <div class="od-field-label">${this._esc(label)}</div>
             <div class="od-field-value" id="od-val-${field}">${displayValue}</div>
         </div>`;
     },
 
     _fieldRowDateRange(fieldStart, fieldEnd, label, valueStart, valueEnd) {
-        const fmtStart = valueStart ? App.formatDate(valueStart) : '—';
-        const fmtEnd = valueEnd ? App.formatDate(valueEnd) : '';
-        const display = fmtEnd ? `${fmtStart} → ${fmtEnd}` : fmtStart;
+        const fmtStart = valueStart ? this._esc(App.formatDate(valueStart)) : '—';
+        const fmtEnd = valueEnd ? this._esc(App.formatDate(valueEnd)) : '';
+        const dateButton = (field, value, shown) => `
+                <span class="odc-date-btn" role="button" tabindex="0" id="od-val-${field}" data-value="${this._escAttr(value || '')}"
+                    onclick="OrderDetail.startEditDate('${field}', this.dataset.value)"
+                    onkeydown="if(event.target===this&&event.key==='Enter'){event.preventDefault();OrderDetail.startEditDate('${field}', this.dataset.value);}"
+                    title="Нажмите для изменения">${shown}</span>`;
 
         return `
         <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;">
-                <span id="od-val-${fieldStart}" onclick="OrderDetail.startEditDate('${fieldStart}', '${valueStart || ''}')" style="cursor:pointer" title="Нажмите для изменения">${fmtStart}</span>
-                <span>→</span>
-                <span id="od-val-${fieldEnd}" onclick="OrderDetail.startEditDate('${fieldEnd}', '${valueEnd || ''}')" style="cursor:pointer" title="Нажмите для изменения">${fmtEnd || '<span class=text-muted>—</span>'}</span>
-            </div>
-        </div>`;
-    },
-
-    _fieldRowSelect(field, label, value, options) {
-        const opts = options.map(o =>
-            `<option value="${o.key}" ${o.key === value ? 'selected' : ''}>${o.label}</option>`
-        ).join('');
-
-        return `
-        <div class="od-field-row">
-            <div class="od-field-label">${label}</div>
-            <div class="od-field-value">
-                <select class="od-status-select" onchange="OrderDetail.onSelectChange('${field}', this.value)">
-                    ${opts}
-                </select>
+            <div class="od-field-label">${this._esc(label)}</div>
+            <div class="od-field-value od-field-dates">
+                ${dateButton(fieldStart, valueStart, fmtStart)}
+                <span aria-hidden="true">→</span>
+                ${dateButton(fieldEnd, valueEnd, fmtEnd || '<span class="text-muted">—</span>')}
             </div>
         </div>`;
     },
@@ -2230,13 +2758,8 @@ const OrderDetail = {
     // UTILS
     // ==========================================
 
-    _statusColor(status) {
-        const map = { draft: 'gray', calculated: 'blue', in_production: 'orange', production_printing: 'orange', completed: 'green', cancelled: 'red', deleted: 'red' };
-        return map[status] || 'gray';
-    },
-
     _esc(str) {
-        if (!str) return '';
+        if (!str && str !== 0) return '';
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -2246,7 +2769,7 @@ const OrderDetail = {
     },
 
     _escAttr(str) {
-        if (!str) return '';
+        if (!str && str !== 0) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     },
 };

@@ -656,39 +656,27 @@
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
+        <!-- Карточка заказа без вкладок (docs/specs/2026-10-28-order-card-redesign.md). Блоки рисует
+             js/order-detail.js; раскрывающееся открывается прямо под своей кнопкой. -->
         <div id="page-order-detail" class="page">
-            <div class="page-header">
-                <div class="flex gap-8" style="align-items:center">
-                    <button class="btn btn-outline btn-sm" onclick="App.navigate('orders')">&larr; Назад</button>
-                    <h1 id="od-title" style="margin:0">Заказ</h1>
-                    <span class="badge" id="od-status-badge"></span>
+            <div class="odc">
+                <section class="odc-card odc-top" aria-label="Заказ с первого взгляда">
+                    <div id="od-head" class="odc-head-wrap">
+                        <h1 id="od-title" class="odc-title">Заказ</h1>
+                    </div>
+                    <div id="od-type" class="odc-type" aria-label="Тип заказа и как продаём"></div>
+                    <div id="od-stats" class="odc-tiles"></div>
+                    <div id="od-money" class="odc-money" aria-label="Деньги"></div>
+                    <div id="od-panel" class="odc-panel" hidden></div>
+                    <div id="od-stages" class="odc-stages"></div>
+                </section>
+                <div class="odc-columns">
+                    <section id="od-what" class="odc-card odc-what" aria-label="Что делаем"></section>
+                    <div id="od-progress" class="odc-side"></div>
                 </div>
-                <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="OrderDetail.cloneOrder()">&#10697; Копировать</button>
-                    <button class="btn btn-outline" onclick="OrderDetail.openInCalculator()">&#9998; Калькулятор</button>
-                    <button class="btn btn-primary" onclick="OrderDetail.changeStatus()">Сменить статус</button>
-                </div>
+                <section id="od-more" class="odc-card odc-more" aria-label="Подробности заказа"></section>
+                <span id="od-status-badge" hidden></span>
             </div>
-
-            <div class="stats-grid" id="od-stats"></div>
-
-            <div class="od-tabs">
-                <button class="od-tab-btn active" data-tab="info" onclick="OrderDetail.switchTab('info')">&#128196; Информация</button>
-                <button class="od-tab-btn" data-tab="production" onclick="OrderDetail.switchTab('production')">&#9881; Производство</button>
-                <button class="od-tab-btn" data-tab="files" onclick="OrderDetail.switchTab('files')">&#128193; Файлы</button>
-                <button class="od-tab-btn" data-tab="items" onclick="OrderDetail.switchTab('items')">&#128230; Изделия</button>
-                <button class="od-tab-btn" data-tab="hardware" onclick="OrderDetail.switchTab('hardware')">&#128295; Фурнитура</button>
-                <button class="od-tab-btn" data-tab="tasks" onclick="OrderDetail.switchTab('tasks')">&#9745; Задачи</button>
-                <button class="od-tab-btn" data-tab="china" onclick="OrderDetail.switchTab('china')">&#127464;&#127475; Китай</button>
-            </div>
-
-            <div id="od-tab-info" class="od-tab-content"></div>
-            <div id="od-tab-production" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-files" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-items" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-hardware" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-tasks" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-china" class="od-tab-content" style="display:none"></div>
         </div>
 
         <!-- ========== PRODUCTION PLAN ========== -->
