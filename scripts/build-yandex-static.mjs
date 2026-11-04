@@ -11,7 +11,6 @@ import {
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, 'deploy/static-yandex');
 const BUCKET = process.env.RO_YANDEX_BUCKET || 'calc.recycleobject.ru';
-const STORAGE_ORIGIN = process.env.RO_YANDEX_STORAGE_ORIGIN || `https://storage.yandexcloud.net/${BUCKET}`;
 
 const MIRROR_ORDER_STATUSES = new Set([
   'draft',
@@ -59,14 +58,6 @@ function copyRecursive(src, dest) {
   }
   ensureDir(path.dirname(dest));
   fs.copyFileSync(src, dest);
-}
-
-function rewriteIndexForObjectStorage(source) {
-  return source.replace(/\b(src|href)="(?!https?:|\/\/|#|mailto:|tel:|data:)([^"]+)"/g, (match, attr, rawUrl) => {
-    const cleanUrl = rawUrl.replace(/^\.\//, '').replace(/^\//, '');
-    if (!/^(assets|css|data|img|js|vendor)\//.test(cleanUrl)) return match;
-    return `${attr}="${STORAGE_ORIGIN}/${cleanUrl}"`;
-  });
 }
 
 // Keep deterministic paging for large JSON rows such as order_items.
@@ -404,8 +395,9 @@ async function main() {
     copyRecursive(path.join(ROOT, relPath), path.join(OUT_DIR, relPath));
   }
 
-  const indexSource = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  fs.writeFileSync(path.join(OUT_DIR, 'index.html'), rewriteIndexForObjectStorage(indexSource));
+  // The server serves the whole release from one origin: index.html keeps its
+  // relative asset URLs, so the page and its scripts always come from the same release.
+  fs.copyFileSync(path.join(ROOT, 'index.html'), path.join(OUT_DIR, 'index.html'));
 
   const bootstrap = await buildBootstrapSnapshot();
   assertHealthyBootstrap(bootstrap);

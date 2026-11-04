@@ -581,6 +581,8 @@ async function main() {
             'cords',
             'carabiners',
             '_totalSellPerUnit',
+            // разметка тиража нужна доске и карточке для честной выручки
+            'tirage_allocation',
         ].forEach(field => {
             assert.match(columns, new RegExp(`${field}:item_data->${field}`), `summary must project ${field}`);
         });
@@ -2769,7 +2771,8 @@ async function main() {
         const savedOrderId = await vm.runInContext(`
             saveOrder(
                 { id: ${orderId}, order_name: 'cleanup save', status: 'draft' },
-                [{ item_number: 1, item_type: 'product', product_name: 'Новая версия позиции', quantity: 100 }]
+                [{ item_number: 1, item_type: 'product', product_name: 'Новая версия позиции', quantity: 100 }],
+                { knownItemIds: [${currentItemId}, ${staleItemId}] }
             )
         `, context);
 

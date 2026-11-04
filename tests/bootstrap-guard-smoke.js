@@ -34,17 +34,16 @@ for (const [key, payload] of Object.entries(shards)) {
 }
 
 const yandexSync = fs.readFileSync(path.join(process.cwd(), '.github/workflows/yandex-static-sync.yml'), 'utf8');
-assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deployed without immutable one-year cache');
 assert.match(
   yandexSync,
-  /RO_YANDEX_BUCKET:\s*calc\.recycleobject\.ru/,
-  'the guarded snapshot must build once for the canonical calculator bucket',
+  /RO_CALC_HOST:\s*calc\.recycleobject\.ru/,
+  'the guarded snapshot must build once for the canonical calculator host',
 );
 assert.doesNotMatch(yandexSync, /matrix:/, 'the production snapshot must not be built once per mirror');
 assert.match(
   yandexSync,
   /concurrency:[\s\S]*cancel-in-progress:\s*false/,
-  'a newer sync must queue instead of cancelling an in-progress non-atomic bucket upload',
+  'a newer sync must queue instead of cancelling an in-progress upload',
 );
 assert.match(
   yandexSync,

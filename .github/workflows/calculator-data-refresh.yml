@@ -9,15 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: calculator-object-storage-write
+  group: calculator-static-write
   cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
-  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
-  RO_YANDEX_BUCKET: calc.recycleobject.ru
-  UPLOAD_PARALLELISM: 12
+  RO_CALC_HOST: calc.recycleobject.ru
+  RO_STATIC_ROOT: /home/robot/srv/static
 
 jobs:
   refresh:
@@ -53,59 +51,45 @@ jobs:
             sleep "$delay"
           done
 
-      - name: Install Yandex Cloud CLI
+      - name: Configure SSH to the server
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
         run: |
           set -euo pipefail
-          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
-          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/calc_vm"
+          chmod 600 "$HOME/.ssh/calc_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
 
+      # Only data/ and floor/ of the live release change; rsync writes each
+      # file to a temp name and renames it, so hard links shared with older
+      # releases are never modified in place.
       - name: Upload data and production floor only
         env:
-          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
         run: |
           set -euo pipefail
-          test -n "${YC_OAUTH_TOKEN:-}"
-          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
-          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
-          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
-
-          upload_data_file() {
-            local file="$1"
-            local rel="${file#deploy/static-yandex/}"
-            local content_type="application/octet-stream"
-            local cache_control="public, max-age=31536000, immutable"
-            case "$file" in
-              *.html)
-                content_type="text/html; charset=utf-8"
-                cache_control="no-cache, no-store, must-revalidate"
-                ;;
-              *.css) content_type="text/css; charset=utf-8" ;;
-              *.js) content_type="application/javascript; charset=utf-8" ;;
-              *.json)
-                content_type="application/json; charset=utf-8"
-                cache_control="no-cache, no-store, must-revalidate"
-                ;;
-              *.png) content_type="image/png" ;;
-              *.jpg|*.jpeg) content_type="image/jpeg" ;;
-              *.svg) content_type="image/svg+xml" ;;
-              *.webp) content_type="image/webp" ;;
-            esac
-            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type" --cache-control "$cache_control"
-          }
-          export -f upload_data_file
-
-          find deploy/static-yandex/data deploy/static-yandex/floor -type f -print0 \
-            | xargs -0 -r -n 1 -P "$UPLOAD_PARALLELISM" bash -c 'upload_data_file "$1"' _
-          yc config unset token >/dev/null
+          ssh_cmd="ssh -i $HOME/.ssh/calc_vm -o BatchMode=yes"
+          target="$YANDEX_VM_USER@$YANDEX_VM_HOST"
+          live="$($ssh_cmd "$target" "readlink -f $RO_STATIC_ROOT/calc")"
+          test -n "$live"
+          for dir in data floor; do
+            rsync -a -e "$ssh_cmd" "deploy/static-yandex/$dir/" "$target:$live/$dir/"
+          done
 
       - name: Verify refreshed snapshot
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
         run: |
           set -euo pipefail
           expected="$(node -e 'console.log(require("./deploy/static-yandex/data/bootstrap.json").generated_at || "")')"
           for attempt in 1 2 3 4; do
             actual="$(
               curl -fsSL --max-time 20 \
-                "https://${RO_YANDEX_BUCKET}/data/bootstrap.json?cb=${GITHUB_RUN_ID}-${attempt}" \
+                --resolve "${RO_CALC_HOST}:443:${YANDEX_VM_HOST}" \
+                "https://${RO_CALC_HOST}/data/bootstrap.json?cb=${GITHUB_RUN_ID}-${attempt}" \
                 | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).generated_at||"")}catch{console.log("")}})'
             )" || actual=""
             if [ -n "$expected" ] && [ "$actual" = "$expected" ]; then

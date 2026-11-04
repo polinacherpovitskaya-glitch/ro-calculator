@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=432">
+  <link rel="stylesheet" href="css/style.css?v=433">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v480';
+        const CURRENT_HTML_VERSION = 'v486';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v480</span></span>
+            <span>Калькулятор <span id="app-version">v486</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -312,9 +312,10 @@
                         <label>Тип работ</label>
                         <select id="calc-production-purpose" onchange="Calculator.setProductionPurpose(this.value)">
                             <option value="commercial">Клиентский заказ</option>
+                            <option value="stock_sample">Сток / внутренний образец</option>
+                            <option value="marketing">Маркетинг: подарки, промо, раздача</option>
                             <option value="leftover_assembly">Сборка из неучтённых остатков</option>
                             <option value="rework">Переделка брака</option>
-                            <option value="stock_sample">Сток / внутренний образец</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -557,10 +558,12 @@
 
             <!-- Summary footer -->
             <div class="summary-footer" id="calc-summary-footer" style="display:none">
+                <div style="display:flex;flex-direction:column;gap:6px;">
                 <div class="summary-stats">
                     <div class="summary-stat-item">
                         <div class="label" id="sum-revenue-label">Выручка без НДС</div>
                         <div class="value" id="sum-revenue">0 &#8381;</div>
+                        <div id="sum-revenue-note" style="display:none;font-size:14px;line-height:1.3;color:var(--text-secondary);margin:2px auto 0;max-width:150px;"></div>
                     </div>
                     <div class="summary-stat-item">
                         <div class="label" id="sum-earned-label">Заработок</div>
@@ -574,6 +577,8 @@
                         <div class="label">Часы</div>
                         <div class="value" id="sum-hours">0 ч</div>
                     </div>
+                </div>
+                <div id="sum-free-note" style="display:none;font-size:14px;color:var(--text-secondary);"></div>
                 </div>
                 <div id="calc-discount-panel" style="display:flex;align-items:center;gap:8px;">
                     <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap">Скидка:</span>
@@ -651,39 +656,26 @@
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
+        <!-- Карточка заказа без вкладок (docs/specs/2026-10-28-order-card-redesign.md). Блоки рисует
+             js/order-detail.js; раскрывающееся открывается прямо под своей кнопкой. -->
         <div id="page-order-detail" class="page">
-            <div class="page-header">
-                <div class="flex gap-8" style="align-items:center">
-                    <button class="btn btn-outline btn-sm" onclick="App.navigate('orders')">&larr; Назад</button>
-                    <h1 id="od-title" style="margin:0">Заказ</h1>
-                    <span class="badge" id="od-status-badge"></span>
+            <div class="odc">
+                <section class="odc-card odc-top" aria-label="Заказ с первого взгляда">
+                    <div id="od-head" class="odc-head-wrap">
+                        <h1 id="od-title" class="odc-title">Заказ</h1>
+                    </div>
+                    <div id="od-type" class="odc-type" aria-label="Тип заказа и как продаём"></div>
+                    <div id="od-stats" class="odc-tiles"></div>
+                    <div id="od-money" class="odc-money" aria-label="Деньги"></div>
+                    <div id="od-panel" class="odc-panel" hidden></div>
+                    <div id="od-stages" class="odc-stages"></div>
+                </section>
+                <div class="odc-columns">
+                    <section id="od-what" class="odc-card odc-what" aria-label="Что делаем"></section>
+                    <div id="od-progress" class="odc-side"></div>
                 </div>
-                <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="OrderDetail.cloneOrder()">&#10697; Копировать</button>
-                    <button class="btn btn-outline" onclick="OrderDetail.openInCalculator()">&#9998; Калькулятор</button>
-                    <button class="btn btn-primary" onclick="OrderDetail.changeStatus()">Сменить статус</button>
-                </div>
+                <section id="od-more" class="odc-card odc-more" aria-label="Подробности заказа"></section>
             </div>
-
-            <div class="stats-grid" id="od-stats"></div>
-
-            <div class="od-tabs">
-                <button class="od-tab-btn active" data-tab="info" onclick="OrderDetail.switchTab('info')">&#128196; Информация</button>
-                <button class="od-tab-btn" data-tab="production" onclick="OrderDetail.switchTab('production')">&#9881; Производство</button>
-                <button class="od-tab-btn" data-tab="files" onclick="OrderDetail.switchTab('files')">&#128193; Файлы</button>
-                <button class="od-tab-btn" data-tab="items" onclick="OrderDetail.switchTab('items')">&#128230; Изделия</button>
-                <button class="od-tab-btn" data-tab="hardware" onclick="OrderDetail.switchTab('hardware')">&#128295; Фурнитура</button>
-                <button class="od-tab-btn" data-tab="tasks" onclick="OrderDetail.switchTab('tasks')">&#9745; Задачи</button>
-                <button class="od-tab-btn" data-tab="china" onclick="OrderDetail.switchTab('china')">&#127464;&#127475; Китай</button>
-            </div>
-
-            <div id="od-tab-info" class="od-tab-content"></div>
-            <div id="od-tab-production" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-files" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-items" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-hardware" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-tasks" class="od-tab-content" style="display:none"></div>
-            <div id="od-tab-china" class="od-tab-content" style="display:none"></div>
         </div>
 
         <!-- ========== PRODUCTION PLAN ========== -->
@@ -3641,19 +3633,19 @@
 </button>
 
 <!-- Scripts -->
-<script src="js/platform-client.js?v=441"></script>
+<script src="js/platform-client.js?v=481"></script>
 <script src="vendor/chart-4.5.1.js?v=1"></script>
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=478"></script>
+<script src="js/supabase.js?v=482"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=480"></script>
-<script src="js/app.js?v=480"></script>
+<script src="js/calculator.js?v=486"></script>
+<script src="js/app.js?v=486"></script>
 <script src="js/tpa.js?v=4"></script>
-<script src="js/order-detail.js?v=439"></script>
-<script src="js/orders.js?v=439"></script>
-<script src="js/production_plan.js?v=76"></script>
+<script src="js/order-detail.js?v=485"></script>
+<script src="js/orders.js?v=483"></script>
+<script src="js/production_plan.js?v=482"></script>
 <script src="js/analytics.js?v=46g"></script>
     <script src="js/molds.js?v=477"></script>
 <script src="js/colors.js?v=46g"></script>
@@ -3667,14 +3659,14 @@
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=27"></script>
 <script src="js/indirect_costs.js?v=9"></script>
-<script src="js/factual.js?v=96"></script>
-<script src="js/production_load.js?v=408"></script>
-<script src="js/bonuses.js?v=23"></script>
+<script src="js/factual.js?v=485"></script>
+<script src="js/production_load.js?v=409"></script>
+<script src="js/bonuses.js?v=24"></script>
 <script src="js/china.js?v=165"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=283"></script>
-<script src="js/warehouse.js?v=446"></script>
+<script src="js/warehouse.js?v=484"></script>
 <script src="js/monitoring.js?v=2"></script>
 <script src="js/settings.js?v=428"></script>
 <script src="js/pendant.js?v=17"></script>

@@ -93,3 +93,30 @@ test('presignedGetUrl can use mold-photos endpoint when bucket is regional', asy
     }
   }
 });
+
+test('presignedGetUrl maps selectel references into S3_BUCKET in single-bucket mode', async () => {
+  const names = ['S3_MOCK_DIR', 'S3_ENDPOINT', 'S3_REGION', 'S3_BUCKET', 'S3_SINGLE_BUCKET', 'S3_ACCESS_KEY', 'S3_SECRET_KEY'];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+
+  try {
+    delete process.env.S3_MOCK_DIR;
+    process.env.S3_ENDPOINT = 'https://s3.recycleobject.ru';
+    process.env.S3_REGION = 'garage';
+    process.env.S3_BUCKET = 'ro-platform-media';
+    process.env.S3_SINGLE_BUCKET = '1';
+    process.env.S3_ACCESS_KEY = 'test-access-key';
+    process.env.S3_SECRET_KEY = 'test-secret-key';
+
+    const url = await presignedGetUrl('selectel://ro-ops-mold-photos/mold-photos/a.png');
+
+    assert.match(url, /^https:\/\/s3\.recycleobject\.ru\/ro-platform-media\/mold-photos\/a\.png\?/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});

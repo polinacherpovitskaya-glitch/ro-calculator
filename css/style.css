@@ -2841,16 +2841,425 @@ table .text-center { text-align: center; }
    ORDER DETAIL PAGE
    ============================================= */
 
-/* Tab bar */
-.od-tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:16px; overflow-x:auto; }
-.od-tab-btn {
-    padding:10px 20px; font-size:13px; font-weight:600; cursor:pointer;
-    color:var(--text-muted); border:none; background:none;
-    border-bottom:2px solid transparent; margin-bottom:-2px; white-space:nowrap;
-    transition: color .15s, border-color .15s;
+/* Карточка заказа без вкладок (js/order-detail.js, классы odc-*). Текст 16 px, подписи 14 px,
+   кнопки и строки от 44 px; на телефоне всё в столбик. */
+:root {
+    --odc-text-soft: #555555;
+    --odc-line: #eeeeee;
+    --odc-tile-border: #e5e5e5;
+    --odc-green-text: #15803d;
+    --odc-red-text: #b91c1c;
+    --odc-yellow-text: #854d0e;
+    --odc-accent-text: #1d4ed8;
+    --odc-accent-border: #bfdbfe;
+    --odc-accent-bg: #f8fbff;
+    /* Доли тиража: коммерция, сток, партнёру, маркетинг, переделка, B2C */
+    --odc-part-commercial: #0f766e;
+    --odc-part-stock: #2563eb;
+    --odc-part-partner: #9333ea;
+    --odc-part-marketing: #db2777;
+    --odc-part-rework: #ea580c;
+    --odc-part-b2c: #0e7490;
 }
-.od-tab-btn:hover { color:var(--text); }
-.od-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+.odc {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text);
+}
+.odc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+.odc-top { padding: 22px 28px 26px; gap: 20px; }
+.odc-h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.3; }
+.odc-h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.35; }
+.odc-muted, .odc-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-panel-note { font-size: 15px; color: var(--odc-text-soft); }
+.odc-tone-green { color: var(--odc-green-text); }
+.odc-tone-red { color: var(--odc-red-text); }
+.odc-tone-yellow { color: var(--odc-yellow-text); }
+.odc-tone-gray, .odc-tone-muted { color: var(--odc-text-soft); }
+
+/* Кнопки */
+.odc-btn {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid #cccccc;
+    background: var(--bg-card);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+}
+.odc-btn:hover { border-color: var(--accent); }
+.odc-btn:disabled { opacity: .6; cursor: default; }
+.odc-btn:focus-visible, .odc-row-btn:focus-visible, .odc-tile-button:focus-visible, .odc-back:focus-visible,
+.odc-menu-item:focus-visible, .od-field-row:focus-visible, .odc-date-btn:focus-visible {
+    outline: 3px solid var(--accent-light);
+    outline-offset: 2px;
+}
+.odc-btn-icon { min-width: 44px; padding: 0; }
+.odc-btn-primary {
+    min-height: 48px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+}
+.odc-btn-primary:hover { background: #1d4ed8; }
+
+/* Шапка: «Все заказы», «Калькулятор», «⋯» */
+.odc-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.odc-toolbar-actions { display: flex; gap: 10px; }
+.odc-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: #444444;
+    cursor: pointer;
+}
+.odc-back:hover { color: var(--accent); }
+.odc-menu-wrap { position: relative; }
+.odc-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 60;
+    width: max-content;
+    min-width: 260px;
+    max-width: min(360px, calc(100vw - 32px));
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+}
+.odc-menu-title { padding: 10px 12px 6px; font-size: 14px; font-weight: 600; color: var(--odc-text-soft); }
+.odc-menu-item {
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+button.odc-menu-item:hover { background: var(--bg); }
+.odc-menu-current { color: var(--odc-text-soft); cursor: default; }
+.odc-menu-danger { color: var(--odc-red-text); }
+.odc-menu-back { color: var(--odc-text-soft); }
+.odc-head-wrap { display: flex; flex-direction: column; gap: 20px; }
+.odc-head { display: flex; flex-wrap: wrap; gap: 18px 22px; align-items: flex-start; }
+.odc-head-main { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.odc-head-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.odc-title { margin: 0; font-size: 34px; line-height: 1.15; font-weight: 700; word-break: break-word; }
+
+/* Лицо, вердикт, причины */
+.odc-face { flex: none; }
+.odc-face-green .odc-face-bg { fill: var(--green-light); stroke: var(--green); }
+.odc-face-green .odc-face-ink { fill: var(--odc-green-text); }
+.odc-face-green .odc-face-line { stroke: var(--odc-green-text); }
+.odc-face-yellow .odc-face-bg { fill: var(--yellow-light); stroke: var(--yellow); }
+.odc-face-yellow .odc-face-ink { fill: var(--odc-yellow-text); }
+.odc-face-yellow .odc-face-line { stroke: var(--odc-yellow-text); }
+.odc-face-red .odc-face-bg { fill: var(--red-light); stroke: var(--red); }
+.odc-face-red .odc-face-ink { fill: var(--odc-red-text); }
+.odc-face-red .odc-face-line { stroke: var(--odc-red-text); }
+.odc-face-gray .odc-face-bg { fill: #f0f0f0; stroke: #a3a3a3; }
+.odc-face-gray .odc-face-ink { fill: #737373; }
+.odc-face-gray .odc-face-line { stroke: #737373; }
+.odc-verdict { font-size: 20px; font-weight: 700; }
+.odc-head-meta { font-size: 16px; color: var(--odc-text-soft); }
+.odc-reasons { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; font-size: 16px; }
+
+/* Тип заказа и как продаём */
+.odc-type { display: flex; flex-direction: column; gap: 8px; }
+.odc-type-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--odc-line); }
+.odc-type-seg { display: block; height: 100%; }
+.odc-type-labels { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 15px; }
+.odc-part-commercial { background: var(--odc-part-commercial); }
+.odc-part-stock { background: var(--odc-part-stock); }
+.odc-part-partner { background: var(--odc-part-partner); }
+.odc-part-marketing { background: var(--odc-part-marketing); }
+.odc-part-rework { background: var(--odc-part-rework); }
+.odc-part-b2c { background: var(--odc-part-b2c); }
+.odc-part-text-commercial { color: var(--odc-part-commercial); }
+.odc-part-text-stock { color: var(--odc-accent-text); }
+.odc-part-text-partner { color: #7e22ce; }
+.odc-part-text-marketing { color: #be185d; }
+.odc-part-text-rework { color: #c2410c; }
+.odc-part-text-b2c { color: var(--odc-part-b2c); }
+
+/* Плитки и панель под ними */
+.odc-tiles { display: flex; flex-wrap: wrap; gap: 12px; }
+.odc-tile {
+    flex: 1 1 170px;
+    min-width: 0;
+    border: 1px solid var(--odc-tile-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+}
+.odc-tile-button { cursor: pointer; border-color: var(--odc-accent-border); background: var(--odc-accent-bg); min-height: 44px; }
+.odc-tile-button:hover { border-color: var(--accent); }
+.odc-tile-button[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.odc-tile-label { font-size: 14px; color: var(--odc-text-soft); }
+.odc-tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; word-break: break-word; }
+.odc-tile-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-tile-more { font-size: 14px; color: var(--odc-accent-text); display: inline-flex; align-items: center; gap: 2px; margin-top: 2px; }
+.odc-chevron { flex: none; transition: transform .15s ease; }
+[aria-expanded="true"] > .odc-chevron, [aria-expanded="true"] .odc-tile-more .odc-chevron { transform: rotate(180deg); }
+.odc-panel { border: 1px solid var(--odc-accent-border); border-radius: 10px; padding: 16px 20px; min-width: 0; }
+
+/* Деньги: строка под плитками */
+.odc-money { display: flex; flex-wrap: wrap; border: 1px solid var(--odc-tile-border); border-radius: 10px; overflow: hidden; }
+.odc-money-cell {
+    flex: 1 1 210px;
+    min-width: 0;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-right: 1px solid var(--odc-line);
+}
+.odc-money-cell:last-child { border-right: 0; }
+.odc-money-label, .odc-money-caption { font-size: 14px; color: var(--odc-text-soft); }
+.odc-money-value { font-size: 22px; font-weight: 700; line-height: 1.25; }
+.odc-money-panel { display: flex; flex-direction: column; gap: 12px; }
+.odc-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: 16px; }
+.odc-lines li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--odc-line); }
+.odc-lines li:last-child { border-bottom: 0; }
+.odc-lines-value { white-space: nowrap; font-weight: 600; }
+.odc-lines-total { font-weight: 700; }
+.odc-panel[hidden], .odc-money:empty, .odc-type:empty { display: none; }
+.odc-field { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.odc-field-label { font-size: 15px; color: var(--odc-text-soft); }
+.odc-select, .odc-input {
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid #cccccc;
+    border-radius: 8px;
+    background: var(--bg-card);
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+}
+.odc-select:focus, .odc-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* Этапы */
+.odc-stages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--odc-line);
+}
+.odc-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 15px; }
+.odc-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid #d4d4d4;
+    color: var(--odc-text-soft);
+}
+.odc-step-done { background: var(--green-light); border-color: var(--green-light); color: #166534; font-weight: 600; }
+.odc-step-current { background: var(--accent); border-color: var(--accent); color: #ffffff; font-weight: 700; }
+.odc-step-current.odc-step-final { background: var(--odc-green-text); border-color: var(--odc-green-text); }
+.odc-stages-note { font-size: 15px; color: var(--odc-text-soft); }
+
+/* Две колонки: «Что делаем» и «Как идёт» */
+.odc-columns { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.odc-what { flex: 999 1 520px; }
+.odc-side { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.odc-brief {
+    width: 100%;
+    min-height: 120px;
+    padding: 14px 16px;
+    border: 1px solid var(--odc-tile-border);
+    border-radius: 10px;
+    background: #fafafa;
+    font-family: inherit;
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--text);
+    resize: vertical;
+}
+.odc-brief:placeholder-shown { border: 2px dashed #d4d4d4; }
+.odc-brief:focus { outline: none; border-color: var(--accent); background: var(--bg-card); box-shadow: 0 0 0 3px var(--accent-light); }
+.odc-what-items { display: flex; flex-direction: column; gap: 12px; }
+.odc-product { padding: 14px 16px; border: 1px solid var(--odc-tile-border); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; }
+.odc-product-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.odc-product-name { font-size: 18px; font-weight: 700; }
+.odc-product-meta { color: var(--odc-text-soft); }
+.odc-product-colors { font-size: 15px; }
+.odc-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.odc-thumb-btn { padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); cursor: zoom-in; overflow: hidden; line-height: 0; }
+.odc-thumb { width: 72px; height: 72px; object-fit: cover; display: block; }
+.odc-thumb-btn.is-big { cursor: zoom-out; flex-basis: 100%; max-width: 480px; }
+.odc-thumb-btn.is-big .odc-thumb { width: 100%; height: auto; }
+.odc-supply { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.odc-supply li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px 12px;
+    min-height: 44px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--odc-line);
+}
+.odc-supply li:last-child { border-bottom: 0; }
+.odc-chip { font-size: 14px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+.odc-chip-green { color: #166534; background: var(--green-light); }
+.odc-chip-blue { color: #1e40af; background: var(--accent-light); }
+.odc-chip-red { color: #991b1b; background: var(--red-light); }
+.odc-chip-gray { color: var(--odc-text-soft); background: none; font-weight: 400; padding: 3px 0; }
+
+/* «Маржа: план → сейчас» */
+.odc-margin-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.odc-margin-big { font-size: 24px; font-weight: 700; }
+.odc-margin-arrow { font-size: 20px; color: var(--odc-text-soft); }
+.odc-margin-delta { font-size: 15px; font-weight: 600; }
+
+/* «Как идёт»: полоса сроков и часы по этапам */
+.odc-timeline { display: flex; flex-direction: column; gap: 6px; }
+.odc-timeline-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--odc-line); }
+.odc-timeline-seg { display: block; height: 100%; }
+.odc-seg-past { background: #93c5fd; }
+.odc-seg-done { background: var(--green); }
+.odc-seg-late { background: var(--red); }
+.odc-timeline-labels { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; color: var(--odc-text-soft); }
+.odc-timeline-labels .odc-tone-red, .odc-timeline-labels .odc-tone-green, .odc-tone-strong { font-weight: 700; }
+.odc-tone-strong { color: var(--text); }
+.odc-hours { display: flex; flex-direction: column; gap: 14px; }
+.odc-hours-row { display: flex; flex-direction: column; gap: 4px; }
+.odc-hours-head { display: flex; justify-content: space-between; gap: 8px; }
+.odc-hours-name { font-weight: 600; }
+.odc-strong { font-weight: 700; }
+.odc-bar { height: 8px; border-radius: 999px; background: var(--odc-line); overflow: hidden; }
+.odc-bar-fill { display: block; height: 100%; background: var(--accent); }
+.odc-bar-red { background: var(--red); }
+.odc-bar-yellow { background: var(--yellow); }
+.odc-tirage { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--odc-line); }
+.odc-tirage-rows { display: grid; gap: 14px; }
+.odc-tirage-name { font-size: 16px; font-weight: 600; }
+.odc-tirage-split { font-size: 15px; margin-top: 2px; }
+.odc-tirage-stock { border-top: 1px solid var(--odc-line); padding-top: 12px; }
+.odc-tirage-action { margin-top: 10px; }
+
+/* «Как идёт»: подблоки, которые перерисовываются, пока пишут в «Графике сдачи» */
+.odc-slot { display: contents; }
+.odc-progress-flow { display: flex; flex-direction: column; gap: 14px; }
+
+/* Разделы, оставшиеся от вкладок (состав подробно, задачи, Китай, фурнитура): таблицы и кнопки
+   внутри карточки — не мельче 15 px, кнопки и строки задач — не ниже 44 px */
+.odc table th, .odc table td { font-size: 15px; }
+.odc table th { text-transform: none; letter-spacing: 0; }
+.odc .btn-sm { font-size: 15px; min-height: 44px; padding: 0 14px; }
+.odc .badge { font-size: 14px; padding: 2px 8px; border-radius: 12px; }
+.odc .odc-more-body tbody tr { height: 48px; }
+.odc .od-project-card { min-height: 44px; }
+
+/* Строки, которые раскрываются под собой */
+.odc-row-btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.odc-row-title { font-weight: 600; }
+.odc-row-sum { margin-left: auto; font-size: 15px; color: var(--odc-text-soft); text-align: right; }
+.odc-more { padding-top: 8px; padding-bottom: 8px; gap: 0; }
+.odc-more-row + .odc-more-row { border-top: 1px solid var(--odc-line); }
+.odc-more-btn { min-height: 56px; font-size: 17px; }
+.odc-more-body { padding: 4px 0 18px; }
+.odc-more-body[hidden], #od-delivery-slot[hidden] { display: none; }
+.odc-fields { border: 1px solid var(--odc-tile-border); border-radius: 10px; padding: 14px 0 4px; min-width: 0; }
+.odc-fields .odc-h3 { padding: 0 16px 6px; }
+
+/* «График сдачи» */
+.odc-delivery { border-top: 1px solid var(--odc-line); }
+.odc-delivery-card { display: flex; flex-direction: column; gap: 12px; padding-bottom: 6px; }
+.odc-delivery-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.odc-delivery-lines { display: grid; gap: 8px; }
+.odc-delivery-line { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(110px, .7fr) auto; gap: 8px; align-items: center; }
+.odc-delivery-actions { display: flex; justify-content: flex-end; }
+
+/* Фурнитура в панели «Склад» */
+.odc-hw-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.odc-hw-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.odc-hw-totals { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 15px; margin-bottom: 12px; }
+.odc-hw-table td, .odc-hw-table th { font-size: 15px; }
+.odc-input-qty { width: 110px; text-align: right; }
+.odc-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 15px; }
+.odc-check input { width: 20px; height: 20px; }
+
+@media (max-width: 640px) {
+    .odc-top, .odc-card { padding: 18px 16px; }
+    .odc-title { font-size: 26px; }
+    .odc-face { width: 56px; height: 56px; }
+    .odc-tile { flex-basis: 100%; }
+    .odc-money-cell { flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--odc-line); }
+    .odc-money-cell:last-child { border-bottom: 0; }
+    .odc-stages > .odc-btn-primary { width: 100%; }
+    .odc-delivery-line { grid-template-columns: 1fr 1fr auto; }
+    .odc-menu { right: -8px; }
+}
 
 /* Two-column detail grid */
 .od-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -2858,21 +3267,24 @@ table .text-center { text-align: center; }
 
 /* Field row */
 .od-field-row {
-    display:flex; justify-content:space-between; align-items:center;
-    padding:10px 16px; border-bottom:1px solid var(--border);
-    transition: background .1s;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    min-height:48px; padding:10px 16px; border-bottom:1px solid var(--border);
+    transition: background .1s; cursor:pointer;
 }
 .od-field-row:hover { background:var(--bg); }
 .od-field-row:last-child { border-bottom:none; }
-.od-field-label { font-size:12px; font-weight:600; color:var(--text-muted); min-width:130px; flex-shrink:0; }
-.od-field-value { font-size:14px; flex:1; text-align:right; word-break:break-word; }
+.od-field-label { font-size:14px; font-weight:600; color:var(--odc-text-soft); min-width:130px; flex-shrink:0; }
+.od-field-value { font-size:16px; flex:1; text-align:right; word-break:break-word; }
 .od-field-value a { color:var(--accent); text-decoration:none; }
 .od-field-value a:hover { text-decoration:underline; }
+.od-field-dates { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+.odc-date-btn { display:inline-flex; align-items:center; min-height:44px; padding:0 6px; border-radius:6px; cursor:pointer; }
+.odc-date-btn:hover { background:var(--bg); }
 
 /* URL link */
 .od-url-link {
     display:inline-flex; align-items:center; gap:4px;
-    color:var(--accent); text-decoration:none; font-size:13px;
+    color:var(--accent); text-decoration:none; font-size:15px;
     max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .od-url-link:hover { text-decoration:underline; }
@@ -2880,7 +3292,7 @@ table .text-center { text-align: center; }
 /* Status select */
 .od-status-select {
     padding:4px 10px; border:1px solid var(--border); border-radius:6px;
-    font-size:13px; background:var(--card-bg); cursor:pointer;
+    font-size:15px; background:var(--card-bg); cursor:pointer;
 }
 
 /* Item card */
@@ -2895,9 +3307,9 @@ table .text-center { text-align: center; }
 }
 
 .od-hardware-truth-summary {
-    font-size: 11px;
+    font-size: 14px;
     line-height: 1.35;
-    color: var(--text-muted);
+    color: var(--odc-text-soft);
 }
 
 .od-hardware-truth-details {
@@ -2906,10 +3318,13 @@ table .text-center { text-align: center; }
 
 .od-hardware-truth-details summary {
     cursor: pointer;
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--accent);
     list-style: none;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .od-hardware-truth-details summary::-webkit-details-marker {
@@ -2934,7 +3349,7 @@ table .text-center { text-align: center; }
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg);
-    font-size: 11px;
+    font-size: 14px;
     line-height: 1.45;
     color: var(--text);
     display: flex;

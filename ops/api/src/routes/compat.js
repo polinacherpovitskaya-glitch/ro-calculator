@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { readCompatRows as readRows } from '../compat-rows.js';
+import { readCompatRows as readRows, equalityNarrow, narrowForFilters } from '../compat-rows.js';
+import { BLOB_TARGETS, applyBlobPatchToValue } from '../compat-blob-patch.js';
 import { getPool, withTransaction } from '../db.js';
 import { withIdempotency } from '../idempotency.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -260,6 +261,14 @@ export async function executeAtomicOrderSave(client, body) {
   sourceId(incomingOrder, ['id']);
   const incomingItems = normalizeOrderSaveItems(body?.items || [], orderId);
   const allowEmptyItemsDelete = body?.allowEmptyItemsDelete === true;
+  // Only rows the calculator actually held in its form may be removed by
+  // omission. A partially loaded form, a stale local copy or an old bundle
+  // without this list must never wipe rows it did not see.
+  const knownItemIds = new Set(
+    (Array.isArray(body?.knownItemIds) ? body.knownItemIds : [])
+      .filter((id) => id !== null && id !== undefined && id !== '')
+      .map((id) => String(id)),
+  );
 
   // Every legacy save used to lock/write these tables in separate requests.
   // Taking both locks in a stable order makes the order header and item set one
@@ -268,8 +277,14 @@ export async function executeAtomicOrderSave(client, body) {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`compat:${table}`]);
   }
 
-  const orderRows = await readRows(client, 'orders', true);
-  const itemRows = await readRows(client, 'order_items', true);
+  // Read only this order, its items and rows sharing the incoming ids instead
+  // of both tables in full (all items carry base64 photos).
+  const orderRows = await readRows(client, 'orders', true, [{ sourceIds: [String(orderId)] }]);
+  const orderNarrow = equalityNarrow('order_id', orderId);
+  const itemRows = await readRows(client, 'order_items', true, orderNarrow && [
+    ...orderNarrow,
+    { sourceIds: incomingItems.map((item) => sourceId(item, ['id'])) },
+  ]);
   const existingOrder = orderRows.find((row) => equalValue(row?.id, orderId)) || null;
   const nowIso = new Date().toISOString();
   const savedOrder = existingOrder
@@ -314,6 +329,10 @@ export async function executeAtomicOrderSave(client, body) {
     for (const staleItem of existingItemsForOrder) {
       const staleId = sourceId(staleItem, ['id']);
       if (incomingIds.has(staleId)) continue;
+      if (!knownItemIds.has(staleId)) {
+        savedItems.push(staleItem);
+        continue;
+      }
       await client.query(
         `DELETE FROM compat_rows WHERE table_name = 'order_items' AND source_id = $1`,
         [staleId],
@@ -338,6 +357,27 @@ export async function executeAtomicOrderSave(client, body) {
     },
     error: null,
   };
+}
+
+export async function executeBlobPatch(client, body) {
+  const targetName = String(body?.target || '');
+  const target = BLOB_TARGETS[targetName];
+  if (!target) {
+    throw new CompatError(400, 'INVALID_BLOB_TARGET', `Неизвестный блоб: ${targetName || 'не указан'}`);
+  }
+  const patch = body?.patch && typeof body.patch === 'object' && !Array.isArray(body.patch) ? body.patch : {};
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`compat:${target.table}`]);
+  const [currentRow] = await readRows(client, target.table, true, [{ sourceIds: [target.sourceId] }]);
+  const nowIso = new Date().toISOString();
+  const value = applyBlobPatchToValue(targetName, currentRow?.[target.field], patch, nowIso);
+  const nextRow = {
+    ...(currentRow || {}),
+    ...target.keyRow,
+    [target.field]: JSON.stringify(value),
+    updated_at: nowIso,
+  };
+  await writeRow(client, target.table, target.primaryKey, nextRow);
+  return { data: { value, updated_at: nowIso }, error: null };
 }
 
 function conflictColumns(body, primaryKey) {
@@ -379,7 +419,7 @@ async function protectAuthAccountMutation(req, rows, incomingRows) {
 }
 
 async function executeSelect(client, table, body) {
-  let rows = await readRows(client, table);
+  let rows = await readRows(client, table, false, narrowForFilters(body.filters, primaryKeyFor(table)));
   rows = filterRows(rows, body.filters);
   rows = orderRows(rows, body.orders);
   rows = paginateRows(rows, body);
@@ -390,7 +430,12 @@ async function executeSelect(client, table, body) {
 
 async function executeMutation(req, client, table, primaryKey, body) {
   await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`compat:${table}`]);
-  const rows = await readRows(client, table, true);
+  // update/delete only touch filtered rows; inserts need the whole table for
+  // conflict and id checks, settings for the auth-account guard.
+  const narrow = ['update', 'delete'].includes(body.action) && table !== 'settings'
+    ? narrowForFilters(body.filters, primaryKey)
+    : null;
+  const rows = await readRows(client, table, true, narrow);
   const matchedRows = filterRows(rows, body.filters);
   const returning = body.returning === true;
   let changed = [];
@@ -467,6 +512,13 @@ async function executeMutation(req, client, table, primaryKey, body) {
 router.post('/order-save', requireAuth, asyncHandler(async (req, res) => {
   return withIdempotency(req, res, async () => {
     const result = await withTransaction((client) => executeAtomicOrderSave(client, req.body || {}));
+    res.json(result);
+  });
+}));
+
+router.post('/blob-patch', requireAuth, asyncHandler(async (req, res) => {
+  return withIdempotency(req, res, async () => {
+    const result = await withTransaction((client) => executeBlobPatch(client, req.body || {}));
     res.json(result);
   });
 }));

@@ -124,6 +124,13 @@ export async function downloadObject(key, bucket = undefined) {
   };
 }
 
+// Legacy selectel://<bucket>/<key> references were merged into the one
+// S3_BUCKET when media left Selectel (first Yandex, now the server's own
+// storage); S3_SINGLE_BUCKET=1 marks such a setup on any endpoint.
+function usesSingleBucket() {
+  return process.env.S3_SINGLE_BUCKET === '1' || String(process.env.S3_ENDPOINT || '').includes('yandexcloud.net');
+}
+
 function selectelParts(value) {
   const match = String(value).match(/^selectel:\/\/([^/]+)\/(.+)$/);
   return match ? { bucket: match[1], key: match[2] } : null;
@@ -138,7 +145,7 @@ export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) 
     if (mockPath(selectel.key)) {
       return `mock-s3://${selectel.bucket}/${selectel.key}`;
     }
-    if (String(process.env.S3_ENDPOINT || '').includes('yandexcloud.net')) {
+    if (usesSingleBucket()) {
       const consolidatedBucket = getBucket();
       return getSignedUrl(
         getClient(consolidatedBucket),

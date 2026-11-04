@@ -531,35 +531,26 @@ const ProductionPlan = {
         const managerName = App.getCurrentEmployeeName() || 'Неизвестный';
 
         if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
-            const guard = await Orders._ensureStatusTransitionAllowed(orderId, newStatus);
+            const guard = await Orders._ensureStatusTransitionAllowed(orderId, newStatus, { oldStatus });
             if (!guard.ok) return false;
         }
 
-        await updateOrderStatus(orderId, newStatus);
-
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders._syncWarehouseByStatus === 'function') {
-            try {
-                await Orders._syncWarehouseByStatus(orderId, oldStatus, newStatus, row.orderName, managerName);
-            } catch (e) {
-                console.error('ProductionPlan syncWarehouseByStatus failed:', e);
-            }
-        }
-
-        if (typeof Orders !== 'undefined' && Orders && typeof Orders.addChangeRecord === 'function') {
-            try {
-                await Orders.addChangeRecord(orderId, {
-                    field: 'status',
-                    old_value: App.statusLabel(oldStatus),
-                    new_value: App.statusLabel(newStatus),
-                    manager: managerName,
-                });
-            } catch (e) {
-                console.error('ProductionPlan addChangeRecord failed:', e);
-            }
+        try {
+            await updateOrderStatus(orderId, newStatus);
+        } catch (error) {
+            console.error('ProductionPlan updateOrderStatus failed:', error);
+            App.toast('Не удалось сохранить статус. Обновите страницу и попробуйте ещё раз.');
+            return false;
         }
 
         row.status = newStatus;
         App.toast(`Статус: ${App.statusLabel(newStatus)}`);
+
+        // Склад, готовая продукция и история — так же, как при смене статуса на доске и в карточке.
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders._finishStatusTransition === 'function') {
+            await Orders._finishStatusTransition(orderId, { id: orderId, order_name: row.orderName }, oldStatus, newStatus, managerName);
+        }
+
         await this.load();
         return true;
     },

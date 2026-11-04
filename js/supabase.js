@@ -693,6 +693,9 @@ const GLOBAL_SETTINGS_EXCLUDED_KEYS = Object.freeze([
     'ready_goods_stock_json',
     'ready_goods_history_json',
     'ready_goods_sales_records_json',
+    // Saved only through saveProjectHardwareState() as a per-key patch. Loading
+    // it into App.settings let the Settings page write a stale copy back whole.
+    'project_hardware_state_json',
     ...Object.values(WORK_SETTINGS_KEYS),
 ]);
 
@@ -1607,8 +1610,11 @@ async function saveAllSettings(settingsObj) {
     setLocal(LOCAL_KEYS.settings, settingsObj);
 
     if (isSupabaseReady()) {
+        // Dedicated payloads have their own savers; a settings form must never
+        // overwrite them with whatever copy happens to sit in App.settings.
+        const excludedKeys = new Set(GLOBAL_SETTINGS_EXCLUDED_KEYS);
         // Convert ALL values to strings for Supabase TEXT column
-        const rows = Object.entries(settingsObj).map(([key, value]) => ({
+        const rows = Object.entries(settingsObj).filter(([key]) => !excludedKeys.has(key)).map(([key, value]) => ({
             key, value: String(value ?? ''), updated_at: new Date().toISOString()
         }));
         const { error } = await supabaseClient
@@ -2345,7 +2351,13 @@ async function _rewriteOrderItems(orderId, items) {
     return true;
 }
 
-async function saveOrder(order, items = []) {
+async function saveOrder(order, items = [], options = {}) {
+    // knownItemIds = ids of rows the caller really held (a fully loaded
+    // calculator form). Rows missing from `items` are deleted only when their
+    // id is in this list; without it nothing is deleted by omission.
+    const knownItemIds = Array.isArray(options && options.knownItemIds)
+        ? options.knownItemIds.filter(id => id !== null && id !== undefined && id !== '').map(id => String(id))
+        : [];
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
         let orderId = _normalizeOrderId(order.id);
@@ -2402,6 +2414,7 @@ async function saveOrder(order, items = []) {
                     supabaseClient.saveOrderSnapshot({
                         order: orderData,
                         items: itemRows,
+                        knownItemIds,
                         allowEmptyItemsDelete,
                     })
                 ));
@@ -2507,9 +2520,10 @@ async function saveOrder(order, items = []) {
                     throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
                 }
 
+                const knownItemIdSet = new Set(knownItemIds);
                 const staleItemIds = (Array.isArray(existingItems) ? existingItems : [])
                     .map(item => item?.id)
-                    .filter(id => id != null && !savedItemIds.has(String(id)));
+                    .filter(id => id != null && !savedItemIds.has(String(id)) && knownItemIdSet.has(String(id)));
                 for (const staleItemId of staleItemIds) {
                     const { error: deleteStaleItemError } = await _withRemoteTimeout('write', 'delete stale order item', () => supabaseClient
                         .from('order_items')
@@ -2836,7 +2850,10 @@ async function loadOrders(filters = {}) {
             if (error) {
                 console.error('loadOrders error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                if (localFallback.length > 0) return localFallback;
+                if (localFallback.length > 0) {
+                    _setDataLoadMeta('orders', { source: 'local', message: 'remote error' });
+                    return localFallback;
+                }
                 const bootstrapOrders = await refreshOrdersWarmCache().catch(() => null);
                 if (Array.isArray(bootstrapOrders) && bootstrapOrders.length > 0) {
                     return applyOrderFilters(bootstrapOrders);
@@ -2920,9 +2937,17 @@ async function loadOrder(orderId) {
         if (repairDuplicates && order && dedupedItems.length !== orderItems.length) {
             repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
         }
-        return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
+        return order ? {
+            order,
+            items: dedupedItems,
+            repaired_duplicates: repairedDuplicates,
+            source: options.source || 'local',
+        } : null;
     };
-    const loadStaticBootstrapOrder = async () => {
+    // With a live remote, fallback copies are possibly stale: never "repair"
+    // them back to the server (that path deletes and re-inserts every row).
+    const remoteFallback = { repairDuplicates: false };
+    const loadStaticBootstrapOrder = async (options = {}) => {
         if (!_canUseSameOriginBootstrap()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orders', 'orderItems'], { timeoutMs: 15000 });
         let refreshed = false;
@@ -2938,7 +2963,7 @@ async function loadOrder(orderId) {
         if (!refreshed) return null;
         _ordersLastSyncAt = Date.now();
         _setDataLoadMeta('orders', { source: 'bootstrap' });
-        return await loadLocalOrder({ repairDuplicates: true });
+        return await loadLocalOrder({ repairDuplicates: options.repairDuplicates !== false, source: 'bootstrap' });
     };
     const localSnapshot = await loadLocalOrder({ repairDuplicates: false });
     if (isSupabaseReady()) {
@@ -2948,9 +2973,9 @@ async function loadOrder(orderId) {
             if (e1) {
                 console.error('loadOrder error:', e1);
                 if (_isSupabaseAccessError(e1)) _markSupabaseAccessProblem(e1);
-                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
                 if (bootstrapSnapshot) return bootstrapSnapshot;
-                return await loadLocalOrder({ repairDuplicates: true });
+                return await loadLocalOrder(remoteFallback);
             }
 
             // Restore full order data from legacy TEXT or native JSONB.
@@ -2967,9 +2992,9 @@ async function loadOrder(orderId) {
             if (e2) {
                 console.error('loadOrderItems error:', e2);
                 if (_isSupabaseAccessError(e2)) _markSupabaseAccessProblem(e2);
-                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
                 if (bootstrapSnapshot) return bootstrapSnapshot;
-                return await loadLocalOrder({ repairDuplicates: true });
+                return await loadLocalOrder(remoteFallback);
             }
 
             const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
@@ -2985,13 +3010,13 @@ async function loadOrder(orderId) {
 
             _saveOrderLocally(fullOrder, items);
             _clearLocalDatasetDirty(['orders', 'orderItems']);
-            return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
+            return { order: fullOrder, items, repaired_duplicates: repairedDuplicates, source: 'remote' };
         } catch (error) {
             console.error('loadOrder exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            const bootstrapSnapshot = await loadStaticBootstrapOrder();
+            const bootstrapSnapshot = await loadStaticBootstrapOrder(remoteFallback);
             if (bootstrapSnapshot) return bootstrapSnapshot;
-            return await loadLocalOrder({ repairDuplicates: true });
+            return await loadLocalOrder(remoteFallback);
         }
     }
     if (_isStaticYandexMirrorRuntime() && !_isLocalDatasetDirty('orders') && !_isLocalDatasetDirty('orderItems')) {
@@ -3010,6 +3035,8 @@ const ORDER_ITEM_CALC_FIELDS = [
     'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
     'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
     'custom_composite', 'custom_parts',
+    // Разметка тиража строки: без неё доска считала бы выручку со всего тиража.
+    'tirage_allocation',
     'setup_hours_override', 'colors', 'color_count',
     'builtin_assembly_name', 'builtin_assembly_speed',
     'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',
@@ -3054,6 +3081,9 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
     const summaryOnly = options && options.summary === true;
+    // Callers that rewrite shared state from these rows (warehouse reconcile)
+    // need the live answer or nothing — a stale fallback misses new orders.
+    const requireRemote = options && options.requireRemote === true;
 
     const localFallback = (rows = null) => (Array.isArray(rows) ? rows : (getLocal(LOCAL_KEYS.orderItems) || []))
         .filter(item => ids.includes(Number(item.order_id)))
@@ -3093,6 +3123,7 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
             if (error) {
                 console.error('loadOrderItemsByOrderIds error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                if (requireRemote) return null;
                 const bootstrapFallback = await loadBootstrapFallback();
                 return bootstrapFallback || localFallback();
             }
@@ -3103,6 +3134,7 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            if (requireRemote) return null;
             const bootstrapFallback = await loadBootstrapFallback();
             return bootstrapFallback || localFallback();
         }
@@ -6082,6 +6114,10 @@ async function saveProductionPlanState(state) {
 // =============================================
 
 async function loadProjectHardwareState() {
+    return _trackMapBlob('project_hardware_state', await _loadProjectHardwareStateUntracked());
+}
+
+async function _loadProjectHardwareStateUntracked() {
     const normalizeState = (raw) => {
         const parsed = raw && typeof raw === 'object' ? { ...raw } : { checks: {}, actual_qtys: {} };
         if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
@@ -6118,6 +6154,21 @@ async function saveProjectHardwareState(state) {
     if (!payload.checks || typeof payload.checks !== 'object') payload.checks = {};
     if (!payload.actual_qtys || typeof payload.actual_qtys !== 'object') payload.actual_qtys = {};
     setLocal(LOCAL_KEYS.projectHardwareState, payload);
+    if (isSupabaseReady()) {
+        try {
+            const patch = _diffMapBlob('project_hardware_state', payload);
+            if (_isEmptyBlobPatch(patch)) return;
+            const merged = await _sendBlobPatch('project_hardware_state', patch);
+            if (merged !== undefined) {
+                _trackMapBlob('project_hardware_state', payload);
+                if (_isPlainBlobMap(merged)) setLocal(LOCAL_KEYS.projectHardwareState, merged);
+                return;
+            }
+        } catch (e) {
+            console.error('saveProjectHardwareState patch error:', e);
+            return;
+        }
+    }
     await _saveJsonSetting('project_hardware_state_json', payload);
 }
 
@@ -6705,7 +6756,165 @@ async function deleteWarehouseItem(itemId) {
     _invalidateBootstrapCache(['warehouseItems']);
 }
 
+// =============================================
+// SHARED WAREHOUSE BLOBS — save the difference, not the whole blob
+// =============================================
+// Reservations, history and the project-hardware state are single rows that
+// every tab used to overwrite whole from its own, possibly stale, copy. Each
+// load now remembers what it returned; a save sends only records/keys that
+// changed against that load and removes only what this tab saw and dropped.
+
+const _blobRecordInfo = new WeakMap();
+const _blobArrayInfo = new WeakMap();
+const _blobLatestSnapshot = {};
+
+function _blobRecordId(record) {
+    const id = record && record.id;
+    return id === null || id === undefined || id === '' ? null : String(id);
+}
+
+function _trackRecordBlob(name, records) {
+    if (!Array.isArray(records)) return records;
+    const snapshot = { ids: new Set(), jsonById: new Map() };
+    records.forEach(record => {
+        if (!record || typeof record !== 'object') return;
+        const json = JSON.stringify(record);
+        const id = _blobRecordId(record);
+        if (id !== null) {
+            snapshot.ids.add(id);
+            snapshot.jsonById.set(id, json);
+        }
+        _blobRecordInfo.set(record, { snapshot, json });
+    });
+    _blobArrayInfo.set(records, snapshot);
+    _blobLatestSnapshot[name] = snapshot;
+    return records;
+}
+
+function _diffRecordBlob(name, records) {
+    const origins = new Set();
+    const arraySnapshot = _blobArrayInfo.get(records);
+    if (arraySnapshot) origins.add(arraySnapshot);
+    records.forEach(record => {
+        const info = record && typeof record === 'object' ? _blobRecordInfo.get(record) : null;
+        if (info) origins.add(info.snapshot);
+    });
+    if (origins.size === 0 && _blobLatestSnapshot[name]) origins.add(_blobLatestSnapshot[name]);
+
+    const presentIds = new Set();
+    const upserts = [];
+    const prependIds = [];
+    let seenKnown = false;
+    records.forEach(record => {
+        if (!record || typeof record !== 'object') return;
+        const id = _blobRecordId(record);
+        if (id !== null) presentIds.add(id);
+        const json = JSON.stringify(record);
+        const info = _blobRecordInfo.get(record);
+        let baseJson = info ? info.json : undefined;
+        let known = !!info;
+        if (!info && id !== null) {
+            for (const snapshot of origins) {
+                if (snapshot.jsonById.has(id)) {
+                    baseJson = snapshot.jsonById.get(id);
+                    known = true;
+                    break;
+                }
+            }
+        }
+        if (known) seenKnown = true;
+        if (baseJson === json) return;
+        upserts.push(record);
+        // New records written before any loaded one were added to the top.
+        if (!known && !seenKnown && id !== null) prependIds.push(id);
+    });
+    const removeIds = new Set();
+    origins.forEach(snapshot => snapshot.ids.forEach(id => {
+        if (!presentIds.has(id)) removeIds.add(id);
+    }));
+    return { upserts, removeIds: [...removeIds], prependIds };
+}
+
+const _blobMapInfo = new WeakMap();
+const _blobLatestMapSnapshot = {};
+
+function _isPlainBlobMap(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function _trackMapBlob(name, state) {
+    if (!_isPlainBlobMap(state)) return state;
+    const snapshot = { maps: {}, top: {} };
+    Object.entries(state).forEach(([key, value]) => {
+        if (_isPlainBlobMap(value)) {
+            snapshot.maps[key] = {};
+            Object.entries(value).forEach(([entryKey, entryValue]) => {
+                snapshot.maps[key][entryKey] = JSON.stringify(entryValue);
+            });
+        } else {
+            snapshot.top[key] = JSON.stringify(value);
+        }
+    });
+    _blobMapInfo.set(state, snapshot);
+    _blobLatestMapSnapshot[name] = snapshot;
+    return state;
+}
+
+function _diffMapBlob(name, state) {
+    const base = _blobMapInfo.get(state) || _blobLatestMapSnapshot[name] || { maps: {}, top: {} };
+    const set = {};
+    const remove = {};
+    const top = {};
+    Object.entries(state || {}).forEach(([key, value]) => {
+        if (_isPlainBlobMap(value)) {
+            const baseMap = base.maps[key] || {};
+            Object.entries(value).forEach(([entryKey, entryValue]) => {
+                if (baseMap[entryKey] === JSON.stringify(entryValue)) return;
+                (set[key] = set[key] || {})[entryKey] = entryValue;
+            });
+            Object.keys(baseMap).forEach(entryKey => {
+                if (Object.prototype.hasOwnProperty.call(value, entryKey)) return;
+                (remove[key] = remove[key] || []).push(entryKey);
+            });
+        } else if (base.top[key] !== JSON.stringify(value)) {
+            top[key] = value;
+        }
+    });
+    return { set, remove, top };
+}
+
+function _isEmptyBlobPatch(patch) {
+    if (!patch) return true;
+    if (Array.isArray(patch.upserts)) return patch.upserts.length === 0 && patch.removeIds.length === 0;
+    return Object.keys(patch.set).length === 0 && Object.keys(patch.remove).length === 0 && Object.keys(patch.top).length === 0;
+}
+
+// The API cannot take this patch yet: it has no blob-patch route (404/405) or it
+// is the build from before this blob existed (400 INVALID_BLOB_TARGET). The SPA
+// and the API deploy from one merge a few minutes apart, so in that window a
+// save falls back to the legacy write instead of failing.
+function _isBlobPatchNotReadyError(error) {
+    return [404, 405].includes(Number(error.status || error.code))
+        || String(error.code) === 'INVALID_BLOB_TARGET';
+}
+
+// Sends the patch; returns the merged server value, or undefined when the
+// endpoint is not ready for it (caller then falls back to the legacy write).
+async function _sendBlobPatch(target, patch) {
+    if (!supabaseClient || typeof supabaseClient.patchBlob !== 'function') return undefined;
+    const { data, error } = await _withRemoteTimeout('write', `patch ${target}`, () => supabaseClient.patchBlob(target, patch));
+    if (error) {
+        if (_isBlobPatchNotReadyError(error)) return undefined;
+        throw new Error(error.message || error.code || `patch ${target} failed`);
+    }
+    return data ? data.value : null;
+}
+
 async function loadWarehouseReservations() {
+    return _trackRecordBlob('warehouse_reservations', await _loadWarehouseReservationsUntracked());
+}
+
+async function _loadWarehouseReservationsUntracked() {
     if (_isStaticYandexMirrorRuntime()) {
         const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations'], { timeoutMs: 15000 });
         if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
@@ -6756,6 +6965,21 @@ async function loadWarehouseReservations() {
 async function saveWarehouseReservations(reservations) {
     setLocal(LOCAL_KEYS.warehouseReservations, reservations);
     _invalidateBootstrapCache(['warehouseReservations']);
+    if (isSupabaseReady() && Array.isArray(reservations)) {
+        try {
+            const patch = _diffRecordBlob('warehouse_reservations', reservations);
+            if (_isEmptyBlobPatch(patch)) return;
+            const merged = await _sendBlobPatch('warehouse_reservations', patch);
+            if (merged !== undefined) {
+                _trackRecordBlob('warehouse_reservations', reservations);
+                if (Array.isArray(merged)) setLocal(LOCAL_KEYS.warehouseReservations, merged);
+                return;
+            }
+        } catch (e) {
+            console.error('saveWarehouseReservations patch error:', e);
+            return;
+        }
+    }
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
@@ -6773,6 +6997,10 @@ async function saveWarehouseReservations(reservations) {
 }
 
 async function loadWarehouseHistory() {
+    return _trackRecordBlob('warehouse_history', await _loadWarehouseHistoryUntracked());
+}
+
+async function _loadWarehouseHistoryUntracked() {
     // Prefer live Supabase read so recent stock adjustments appear immediately;
     // the bootstrap mirror snapshot is up to ~30 min stale on the Yandex CDN.
     if (isSupabaseReady()) {
@@ -6813,6 +7041,27 @@ async function loadWarehouseHistory() {
 }
 
 async function saveWarehouseHistory(history) {
+    if (isSupabaseReady() && Array.isArray(history)) {
+        try {
+            const patch = _diffRecordBlob('warehouse_history', history);
+            if (!_isEmptyBlobPatch(patch)) {
+                const merged = await _sendBlobPatch('warehouse_history', patch);
+                if (merged !== undefined) {
+                    _trackRecordBlob('warehouse_history', history);
+                    setLocal(LOCAL_KEYS.warehouseHistory, Array.isArray(merged) ? merged : history);
+                    _invalidateBootstrapCache(['warehouseHistory']);
+                    return;
+                }
+            } else {
+                setLocal(LOCAL_KEYS.warehouseHistory, history);
+                return;
+            }
+        } catch (e) {
+            console.error('saveWarehouseHistory patch error:', e);
+            setLocal(LOCAL_KEYS.warehouseHistory, history);
+            return;
+        }
+    }
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
@@ -7617,6 +7866,15 @@ const READY_GOODS_SETTINGS_KEYS = Object.freeze({
     sales_records: 'ready_goods_sales_records_json',
 });
 
+// The same three lists as blob-patch targets (ops/api compat-blob-patch.js).
+// Each shared read remembers what it returned under this name and each save
+// sends only the difference, so two tabs never overwrite each other's rows.
+const READY_GOODS_BLOB_TARGETS = Object.freeze({
+    ready_goods: 'ready_goods_stock',
+    ready_goods_history: 'ready_goods_history',
+    sales_records: 'ready_goods_sales_records',
+});
+
 const READY_GOODS_SOURCE_SHARED = 'shared-settings';
 const READY_GOODS_SOURCE_LOCAL = 'local-cache';
 const READY_GOODS_SOURCE_UNAVAILABLE = 'shared-unavailable';
@@ -7631,6 +7889,31 @@ function _cloneReadyGoodsPayload(value) {
     if (Array.isArray(value)) return value.map(item => (item && typeof item === 'object') ? { ...item } : item);
     if (value && typeof value === 'object') return { ...value };
     return value;
+}
+
+// Lists a ready goods read handed out when it did not reach the shared base. They hold none of
+// the real rows, so _saveReadyGoodsStore never saves one — nor a list built on one — even after a
+// later read of the same list in this tab has turned the store's status back to «shared».
+const _readyGoodsFallbackLists = new WeakSet();
+
+function _readyGoodsFallbackPayload(fallbackValue) {
+    const payload = _cloneReadyGoodsPayload(fallbackValue);
+    if (payload && typeof payload === 'object') _readyGoodsFallbackLists.add(payload);
+    return payload;
+}
+
+// Would this save stand on a failed read? The list itself is one a failed read handed out (rows
+// pushed into it or not); or it was built on one ([...list], list.map(...)): then it has no tracked
+// origin — neither the list nor any of its records came from a read — and holds no record the
+// tab's latest read of the list knows of, so its patch, diffed against that read, would remove
+// every row of it. Copies of a real read keep the ids of that read and still save.
+function _isReadyGoodsListFromFailedRead(name, records) {
+    if (_readyGoodsFallbackLists.has(records)) return true;
+    if (!Array.isArray(records) || _blobArrayInfo.has(records)) return false;
+    if (records.some(record => record && typeof record === 'object' && _blobRecordInfo.has(record))) return false;
+    const latest = _blobLatestSnapshot[name];
+    if (!latest || latest.ids.size === 0) return false;
+    return !records.some(record => latest.ids.has(_blobRecordId(record)));
 }
 
 function _normalizeReadyGoodsPayload(value, fallbackValue = []) {
@@ -7659,12 +7942,18 @@ function getReadyGoodsSourceStatus() {
 async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
     const safeFallback = _cloneReadyGoodsPayload(fallbackValue);
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
-        const remote = await _loadJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], null);
-        if (remote !== null) {
-            const normalized = _normalizeReadyGoodsPayload(remote, safeFallback);
+        const remote = await _loadJsonSettingState(READY_GOODS_SETTINGS_KEYS[storeKey]);
+        if (remote.status === 'ok' && remote.value !== null) {
+            const normalized = _normalizeReadyGoodsPayload(remote.value, safeFallback);
             setLocal(localKey, normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
-            return normalized;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], normalized);
+        }
+        if (remote.status === 'error') {
+            // A slow or failed read is not "no data": seeding [] here used to
+            // wipe ready goods stock, history and sales for everyone.
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
+            return _readyGoodsFallbackPayload(safeFallback);
         }
 
         const seedPayload = _cloneReadyGoodsPayload(safeFallback);
@@ -7672,23 +7961,69 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
         if (!_hasSupabaseAccessProblem()) {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'seeded-empty');
             setLocal(localKey, seedPayload);
-            return seedPayload;
+            return _trackRecordBlob(READY_GOODS_BLOB_TARGETS[storeKey], seedPayload);
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
-            return _cloneReadyGoodsPayload(safeFallback);
+            return _readyGoodsFallbackPayload(safeFallback);
         }
     }
 
     _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, isSupabaseReady() ? 'shared-unavailable' : 'shared-required');
-    return _cloneReadyGoodsPayload(safeFallback);
+    return _readyGoodsFallbackPayload(safeFallback);
 }
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
+    // _normalizeReadyGoodsPayload hands an array back as is, so the records keep
+    // the identity the diff below relies on.
     const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
+    // A save is only safe on top of a list that was really read from the
+    // shared store; a stale fallback must never be written back.
+    if (_readyGoodsSourceStatus[storeKey] && _readyGoodsSourceStatus[storeKey].source !== READY_GOODS_SOURCE_SHARED) {
+        throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+    }
+    // The status is one for the whole tab: a list from a failed read stays unsafe after another
+    // read of the same list made the store look shared again.
+    if (_isReadyGoodsListFromFailedRead(READY_GOODS_BLOB_TARGETS[storeKey], normalized)) {
+        console.error(`save ${READY_GOODS_BLOB_TARGETS[storeKey]}: refused — the list comes from a read that did not reach the shared base`);
+        throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+    }
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
-        await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        const blobTarget = READY_GOODS_BLOB_TARGETS[storeKey];
+        // Send only what changed since this tab last read or saved the list; the
+        // server merges it into the current list, so rows another tab added or
+        // changed meanwhile survive. `merged` stays undefined only while the API
+        // cannot take the patch yet (no route, or it does not know this blob).
+        let merged;
+        if (blobTarget && Array.isArray(normalized)) {
+            const patch = _diffRecordBlob(blobTarget, normalized);
+            // A record without an id cannot be matched on the server, which appends
+            // every copy it gets: a cloned legacy row would come back once more on
+            // each save (1 → 2 → 4 → 8). Such a row is never sent.
+            const withoutId = patch.upserts.filter(record => _blobRecordId(record) === null);
+            if (withoutId.length > 0) {
+                console.warn(`save ${blobTarget}: skipped ${withoutId.length} record(s) without id`, withoutId);
+                patch.upserts = patch.upserts.filter(record => _blobRecordId(record) !== null);
+            }
+            if (_isEmptyBlobPatch(patch)) {
+                setLocal(localKey, normalized);
+                return normalized;
+            }
+            try {
+                merged = await _sendBlobPatch(blobTarget, patch);
+            } catch (error) {
+                // Never fall back to a whole-list write here: it would drop rows
+                // other tabs added. The snapshot is untouched, so a retry sends
+                // the same change again.
+                console.error(`save ${blobTarget} patch error:`, error);
+                throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+            }
+        }
+        if (merged === undefined) {
+            await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        }
         if (!_hasSupabaseAccessProblem()) {
-            setLocal(localKey, normalized);
+            if (blobTarget) _trackRecordBlob(blobTarget, normalized);
+            setLocal(localKey, Array.isArray(merged) ? merged : normalized);
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
         } else {
             _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
@@ -7916,6 +8251,32 @@ async function _withRemoteTimeout(kind, label, executor) {
     } catch (error) {
         _markSharedDatabaseProblem(error);
         throw error;
+    }
+}
+
+// Like _loadJsonSetting, but tells a missing row ('missing') apart from a
+// failed or timed-out read ('error'). Only a truly missing row may be seeded.
+async function _loadJsonSettingState(settingKey) {
+    if (!isSupabaseReady() || !settingKey) return { status: 'error', value: null };
+    try {
+        const { data, error } = await _withRemoteTimeout('load', `load setting ${settingKey}`, () => supabaseClient
+            .from('settings')
+            .select('value')
+            .eq('key', settingKey)
+            .maybeSingle());
+        if (error) {
+            console.error(`load setting ${settingKey} error:`, error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return { status: 'error', value: null };
+        }
+        if (!data || data.value === null || data.value === undefined || data.value === '') {
+            return { status: 'missing', value: null };
+        }
+        return { status: 'ok', value: JSON.parse(data.value) };
+    } catch (error) {
+        console.error(`load setting ${settingKey} exception:`, error);
+        if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+        return { status: 'error', value: null };
     }
 }
 

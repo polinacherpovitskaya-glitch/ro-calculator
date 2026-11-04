@@ -476,3 +476,21 @@ test('ставку задают деньги без подряда, деньги
   assert.equal(result.money.companyFact, 44064700);
   assert.equal(run().money.companyFact, 17200000); // без отдельного факта — те же деньги
 });
+
+test('marketing: внутренняя работа, как сток', () => {
+  const orders = [
+    { id: 1, order_name: 'Клиент', status: 'completed', production_purpose: 'commercial', total_hours_plan: 100, deadline: '2026-09-20', completed_at: '2026-09-10T10:00:00.000Z' },
+    { id: 2, order_name: 'Подарки', status: 'completed', production_purpose: 'marketing', total_hours_plan: 30, completed_at: '2026-08-01T10:00:00.000Z' },
+    { id: 3, order_name: 'Промо', status: 'completed', production_purpose: 'marketing', total_hours_plan: 20, completed_at: '2026-08-02T10:00:00.000Z' },
+  ];
+  const result = computeProductionPeriod({
+    period: '2026-Q3', today: '2026-10-05', status: 'open', scheme, targets, orders, timeEntries: [],
+    settings: {}, stockApprovals: new Set(['2']),
+  });
+  // в зачёт идёт только отмеченный маркетинг, и он внутренний, а не коммерческий
+  assert.equal(result.output.commercialHours, 100);
+  assert.equal(result.output.internalHours, 30);
+  assert.equal(result.output.fact, 130);
+  const marketingInWork = [{ id: 9, status: 'in_production', production_purpose: 'marketing', total_hours_plan: 40, deadline: '2026-08-01' }];
+  assert.equal(soldHoursForPeriod(marketingInWork, '2026-Q3'), 0, 'gifts are not sold hours');
+});

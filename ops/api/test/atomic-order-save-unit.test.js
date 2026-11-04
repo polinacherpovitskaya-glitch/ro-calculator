@@ -11,11 +11,14 @@ function fakeCompatClient(seed = {}) {
     if (!state.has(table)) state.set(table, new Map());
     return state.get(table);
   };
+  const reads = [];
   return {
     state,
+    reads,
     async query(sql, params = []) {
       if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
       if (sql.includes('SELECT data') && sql.includes('FROM compat_rows')) {
+        reads.push({ sql, params });
         return {
           rows: [...tableState(params[0]).entries()]
             .sort(([left], [right]) => left.localeCompare(right, 'ru', { numeric: true }))
@@ -61,6 +64,7 @@ test('executeAtomicOrderSave preserves workflow state and replaces stale items',
       calculator_data: JSON.stringify({ id: orderId, current: true, status: 'draft' }),
     },
     items: [{ id: currentItemId, order_id: orderId, item_number: 1, product_name: 'After' }],
+    knownItemIds: [currentItemId, staleItemId],
   });
 
   assert.equal(result.error, null);
@@ -112,4 +116,62 @@ test('executeAtomicOrderSave keeps existing items on an accidental empty payload
   assert.equal(result.data.preserved_empty_items, true);
   assert.equal(result.data.items.length, 1);
   assert.equal(client.state.get('order_items').has(String(itemId)), true);
+});
+
+test('executeAtomicOrderSave never deletes items the client did not load', async () => {
+  const orderId = 1786340000003;
+  const plasticId = orderId * 1000 + 1;
+  const hardwareId = orderId * 1000 + 100;
+  const seed = () => fakeCompatClient({
+    orders: [{ id: orderId, order_name: 'Лимон', status: 'draft' }],
+    order_items: [
+      { id: plasticId, order_id: orderId, item_number: 1, product_name: 'Лимон' },
+      { id: hardwareId, order_id: orderId, item_number: 100, product_name: 'Цепочка' },
+    ],
+  });
+
+  // Partial form (hardware not loaded yet): only the plastic id is known.
+  const partial = seed();
+  const partialResult = await executeAtomicOrderSave(partial, {
+    order: { id: orderId, order_name: 'Лимон', status: 'draft' },
+    items: [{ id: plasticId, order_id: orderId, item_number: 1, product_name: 'Лимон', pph: 40 }],
+    knownItemIds: [plasticId],
+  });
+  assert.equal(partial.state.get('order_items').has(String(hardwareId)), true);
+  assert.deepEqual(partialResult.data.items.map((item) => item.id).sort(), [plasticId, hardwareId].sort());
+
+  // Old bundle / other module without knownItemIds: nothing is deleted.
+  const legacy = seed();
+  await executeAtomicOrderSave(legacy, {
+    order: { id: orderId, order_name: 'Лимон', status: 'draft' },
+    items: [{ id: hardwareId, order_id: orderId, item_number: 100, product_name: 'Цепочка' }],
+  });
+  assert.equal(legacy.state.get('order_items').has(String(plasticId)), true);
+
+  // A row the user really removed from a fully loaded form is deleted.
+  const full = seed();
+  await executeAtomicOrderSave(full, {
+    order: { id: orderId, order_name: 'Лимон', status: 'draft' },
+    items: [{ id: plasticId, order_id: orderId, item_number: 1, product_name: 'Лимон' }],
+    knownItemIds: [plasticId, hardwareId],
+  });
+  assert.equal(full.state.get('order_items').has(String(hardwareId)), false);
+});
+
+test('executeAtomicOrderSave reads only this order and its items', async () => {
+  const orderId = 1786340000004;
+  const client = fakeCompatClient({ orders: [], order_items: [] });
+  await executeAtomicOrderSave(client, {
+    order: { id: orderId, order_name: 'Narrow', status: 'draft' },
+    items: [{ id: orderId * 1000 + 1, order_id: orderId, item_number: 1 }],
+  });
+  const [ordersRead, itemsRead] = client.reads;
+  assert.match(ordersRead.sql, /source_id = ANY/);
+  assert.deepEqual(ordersRead.params, ['orders', [String(orderId)]]);
+  assert.match(itemsRead.sql, /data @>/);
+  assert.deepEqual(itemsRead.params.slice(1), [
+    JSON.stringify({ order_id: orderId }),
+    JSON.stringify({ order_id: String(orderId) }),
+    [String(orderId * 1000 + 1)],
+  ]);
 });
