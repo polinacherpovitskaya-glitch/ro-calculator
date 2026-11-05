@@ -6910,7 +6910,23 @@ async function _sendBlobPatch(target, patch) {
     return data ? data.value : null;
 }
 
-async function loadWarehouseReservations() {
+// Share one in-flight read between concurrent callers (Warehouse.load() and
+// loadWarehouseItems() both need it; the row is ~2MB). Only while pending —
+// a save drops it so later reads always see fresh data.
+let _warehouseReservationsInFlight = null;
+
+function loadWarehouseReservations() {
+    if (_warehouseReservationsInFlight) return _warehouseReservationsInFlight;
+    const pending = _loadWarehouseReservationsUncached();
+    _warehouseReservationsInFlight = pending;
+    const clear = () => {
+        if (_warehouseReservationsInFlight === pending) _warehouseReservationsInFlight = null;
+    };
+    pending.then(clear, clear);
+    return pending;
+}
+
+async function _loadWarehouseReservationsUncached() {
     return _trackRecordBlob('warehouse_reservations', await _loadWarehouseReservationsUntracked());
 }
 
@@ -6963,6 +6979,7 @@ async function _loadWarehouseReservationsUntracked() {
 }
 
 async function saveWarehouseReservations(reservations) {
+    _warehouseReservationsInFlight = null;
     setLocal(LOCAL_KEYS.warehouseReservations, reservations);
     _invalidateBootstrapCache(['warehouseReservations']);
     if (isSupabaseReady() && Array.isArray(reservations)) {
