@@ -570,6 +570,47 @@ async function smokeInitSkipsShowAppWithoutRestoredUser(context) {
     })()`, context);
 }
 
+async function smokeInitRendersCachedUserBeforeSessionCheck(context) {
+    context.__events = [];
+    vm.runInContext(`(() => {
+        window.__origPrepareAuthUI = App.prepareAuthUI;
+        window.__origMigratePages = App._migratePagePermsToAuthAccounts;
+        window.__origIsAuthenticated = App.isAuthenticated;
+        window.__origRestoreCached = App.restoreCachedAuthenticatedUser;
+        window.__origRestoreAuthenticatedUser = App.restoreAuthenticatedUser;
+        window.__origShowApp = App.showApp;
+    })()`, context);
+    await vm.runInContext(`(async () => {
+        let resolveCheck;
+        App.prepareAuthUI = async () => { window.__events.push('prepareAuthUI'); };
+        App._migratePagePermsToAuthAccounts = async () => {};
+        App.isAuthenticated = () => true;
+        App.restoreCachedAuthenticatedUser = () => { App.currentUser = { id: 'u1' }; return true; };
+        App.restoreAuthenticatedUser = () => new Promise(resolve => {
+            window.__events.push('check-start');
+            resolveCheck = resolve;
+        });
+        App.showApp = async () => { window.__events.push('showApp'); };
+        await App.init();
+        window.__events.push('init-done');
+        // Server says the session is gone: logout already ran, login UI must be prepared.
+        App.currentUser = null;
+        resolveCheck(null);
+        await new Promise(resolve => setTimeout(resolve, 0));
+    })()`, context);
+
+    assert.deepEqual(context.__events, ['check-start', 'showApp', 'init-done', 'prepareAuthUI'],
+        'cached user must render before the session check resolves, and an explicit failure must show login');
+    vm.runInContext(`(() => {
+        App.prepareAuthUI = window.__origPrepareAuthUI;
+        App._migratePagePermsToAuthAccounts = window.__origMigratePages;
+        App.isAuthenticated = window.__origIsAuthenticated;
+        App.restoreCachedAuthenticatedUser = window.__origRestoreCached;
+        App.restoreAuthenticatedUser = window.__origRestoreAuthenticatedUser;
+        App.showApp = window.__origShowApp;
+    })()`, context);
+}
+
 async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context) {
     context.__employeesCalled = 0;
     context.__employeesSource = [{ id: 5, name: 'Полина', role: 'admin', is_active: true }];
@@ -699,6 +740,7 @@ async function main() {
     await smokePasswordResetDisclosure(context);
     await smokeLogoutCleanup(context);
     await smokeInitSkipsShowAppWithoutRestoredUser(context);
+    await smokeInitRendersCachedUserBeforeSessionCheck(context);
     await smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context);
 
     const routeContext = createContext();
