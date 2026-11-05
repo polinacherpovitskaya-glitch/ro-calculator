@@ -960,15 +960,15 @@ async function main() {
 
     const b2cBreakdown = JSON.parse(vm.runInContext(`JSON.stringify(__breakdown)`, context));
     const b2cCalcState = JSON.parse(vm.runInContext(`JSON.stringify(__calcState)`, context));
-    assert.equal(b2cBreakdown.pkgMaterialCost, 80);
-    assert.equal(b2cBreakdown.totalCost, 183.16);
-    assert.equal(Number(b2cCalcState.lastCalc.totalCost), 183.16);
+    assert.equal(b2cBreakdown.pkgMaterialCost, 63.66);
+    assert.equal(b2cBreakdown.totalCost, 176);
+    assert.equal(Number(b2cCalcState.lastCalc.totalCost), 176);
     assert.ok(b2cCalcState.mpValue > 0);
     assert.ok(b2cCalcState.shopValue > 0);
     assert.equal(b2cCalcState.mpValue % 10, 0);
     assert.equal(b2cCalcState.shopValue % 10, 0);
-    assert.ok(b2cCalcState.mpValue >= 740);
-    assert.ok(b2cCalcState.shopValue >= 420);
+    assert.ok(b2cCalcState.mpValue >= 710);
+    assert.ok(b2cCalcState.shopValue >= 400);
     assert.ok(Number(b2cCalcState.lastCalc.mpMargin) >= 39.5);
     assert.ok(Number(b2cCalcState.lastCalc.shopMargin) >= 39.5);
 

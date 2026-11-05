@@ -24,8 +24,11 @@ const Marketplaces = {
     _colorVariants: [],
     _inlineSaveTimers: {},
     _inlineSaveSeq: {},
-    DEFAULT_PACKAGING_COST: 80,
-    DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
+    // Коробка с шубером RO (RO-BOX-SHUB, 33,66 ₽) + 5 наклеек × 3 ₽ + открытка 15 ₽.
+    // Наклейки и открытка ещё не на складе: обновить, когда встанут с ценой доставки.
+    DEFAULT_PACKAGING_COST: 63.66,
+    // Сборка коробки — 2 минуты.
+    DEFAULT_PACKAGING_SPEED_PER_HOUR: 30,
     B2C_PRICING_VERSION: 3,
 
     async load() {
@@ -271,7 +274,7 @@ const Marketplaces = {
             enabled,
             costPerUnit: this.DEFAULT_PACKAGING_COST,
             assemblySpeed: this.DEFAULT_PACKAGING_SPEED_PER_HOUR,
-            name: 'Дефолтная упаковка B2C',
+            name: 'Коробка RO + 5 наклеек + открытка',
         };
     },
 
