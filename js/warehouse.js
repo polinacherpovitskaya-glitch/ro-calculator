@@ -268,10 +268,21 @@ const Warehouse = {
         const initialView = this.currentView || 'table';
         this._startViewLoading(initialView, this._getWarehouseLoadingMessage(initialView), { replace: true });
         await this._waitForProjectHardwareMutations();
-        this.allItems = await loadWarehouseItems();
-        this.allItems = await this._ensureRequiredSeedItems(this.allItems);
-        await this._loadMoldOrders();
-        await this._refreshBlankHardwareWarehouseItemIds();
+        // These reads are independent of each other — run them in parallel.
+        // Sequentially they cost ~1-2s each on the compat API and made the
+        // warehouse page take 15s+ to open. loadWarehouseItems() also reads
+        // reservations internally; the in-flight dedupe in
+        // loadWarehouseReservations() makes both calls share one 2MB fetch.
+        const reservationsPromise = loadWarehouseReservations();
+        const projectHardwareStatePromise = loadProjectHardwareState();
+        const [loadedItems] = await Promise.all([
+            loadWarehouseItems(),
+            this._loadMoldOrders(),
+            this._refreshBlankHardwareWarehouseItemIds(),
+            reservationsPromise.catch(() => null),
+            projectHardwareStatePromise.catch(() => null),
+        ]);
+        this.allItems = await this._ensureRequiredSeedItems(loadedItems);
         const shouldDeferHeavySync = initialView !== 'project-hardware';
 
         // Auto-seed only for a truly local first run. In cloud mode an empty
@@ -342,14 +353,14 @@ const Warehouse = {
             }
         }
 
-        // Cleanup: remove exact duplicate rows with zero qty
-        if (!isStaticMirror && this._cleanupZeroDuplicateItems()) {
-            await saveWarehouseItems(this.allItems);
-            console.log('[Warehouse] Removed zero-qty duplicate items');
-        }
+        // Hide exact duplicate rows with zero qty from the view. Do NOT save here:
+        // saveWarehouseItems() is an upsert and never deletes the hidden row, so the
+        // duplicate came back on every open and the page rewrote the whole warehouse
+        // (309 rows + snapshot, ~4s, from a possibly stale copy) just to be looked at.
+        this._cleanupZeroDuplicateItems();
 
-        this.allReservations = await loadWarehouseReservations();
-        this.projectHardwareState = await loadProjectHardwareState();
+        this.allReservations = await reservationsPromise;
+        this.projectHardwareState = await projectHardwareStatePromise;
         if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
             this.projectHardwareState = { checks: {}, actual_qtys: {} };
         }
