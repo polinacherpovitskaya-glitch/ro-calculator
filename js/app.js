@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v486';
+const APP_VERSION = 'v487';
 
 const App = {
     currentPage: 'orders',
@@ -476,9 +476,31 @@ const App = {
                 ...account,
                 pages: this.normalizePageList(account.pages),
             }));
-            await this.restoreAuthenticatedUser();
-            if (this.currentUser) {
+            // Render immediately from the cached account and verify the server
+            // session in the background. Waiting for /legacy-me first kept the
+            // login screen up on every reload for a full (often cold) round trip
+            // to the API host. Data calls still need the httpOnly cookie, and an
+            // explicit 401/403/404 from the check still logs the user out.
+            const userId = localStorage.getItem('ro_calc_auth_user_id');
+            if (this.restoreCachedAuthenticatedUser(userId)) {
+                const verification = this.restoreAuthenticatedUser()
+                    .catch(error => {
+                        console.warn('Background session check failed:', error);
+                        return 'cached';
+                    });
                 await this.showApp();
+                verification.then(result => {
+                    if (result === 'remote') {
+                        this.applyNavVisibility();
+                    } else if (!result && !this.currentUser) {
+                        this.prepareAuthUI().catch(() => {});
+                    }
+                });
+            } else {
+                await this.restoreAuthenticatedUser();
+                if (this.currentUser) {
+                    await this.showApp();
+                }
             }
         }
 

@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
+    <!-- Open the API connection while scripts download; every data call and the session check go there. -->
+    <link rel="preconnect" href="https://api.recycleobject.ru" crossorigin="use-credentials">
   <link rel="stylesheet" href="css/style.css?v=433">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v486';
+        const CURRENT_HTML_VERSION = 'v487';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +189,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v486</span></span>
+            <span>Калькулятор <span id="app-version">v487</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -3641,7 +3643,7 @@
 <script src="js/supabase.js?v=486"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=483"></script>
-<script src="js/app.js?v=486"></script>
+<script src="js/app.js?v=487"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=485"></script>
 <script src="js/orders.js?v=483"></script>
