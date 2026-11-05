@@ -38,13 +38,13 @@ jobs:
         with:
           node-version: '24'
 
-      # SHA replaces hand-maintained ?v=N references in the deploy snapshot, so
-      # every release gets unique immutable asset URLs.
-      - name: Cache-bust asset versions with commit SHA
-        run: |
-          sha="${GITHUB_SHA::10}"
-          find . -name "*.html" -not -path "./node_modules/*" -print0 \
-            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
+      # A content hash of each file replaces hand-maintained ?v=N references in
+      # the deploy snapshot. Assets are immutable for a year, so only files that
+      # actually changed get new URLs; the commit SHA (used before) made every
+      # deploy re-download all ~1.2 MB of scripts. The SHA stays as a fallback
+      # for references whose file is missing.
+      - name: Cache-bust asset versions with content hashes
+        run: node scripts/hash-asset-versions.mjs "${GITHUB_SHA::10}" .
 
       - name: Build calculator static bundle
         env:
