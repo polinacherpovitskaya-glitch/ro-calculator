@@ -24,6 +24,9 @@ const Marketplaces = {
     _colorVariants: [],
     _inlineSaveTimers: {},
     _inlineSaveSeq: {},
+    // Сборку B2C делает менеджер магазина из готовых отливок: 90 000 ₽ в месяц / 168 часов, без косвенных.
+    // Косвенные производства остаются только в литье.
+    B2C_ASSEMBLER_RATE_PER_HOUR: 536,
     DEFAULT_PACKAGING_COST: 80,
     DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
     B2C_PRICING_VERSION: 3,
@@ -1308,10 +1311,7 @@ const Marketplaces = {
     _calcHwUnitComponents(item, params) {
         item = this._normalizeHwItem(item);
         const cnyRate = params.cnyRate || 12.5;
-        const fotPerHour = params.fotPerHour || 400;
-        const indirectPerHour = params.indirectPerHour || 0;
         const wasteFactor = params.wasteFactor || 1.1;
-        const indirectModeAll = params.indirectCostMode === 'all';
         let materialCost = 0;
         let assemblySpeed = parseFloat(item.assembly_speed) || 0;
 
@@ -1333,8 +1333,7 @@ const Marketplaces = {
         let assemblyFot = 0;
         let assemblyIndirect = 0;
         if (assemblySpeed > 0) {
-            assemblyFot = fotPerHour / assemblySpeed * wasteFactor;
-            assemblyIndirect = indirectModeAll ? (indirectPerHour / assemblySpeed * wasteFactor) : 0;
+            assemblyFot = this.B2C_ASSEMBLER_RATE_PER_HOUR / assemblySpeed * wasteFactor;
         }
 
         const total = round2(materialCost + assemblyFot + assemblyIndirect);
@@ -1352,10 +1351,7 @@ const Marketplaces = {
 
     _calcPkgUnitComponents(item, params) {
         item = this._normalizePkgItem(item);
-        const fotPerHour = params.fotPerHour || 400;
-        const indirectPerHour = params.indirectPerHour || 0;
         const wasteFactor = params.wasteFactor || 1.1;
-        const indirectModeAll = params.indirectCostMode === 'all';
         let materialCost = 0;
         let assemblySpeed = parseFloat(item.assembly_speed) || 0;
 
@@ -1375,8 +1371,7 @@ const Marketplaces = {
         let assemblyFot = 0;
         let assemblyIndirect = 0;
         if (assemblySpeed > 0) {
-            assemblyFot = fotPerHour / assemblySpeed * wasteFactor;
-            assemblyIndirect = indirectModeAll ? (indirectPerHour / assemblySpeed * wasteFactor) : 0;
+            assemblyFot = this.B2C_ASSEMBLER_RATE_PER_HOUR / assemblySpeed * wasteFactor;
         }
 
         const total = round2(materialCost + assemblyFot + assemblyIndirect);
@@ -2408,7 +2403,6 @@ const Marketplaces = {
 
     _enrichPlasticBlanks() {
         const params = App.params || {};
-        const fotPerHour = params.fotPerHour || 400;
 
         this._plasticBlanks.forEach(m => {
             const pMin = m.pph_min || 0;
@@ -2434,7 +2428,7 @@ const Marketplaces = {
                 if (m.hw_name && m.hw_price_per_unit > 0) {
                     let hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qty : 0);
                     if (m.hw_speed > 0) {
-                        hwCostPerUnit += (qty / m.hw_speed * (params.wasteFactor || 1.1)) * fotPerHour / qty;
+                        hwCostPerUnit += (qty / m.hw_speed * (params.wasteFactor || 1.1)) * this.B2C_ASSEMBLER_RATE_PER_HOUR / qty;
                     }
                     adjustedCost += hwCostPerUnit;
                 }
@@ -2508,7 +2502,7 @@ const Marketplaces = {
                 const hwMaterialPerUnit = round2((mold.hw_price_per_unit || 0) + ((mold.hw_delivery_total || 0) / 500));
                 let hwAssemblyFotPerUnit = 0;
                 if (mold.hw_speed > 0) {
-                    hwAssemblyFotPerUnit = round2((params.fotPerHour || 400) / mold.hw_speed * (params.wasteFactor || 1.1));
+                    hwAssemblyFotPerUnit = round2(this.B2C_ASSEMBLER_RATE_PER_HOUR / mold.hw_speed * (params.wasteFactor || 1.1));
                 }
                 hwMaterialCost += hwMaterialPerUnit * qtyMult;
                 assemblyCost += hwAssemblyFotPerUnit * qtyMult;
@@ -2537,10 +2531,8 @@ const Marketplaces = {
 
         const defaultPackaging = this._getDefaultPackagingConfig(s);
         if (this._shouldApplyDefaultPackaging(s)) {
-            const assemblyFot = round2((params.fotPerHour || 400) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1));
-            const assemblyIndirect = params.indirectCostMode === 'all'
-                ? round2((params.indirectPerHour || 0) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1))
-                : 0;
+            const assemblyFot = round2(this.B2C_ASSEMBLER_RATE_PER_HOUR / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1));
+            const assemblyIndirect = 0;
             pkgCost += defaultPackaging.costPerUnit + assemblyFot + assemblyIndirect;
             pkgMaterialCost += defaultPackaging.costPerUnit;
             assemblyCost += assemblyFot;
