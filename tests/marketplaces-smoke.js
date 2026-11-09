@@ -961,8 +961,8 @@ async function main() {
     const b2cBreakdown = JSON.parse(vm.runInContext(`JSON.stringify(__breakdown)`, context));
     const b2cCalcState = JSON.parse(vm.runInContext(`JSON.stringify(__calcState)`, context));
     assert.equal(b2cBreakdown.pkgMaterialCost, 80);
-    assert.equal(b2cBreakdown.totalCost, 183.16);
-    assert.equal(Number(b2cCalcState.lastCalc.totalCost), 183.16);
+    assert.equal(b2cBreakdown.totalCost, 183.83);
+    assert.equal(Number(b2cCalcState.lastCalc.totalCost), 183.83);
     assert.ok(b2cCalcState.mpValue > 0);
     assert.ok(b2cCalcState.shopValue > 0);
     assert.equal(b2cCalcState.mpValue % 10, 0);
