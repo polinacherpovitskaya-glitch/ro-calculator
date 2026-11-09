@@ -162,7 +162,7 @@ jobs:
           test -n "${TIMEBOT_TOKEN:-}"
           test -n "${TASK_BOT_TOKEN:-}"
           test -n "${TELEGRAM_RELAY_SECRET:-}"
-          relay_base="https://ro-calculator-xi.vercel.app/api/telegram-relay/${TELEGRAM_RELAY_SECRET}"
+          relay_base="https://tg.recycleobject.ru/api/telegram-relay/${TELEGRAM_RELAY_SECRET}"
           echo "::add-mask::$relay_base"
           curl --fail --silent --show-error --max-time 25 \
             "${relay_base}/bot${TIMEBOT_TOKEN}/getMe" \
