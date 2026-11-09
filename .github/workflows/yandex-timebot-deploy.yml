@@ -66,7 +66,7 @@ jobs:
           umask 077
           {
             printf 'BOT_TOKEN=%s\n' "$TIMEBOT_TOKEN"
-            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator-xi.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
+            printf 'TELEGRAM_BASE_API_URL=https://tg.recycleobject.ru/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
             printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
             printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
             printf 'ENABLE_TASK_NOTIFICATION_WORKER=false\n'
@@ -75,7 +75,7 @@ jobs:
           } > "$RUNNER_TEMP/timebot.env"
           {
             printf 'TG_BOT_TOKEN=%s\n' "$TASK_BOT_TOKEN"
-            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator-xi.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
+            printf 'TELEGRAM_BASE_API_URL=https://tg.recycleobject.ru/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
             printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
             printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
             printf 'TASK_BOT_POLL_INTERVAL_MS=15000\n'
