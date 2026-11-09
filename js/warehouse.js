@@ -211,6 +211,7 @@ const WAREHOUSE_CATEGORIES = [
     { key: 'cords',      label: 'Шнуры',     icon: '🧵', color: '#fce7f3', textColor: '#9d174d' },
     { key: 'packaging',  label: 'Упаковка',  icon: '📦', color: '#f3e8ff', textColor: '#7c3aed' },
     { key: 'molds',      label: 'Молды',     icon: '🧲', color: '#fef2f2', textColor: '#b91c1c' },
+    { key: 'castings',   label: 'Отливки',   icon: '🧊', color: '#ecfdf5', textColor: '#047857' },
     { key: 'other',      label: 'Разное',    icon: '🔹', color: '#f1f5f9', textColor: '#475569' },
 ];
 
@@ -8549,7 +8550,8 @@ const Warehouse = {
             .filter(([id]) => id));
 
         const grouped = {};
-        WAREHOUSE_CATEGORIES.forEach(cat => {
+        // Отливки считаются по штукам на складе, но как фурнитура в заказы не выбираются.
+        WAREHOUSE_CATEGORIES.filter(cat => cat.key !== 'castings').forEach(cat => {
             const catItems = items
                 .filter(i => i.category === cat.key)
                 .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));

@@ -1833,7 +1833,7 @@ const Molds = {
         try {
             const whItems = await loadWarehouseItems();
             const filtered = (whItems || []).filter(i =>
-                i.category !== 'packaging'
+                i.category !== 'packaging' && i.category !== 'castings'
             );
             this._warehouseItems = filtered;
             this._warehouseHwItems = filtered;
@@ -1967,7 +1967,7 @@ const Molds = {
             this._hwBlanks = await loadHwBlanks();
             // Load warehouse items for dropdown
             const whItems = await loadWarehouseItems();
-            this._warehouseHwItems = (whItems || []).filter(i => i.category !== 'packaging');
+            this._warehouseHwItems = (whItems || []).filter(i => i.category !== 'packaging' && i.category !== 'castings');
             // Ensure ChinaCatalog has rates loaded (for enrichHwBlanks recalc)
             if (ChinaCatalog._items.length === 0) {
                 ChinaCatalog._items = await ChinaCatalog._loadItems();

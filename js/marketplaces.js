@@ -47,7 +47,7 @@ const Marketplaces = {
             this._pkgCatalog = pkgCatalog;
             this._colors = colors || [];
             // Split warehouse by category
-            this._allWarehouseHw = (warehouseItems || []).filter(i => i.category !== 'packaging');
+            this._allWarehouseHw = (warehouseItems || []).filter(i => i.category !== 'packaging' && i.category !== 'castings');
             this._allWarehousePkg = (warehouseItems || []).filter(i => i.category === 'packaging');
 
             this._enrichPlasticBlanks();
