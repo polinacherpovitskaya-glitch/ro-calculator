@@ -1499,9 +1499,10 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
     };
 }
 
-// Продажа, собранная из физически оставшихся в цехе деталей. Это не складская
-// комплектация: детали не существуют в учёте и не должны создавать резерв или
-// повторно попадать в себестоимость. Вручную фиксируем только время сборки.
+// Продажа, собранная из физически оставшихся в цехе деталей. Сами детали
+// (пластик, готовые буквы) не существуют в учёте и не создают резерв или
+// себестоимость: вручную фиксируем выручку и время сборки. Фурнитура и упаковка
+// при этом могут идти со склада — их закупка и нормы сборки учитываются.
 function normalizeLeftoverAssembly(value) {
     const raw = parseOrderCalcJson(value, {});
     const parseNonNegative = input => {
@@ -1516,9 +1517,59 @@ function normalizeLeftoverAssembly(value) {
     };
 }
 
-function calculateLeftoverAssemblyLoad(value, params = {}) {
+// Строки фурнитуры/упаковки бывают живыми (калькулятор: qty, price, result) и
+// сохранёнными (order_items: quantity, *_price_per_unit, hours_*).
+function getLeftoverAssemblyMaterialLines(materials = {}) {
+    const num = value => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+    };
+    const lines = [];
+    const collect = (rows, kind) => {
+        (Array.isArray(rows) ? rows : []).forEach(row => {
+            if (!row || typeof row !== 'object') return;
+            const qty = num(row.qty ?? row.quantity);
+            if (!(qty > 0)) return;
+            const isHw = kind === 'hardware';
+            lines.push({
+                kind,
+                qty,
+                price: num(row.price ?? (isHw ? row.hardware_price_per_unit : row.packaging_price_per_unit)),
+                delivery: num(row.delivery_price ?? (isHw ? row.hardware_delivery_per_unit : row.packaging_delivery_per_unit)),
+                hours: num(isHw
+                    ? (row.result ? row.result.hoursHardware : row.hours_hardware)
+                    : (row.result ? row.result.hoursPackaging : row.hours_packaging)),
+            });
+        });
+    };
+    collect(materials?.hardwareItems, 'hardware');
+    collect(materials?.packagingItems, 'packaging');
+    return lines;
+}
+
+function summarizeLeftoverAssemblyMaterials(materials = {}) {
+    const totals = {
+        hardwarePurchase: 0, hardwareDelivery: 0, hardwareHours: 0,
+        packagingPurchase: 0, packagingDelivery: 0, packagingHours: 0,
+    };
+    getLeftoverAssemblyMaterialLines(materials).forEach(line => {
+        totals[line.kind + 'Purchase'] += line.qty * line.price;
+        totals[line.kind + 'Delivery'] += line.qty * line.delivery;
+        totals[line.kind + 'Hours'] += line.hours;
+    });
+    Object.keys(totals).forEach(key => { totals[key] = round2(totals[key]); });
+    totals.hardwareCost = round2(totals.hardwarePurchase + totals.hardwareDelivery);
+    totals.packagingCost = round2(totals.packagingPurchase + totals.packagingDelivery);
+    totals.materialsCost = round2(totals.hardwareCost + totals.packagingCost);
+    return totals;
+}
+
+function calculateLeftoverAssemblyLoad(value, params = {}, materials = {}) {
     const leftover = normalizeLeftoverAssembly(value);
-    const totalHours = leftover.assemblyHours;
+    const mat = summarizeLeftoverAssemblyMaterials(materials);
+    const hoursHardwareTotal = round2(leftover.assemblyHours + mat.hardwareHours);
+    const hoursPackagingTotal = mat.packagingHours;
+    const totalHours = round2(hoursHardwareTotal + hoursPackagingTotal);
     const packagingLoadPercent = Number(params?.packagingHours) > 0
         ? round2((totalHours * 100) / Number(params.packagingHours))
         : 0;
@@ -1526,8 +1577,8 @@ function calculateLeftoverAssemblyLoad(value, params = {}) {
 
     return {
         hoursPlasticTotal: 0,
-        hoursPackagingTotal: 0,
-        hoursHardwareTotal: totalHours,
+        hoursPackagingTotal,
+        hoursHardwareTotal,
         totalHours,
         plasticLoadPercent: 0,
         packagingLoadPercent,
@@ -1537,14 +1588,16 @@ function calculateLeftoverAssemblyLoad(value, params = {}) {
     };
 }
 
-function calculateLeftoverAssemblySummary(value, params = {}, orderAdjustments = {}) {
+function calculateLeftoverAssemblySummary(value, params = {}, orderAdjustments = {}, materials = {}) {
     const leftover = normalizeLeftoverAssembly(value);
+    const mat = summarizeLeftoverAssemblyMaterials(materials);
+    const totalHours = calculateLeftoverAssemblyLoad(leftover, params, materials).totalHours;
     const discount = calculateOrderDiscount(leftover.revenue, orderAdjustments, params);
     const totalRevenue = discount.revenueAfterDiscount;
     // Сборщики уже находятся в косвенных расходах. Прямую зарплату повторно не
     // начисляем, но часы должны получить свою долю косвенных расходов.
-    const indirectCost = round2(leftover.assemblyHours * Math.max(0, Number(params?.indirectPerHour) || 0));
-    const totalEarned = round2(totalRevenue * getNetRevenueRetentionRate(params) - indirectCost);
+    const indirectCost = round2(totalHours * Math.max(0, Number(params?.indirectPerHour) || 0));
+    const totalEarned = round2(totalRevenue * getNetRevenueRetentionRate(params) - indirectCost - mat.materialsCost);
     const vatOnRevenue = round2(totalRevenue * getVatRate(params));
 
     return {
@@ -1559,22 +1612,27 @@ function calculateLeftoverAssemblySummary(value, params = {}, orderAdjustments =
         marginPercent: totalRevenue > 0 ? round2((totalEarned * 100) / totalRevenue) : 0,
         nonCommercialLoss: 0,
         leftoverAssemblyQuantity: leftover.quantity,
-        leftoverAssemblyHours: leftover.assemblyHours,
+        leftoverAssemblyHours: totalHours,
+        leftoverAssemblyManualHours: leftover.assemblyHours,
         leftoverAssemblyIndirectCost: indirectCost,
+        leftoverAssemblyHardwareCost: mat.hardwareCost,
+        leftoverAssemblyPackagingCost: mat.packagingCost,
+        leftoverAssemblyMaterialsCost: mat.materialsCost,
         leftoverAssemblyDetails: leftover.details,
     };
 }
 
-function calculateLeftoverAssemblyFinDirector(value, params = {}, orderAdjustments = {}) {
-    const summary = calculateLeftoverAssemblySummary(value, params, orderAdjustments);
+function calculateLeftoverAssemblyFinDirector(value, params = {}, orderAdjustments = {}, materials = {}) {
+    const summary = calculateLeftoverAssemblySummary(value, params, orderAdjustments, materials);
+    const mat = summarizeLeftoverAssemblyMaterials(materials);
     return {
         salary: 0,
         indirect: summary.leftoverAssemblyIndirectCost,
-        hardwarePurchase: 0,
+        hardwarePurchase: mat.hardwarePurchase,
         nfcTotal: 0,
-        hardwareDelivery: 0,
-        packagingPurchase: 0,
-        packagingDelivery: 0,
+        hardwareDelivery: mat.hardwareDelivery,
+        packagingPurchase: mat.packagingPurchase,
+        packagingDelivery: mat.packagingDelivery,
         design: 0,
         printing: 0,
         plastic: 0,
@@ -2298,8 +2356,14 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
             mode: order?.discount_mode,
             value: order?.discount_value,
         };
-        const load = calculateLeftoverAssemblyLoad(leftover, runtimeParams);
-        const summary = calculateLeftoverAssemblySummary(leftover, runtimeParams, orderAdjustments);
+        const typeOfRow = row => String(row?.item_type || '').trim().toLowerCase();
+        const savedRows = (orderItems || []).filter(row => row && typeof row === 'object');
+        const materials = {
+            hardwareItems: savedRows.filter(row => typeOfRow(row) === 'hardware'),
+            packagingItems: savedRows.filter(row => typeOfRow(row) === 'packaging'),
+        };
+        const load = calculateLeftoverAssemblyLoad(leftover, runtimeParams, materials);
+        const summary = calculateLeftoverAssemblySummary(leftover, runtimeParams, orderAdjustments, materials);
         return {
             products: [],
             hardwareItems: [],

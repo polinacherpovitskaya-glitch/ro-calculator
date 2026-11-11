@@ -10,6 +10,7 @@ vm.runInContext(`${source}\nglobalThis.__leftoverAssembly = {
     isNonCommercialProductionPurpose,
     calculateLeftoverAssemblyLoad,
     calculateLeftoverAssemblySummary,
+    calculateLeftoverAssemblyFinDirector,
     getOrderLiveCalculatorSnapshot,
 };`, context, { filename: 'calculator.js' });
 
@@ -53,5 +54,49 @@ const snapshot = engine.getOrderLiveCalculatorSnapshot({
 assert.equal(snapshot.revenue, 10000, 'empty order_items must not erase a leftover-assembly order from the list/card');
 assert.equal(snapshot.hours, 3.5);
 assert.equal(snapshot.marginPercent, 78);
+
+// Пластик — из остатков, а фурнитура и упаковка — со склада: их закупка и нормы
+// сборки входят в себестоимость и часы.
+const liveHardware = [{ qty: 53, price: 40, delivery_price: 2, result: { hoursHardware: 2 } }];
+const livePackaging = [{ qty: 53, price: 10, delivery_price: 0, result: { hoursPackaging: 0.5 } }];
+const materials = { hardwareItems: liveHardware, packagingItems: livePackaging };
+
+const loadWithHw = engine.calculateLeftoverAssemblyLoad(leftover, params, materials);
+assert.equal(loadWithHw.totalHours, 6, 'manual hours plus hardware and packaging norms');
+assert.equal(loadWithHw.hoursHardwareTotal, 5.5);
+assert.equal(loadWithHw.hoursPackagingTotal, 0.5);
+assert.equal(loadWithHw.packagingLoadPercent, 15);
+
+const summaryWithHw = engine.calculateLeftoverAssemblySummary(leftover, params, {}, materials);
+assert.equal(summaryWithHw.leftoverAssemblyHardwareCost, 2226, '53 × (40 + 2)');
+assert.equal(summaryWithHw.leftoverAssemblyPackagingCost, 530);
+assert.equal(summaryWithHw.leftoverAssemblyMaterialsCost, 2756);
+assert.equal(summaryWithHw.leftoverAssemblyIndirectCost, 1200, 'indirect share of all 6 hours');
+assert.equal(summaryWithHw.leftoverAssemblyHours, 6);
+assert.equal(summaryWithHw.leftoverAssemblyManualHours, 3.5);
+assert.equal(summaryWithHw.totalEarned, 4544, '10000 × 0.85 − 1200 − 2756');
+assert.equal(summaryWithHw.marginPercent, 45.44);
+
+const finWithHw = engine.calculateLeftoverAssemblyFinDirector(leftover, params, {}, materials);
+assert.equal(finWithHw.hardwarePurchase, 2120);
+assert.equal(finWithHw.hardwareDelivery, 106);
+assert.equal(finWithHw.packagingPurchase, 530);
+assert.equal(finWithHw.packagingDelivery, 0);
+assert.equal(finWithHw.indirect, 1200);
+assert.equal(finWithHw.totalCosts, 10000 - 4544);
+
+// Сохранённые строки заказа (список заказов, карточка) дают те же цифры.
+const savedRows = [
+    { item_type: 'hardware', quantity: 53, hardware_price_per_unit: 40, hardware_delivery_per_unit: 2, hours_hardware: 2, hardware_source: 'warehouse' },
+    { item_type: 'packaging', quantity: 53, packaging_price_per_unit: 10, packaging_delivery_per_unit: 0, hours_packaging: 0.5 },
+];
+const snapshotWithHw = engine.getOrderLiveCalculatorSnapshot({
+    production_purpose: 'leftover_assembly',
+    leftover_assembly: leftover,
+}, savedRows, params, []);
+assert.equal(snapshotWithHw.revenue, 10000);
+assert.equal(snapshotWithHw.hours, 6);
+assert.equal(snapshotWithHw.marginPercent, 45.44);
+assert.equal(snapshotWithHw.summary.leftoverAssemblyMaterialsCost, 2756);
 
 console.log('leftover-assembly-smoke: OK');
