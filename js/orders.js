@@ -406,7 +406,8 @@ const Orders = {
         }
         try {
             if (normalizeProductionPurpose(order?.production_purpose) === 'leftover_assembly') {
-                const snapshot = getOrderLiveCalculatorSnapshot(order, []);
+                // Фурнитура и упаковка со склада входят в себестоимость сборки из остатков.
+                const snapshot = getOrderLiveCalculatorSnapshot(order, Array.isArray(items) ? items.filter(Boolean) : []);
                 return {
                     revenue: Number(snapshot?.revenue || 0),
                     marginPercent: Number(snapshot?.marginPercent || 0),

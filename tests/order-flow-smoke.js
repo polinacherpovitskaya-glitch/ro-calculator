@@ -9819,6 +9819,48 @@ async function smokeTirageCalculatorSummary(context) {
     });
 }
 
+// Сборка из остатков: изделия не сохраняются (пластик не на складе), а общие фурнитура и
+// упаковка со склада сохраняются — их резервирует и списывает складская синхронизация — и
+// входят в себестоимость. Фурнитура, привязанная к изделию, в этом режиме не уходит.
+async function smokeLeftoverAssemblyKeepsStockHardware(context) {
+    const result = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-production-purpose').value = 'leftover_assembly';
+        Calculator.productionPurpose = 'leftover_assembly';
+        Calculator.leftoverAssembly = { revenue: 26500, quantity: 53, assemblyHours: 2, details: 'буквы-излишки' };
+        Calculator.items = [Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Буква', quantity: 53, pieces_per_hour: 100, weight_grams: 10,
+        })];
+        Calculator.hardwareItems = [
+            Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse', name: 'Карабин', qty: 53, price: 40, delivery_price: 2,
+                warehouse_item_id: 77, result: { costPerUnit: 42, hoursHardware: 1 },
+            }),
+            Object.assign(Calculator.getEmptyHardware(0), { source: 'custom', name: 'Чужая', qty: 53, price: 100 }),
+        ];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging ? Calculator.getEmptyPackaging(null) : {}, {
+            source: 'warehouse', name: 'Пакет', qty: 53, price: 10, delivery_price: 0,
+            parent_item_index: null, result: { costPerUnit: 10, hoursPackaging: 0 },
+        })];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        const saved = Calculator._collectItemsForSave();
+        const summary = Calculator.getPurposeAwareOrderSummary(App.params);
+        Calculator.resetForm();
+        document.getElementById('calc-production-purpose').value = 'commercial';
+        Calculator.productionPurpose = 'commercial';
+        return { saved, materials: summary.leftoverAssemblyMaterialsCost, hours: summary.leftoverAssemblyHours };
+    })()`, context));
+    assert.deepEqual(result.saved.map(row => [row.item_type, row.product_name]), [['hardware', 'Карабин'], ['packaging', 'Пакет']],
+        'leftover assembly saves only order-level hardware and packaging');
+    const hw = result.saved[0];
+    assert.equal(hw.hardware_source, 'warehouse');
+    assert.equal(hw.hardware_warehouse_item_id, 77, 'stock hardware keeps its warehouse link for reservation and write-off');
+    assert.equal(hw.hardware_parent_item_index, null);
+    assert.equal(result.materials, 2756, 'stock hardware and packaging go to the cost: 53 × 42 + 53 × 10');
+    assert.equal(result.hours, 3, 'manual hours plus hardware norms');
+}
+
 // B2C-заказ (клиент «B2C», как у Orders._shouldSyncOrderToReadyGoods) разметку не использует:
 // весь тираж уходит на склад готовой продукции. Сохранённая разметка не меняет деньги, счёт и КП,
 // при сохранении стирается, а под строкой вместо блока — короткая пометка.
@@ -12347,6 +12389,7 @@ async function main() {
     await smokeTirageCalculatorSummary(context);
     await smokeSaveRemapsParentIndexesPastEmptyRows(context);
     await smokeTirageB2CIgnoresSplit(context);
+    await smokeLeftoverAssemblyKeepsStockHardware(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);

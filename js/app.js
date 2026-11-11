@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v488';
+const APP_VERSION = 'v489';
 
 const App = {
     currentPage: 'orders',
@@ -1930,6 +1930,20 @@ const Calculator = {
         this.scheduleAutosave();
     },
 
+    // В «Сборке из остатков» изделий нет, поэтому в счёт идут только общие строки
+    // фурнитуры и упаковки (без привязки к изделию и не из шаблона изделия).
+    _isOrderLevelMaterial(row) {
+        return !!row && !row._from_template
+            && (row.parent_item_index === null || row.parent_item_index === undefined || row.parent_item_index === '');
+    },
+
+    _getLeftoverMaterials() {
+        return {
+            hardwareItems: (this.hardwareItems || []).filter(hw => this._isOrderLevelMaterial(hw)),
+            packagingItems: (this.packagingItems || []).filter(pkg => this._isOrderLevelMaterial(pkg)),
+        };
+    },
+
     _syncLeftoverAssemblyUi() {
         const leftover = this.getLeftoverAssembly();
         const isLeftover = this.isLeftoverAssembly();
@@ -1942,7 +1956,8 @@ const Calculator = {
         const detailsEl = document.getElementById('calc-leftover-assembly-details');
         if (panel) panel.style.display = isLeftover ? '' : 'none';
         if (itemsSection) itemsSection.style.display = isLeftover ? 'none' : '';
-        if (hardwareSection) hardwareSection.style.display = isLeftover ? 'none' : '';
+        // Фурнитура и упаковка со склада доступны и в сборке из остатков.
+        if (hardwareSection) hardwareSection.style.display = '';
         if (revenueEl) revenueEl.value = leftover.revenue > 0 ? String(leftover.revenue) : '';
         if (quantityEl) quantityEl.value = leftover.quantity > 0 ? String(leftover.quantity) : '';
         if (hoursEl) hoursEl.value = leftover.assemblyHours > 0 ? String(leftover.assemblyHours) : '';
@@ -1951,7 +1966,7 @@ const Calculator = {
 
     getPurposeAwareProductionLoad(params = App.params || {}) {
         return this.isLeftoverAssembly()
-            ? calculateLeftoverAssemblyLoad(this.getLeftoverAssembly(), params)
+            ? calculateLeftoverAssemblyLoad(this.getLeftoverAssembly(), params, this._getLeftoverMaterials())
             : calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
     },
 
@@ -1966,7 +1981,7 @@ const Calculator = {
 
     getPurposeAwareOrderSummary(params = App.params || {}, orderAdjustments = this.getOrderAdjustments()) {
         if (this.isLeftoverAssembly()) {
-            return calculateLeftoverAssemblySummary(this.getLeftoverAssembly(), params, orderAdjustments);
+            return calculateLeftoverAssemblySummary(this.getLeftoverAssembly(), params, orderAdjustments, this._getLeftoverMaterials());
         }
         const rawSummary = calculateOrderSummary(
             this._itemsForMoney(),
@@ -5278,7 +5293,7 @@ const Calculator = {
 
             // FinDirector
             const fin = this.isLeftoverAssembly()
-                ? calculateLeftoverAssemblyFinDirector(this.getLeftoverAssembly(), params, orderAdjustments)
+                ? calculateLeftoverAssemblyFinDirector(this.getLeftoverAssembly(), params, orderAdjustments, this._getLeftoverMaterials())
                 : calculateFinDirectorData(this._itemsForMoney(), this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
             const finDiscountRow = document.getElementById('fin-discount-row');
@@ -5457,7 +5472,7 @@ const Calculator = {
         if (this.isLeftoverAssembly()) {
             const leftover = this.getLeftoverAssembly();
             const summary = this.getPurposeAwareOrderSummary(params);
-            const hasInput = leftover.revenue > 0 || leftover.assemblyHours > 0;
+            const hasInput = leftover.revenue > 0 || leftover.assemblyHours > 0 || summary.leftoverAssemblyMaterialsCost > 0;
             pricingEl.style.display = hasInput ? '' : 'none';
             if (!hasInput) return;
             const details = leftover.details
@@ -5466,11 +5481,12 @@ const Calculator = {
             contentEl.innerHTML = `
                 <div style="padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-muted);line-height:1.45;">
                     <div style="font-weight:700;margin-bottom:6px;">↙ Продажа из неучтённых остатков</div>
-                    <div style="font-size:12px;color:var(--text-muted);">Без склада, пластика, молда, запусков, цвета и прямой зарплаты. В смету входят только косвенные на ручную сборку и расходы продажи.</div>
+                    <div style="font-size:12px;color:var(--text-muted);">Без пластика, молда, запусков, цвета и прямой зарплаты. В смету входят фурнитура и упаковка со склада, косвенные на часы сборки и расходы продажи.</div>
                     <div class="stats-grid" style="margin-top:12px;">
                         <div class="stat-card"><div class="stat-label">Продажа без НДС</div><div class="stat-value">${formatRub(summary.totalRevenue)}</div></div>
                         <div class="stat-card"><div class="stat-label">Количество</div><div class="stat-value">${leftover.quantity > 0 ? leftover.quantity + ' шт.' : '—'}</div></div>
-                        <div class="stat-card"><div class="stat-label">Ручная сборка</div><div class="stat-value">${formatHours(leftover.assemblyHours)}</div></div>
+                        <div class="stat-card"><div class="stat-label">Часы сборки</div><div class="stat-value">${formatHours(summary.leftoverAssemblyHours)}</div></div>
+                        <div class="stat-card"><div class="stat-label">Фурнитура и упаковка</div><div class="stat-value">${formatRub(summary.leftoverAssemblyMaterialsCost)}</div></div>
                         <div class="stat-card"><div class="stat-label">Косвенные на сборку</div><div class="stat-value">${formatRub(summary.leftoverAssemblyIndirectCost)}</div></div>
                         <div class="stat-card"><div class="stat-label">Маржа</div><div class="stat-value ${summary.marginPercent < 30 ? 'text-red' : 'text-green'}">${formatPercent(summary.marginPercent)}</div></div>
                     </div>
@@ -5825,8 +5841,8 @@ const Calculator = {
             const leftover = this.getLeftoverAssembly();
             contentEl.innerHTML = `<div class="pricing-grid-scroll">${pricingHtml}</div>
                 <div style="margin-top:16px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-muted);font-size:13px;line-height:1.45;">
-                    <strong>↙ Сборка из неучтённых остатков</strong> — продажа без склада и повторного производства.
-                    Ручная сборка: <strong>${formatHours(leftover.assemblyHours)}</strong>; косвенные на неё: <strong>${formatRub(summary.leftoverAssemblyIndirectCost)}</strong>.
+                    <strong>↙ Сборка из неучтённых остатков</strong> — продажа без повторного производства.
+                    Часы сборки: <strong>${formatHours(summary.leftoverAssemblyHours)}</strong>; косвенные на них: <strong>${formatRub(summary.leftoverAssemblyIndirectCost)}</strong>; фурнитура и упаковка: <strong>${formatRub(summary.leftoverAssemblyMaterialsCost)}</strong>.
                 </div>`;
             return;
         }
@@ -6369,10 +6385,11 @@ const Calculator = {
     },
 
     _collectItemsForSave() {
-        // Остатки не находятся на складе и не должны создавать никаких позиций,
-        // резервов или списаний. При переводе старого заказа пустой состав ниже
-        // осознанно удалит прежние позиции через __allowEmptyItemsDelete.
-        if (this.isLeftoverAssembly()) return [];
+        // Детали из остатков не находятся на складе и не создают позиций, резервов
+        // или списаний — сохраняются только общие фурнитура и упаковка (они идут со
+        // склада). При переводе старого заказа без них пустой состав осознанно
+        // удалит прежние позиции через __allowEmptyItemsDelete.
+        const leftoverOnly = this.isLeftoverAssembly();
         const items = [];
         // Индекс изделия в калькуляторе -> место среди сохранённых изделий. Пустые строки не
         // сохраняются, а фурнитура и упаковка ссылаются на изделие по месту в сохранённом списке
@@ -6383,6 +6400,7 @@ const Calculator = {
 
         // Product items
         this.items.forEach((item, idx) => {
+            if (leftoverOnly) return;
             if (!this._isMeaningfulProductItem(item)) return;
             savedProductIndex.set(idx, savedProductIndex.size);
             const r = item.result || getEmptyCostResult();
@@ -6449,7 +6467,10 @@ const Calculator = {
         };
 
         // Hardware items
-        this.hardwareItems.filter(hw => hw.qty > 0 || hw._from_template).forEach((hw, i) => {
+        this.hardwareItems
+            .filter(hw => hw.qty > 0 || hw._from_template)
+            .filter(hw => !leftoverOnly || this._isOrderLevelMaterial(hw))
+            .forEach((hw, i) => {
             items.push({
                 item_number: 100 + i,
                 item_type: 'hardware',
@@ -6477,7 +6498,10 @@ const Calculator = {
         });
 
         // Packaging items
-        this.packagingItems.filter(pkg => pkg.qty > 0).forEach((pkg, i) => {
+        this.packagingItems
+            .filter(pkg => pkg.qty > 0)
+            .filter(pkg => !leftoverOnly || this._isOrderLevelMaterial(pkg))
+            .forEach((pkg, i) => {
             items.push({
                 item_number: 200 + i,
                 item_type: 'packaging',
@@ -6502,6 +6526,8 @@ const Calculator = {
                 packaging_parent_item_index: savedParentIndex(pkg.parent_item_index),
             });
         });
+
+        if (leftoverOnly) return items;
 
         // Extra costs
         (this.extraCosts || []).filter(ec => ec.amount > 0 || ec.name).forEach((ec, i) => {
